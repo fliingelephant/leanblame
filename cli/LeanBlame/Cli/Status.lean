@@ -71,17 +71,15 @@ def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : S
 /-- The approve records listing `name` and the counting withdraws covering it, in (date, id)
 order. -/
 def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
-  let withdrawals := ledger.withdrawalsOf name
-  let claimIn (id : String) := (ledger.approves[id]?).bind fun (_, a) =>
-    (a.constants.find? (·.1 == name)).map (·.2)
-  ledger.records.filterMap fun r => match r.record with
-    | .approve a => (a.constants.find? (·.1 == name)).map fun (_, claim) =>
+  (ledger.entriesOf name).map fun
+    | .approve r a claim =>
       { record := r.hash, action := "approve", signer := a.signer, date := a.date, claim
         note := a.note }
-    | .withdraw w => if withdrawals.any (·.loaded.hash == r.hash) then
-        some { record := r.hash, action := "withdraw", signer := w.signer, date := w.date
-               claim := claimIn w.refersTo, note := w.note }
-      else none
+    | .withdraw { loaded := r, withdraw := w, .. } =>
+      let claim := (ledger.approves[w.refersTo]?).bind fun (_, a) =>
+        (a.constants.find? (·.1 == name)).map (·.2)
+      { record := r.hash, action := "withdraw", signer := w.signer, date := w.date, claim
+        note := w.note }
 
 /-- Everything `status` computes. -/
 structure Result where

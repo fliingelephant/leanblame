@@ -92,54 +92,70 @@ structure CountingWithdraw where
   withdraw : WithdrawRecord
   constants : Array String
 
+/-- A record in the history of one constant. -/
+inductive Ledger.Entry where
+  /-- An approve record listing the constant, with the claim hash it carries for it. -/
+  | approve (r : LoadedRecord) (a : ApproveRecord) (claim : String)
+  /-- A counting withdraw covering the constant. -/
+  | withdraw (w : CountingWithdraw)
+
 /-- Records after `exclude`, with withdrawals resolved. -/
 structure Ledger where
   cfg : Config
   /-- Every record loaded, excluded or not, by id. -/
   byId : Std.HashMap String LoadedRecord
+  /-- The records not excluded, in (date, id) order. -/
   records : Array LoadedRecord
   approves : Std.HashMap String (LoadedRecord × ApproveRecord)
-  withdraws : Array CountingWithdraw
   /-- (approve record id, constant) pairs that a counting withdraw covers. -/
   withdrawn : Std.HashSet (String × String)
+  /-- Per constant: the approve records listing it and the counting withdraws covering it, in
+  (date, id) order. -/
+  entries : Std.HashMap String (Array Ledger.Entry)
   /-- Withdraws that break the withdraw rule, excluded or not, with the problems. -/
   problems : Array (LoadedRecord × Array String)
 
-/-- A withdraw counts iff it is not excluded and keeps the withdraw rule. Records are kept in
-(date, id) order. -/
+/-- A withdraw counts iff it is not excluded and keeps the withdraw rule. -/
 def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
   let all := all.qsort fun a b =>
     ((compare a.record.date b.record.date).then (compare a.hash b.hash)) == .lt
   let byId : Std.HashMap String LoadedRecord := all.foldl (fun m r => m.insert r.hash r) {}
-  let records := all.filter fun r => !cfg.exclude.contains r.hash
-  let mut approves : Std.HashMap String (LoadedRecord × ApproveRecord) := {}
-  for r in records do
-    if let .approve a := r.record then approves := approves.insert r.hash (r, a)
-  let mut withdraws := #[]
-  let mut withdrawn : Std.HashSet (String × String) := {}
+  let mut approves := {}
+  let mut withdrawn := {}
+  let mut entries : Std.HashMap String (Array Entry) := {}
   let mut problems := #[]
   for r in all do
-    if let .withdraw w := r.record then
+    let excluded := cfg.exclude.contains r.hash
+    match r.record with
+    | .approve a =>
+      if excluded then continue
+      approves := approves.insert r.hash (r, a)
+      for (c, claim) in a.constants do
+        entries := entries.alter c fun es => (es.getD #[]).push (.approve r a claim)
+    | .withdraw w =>
       match withdrawCovers byId w with
       | .error ps => problems := problems.push (r, ps)
       | .ok covered =>
-        if cfg.exclude.contains r.hash then continue
-        withdraws := withdraws.push { loaded := r, withdraw := w, constants := covered }
-        for c in covered do withdrawn := withdrawn.insert (w.refersTo, c)
-  return { cfg, byId, records, approves, withdraws, withdrawn, problems }
+        if excluded then continue
+        let cw : CountingWithdraw := { loaded := r, withdraw := w, constants := covered }
+        for c in covered do
+          withdrawn := withdrawn.insert (w.refersTo, c)
+          entries := entries.alter c fun es => (es.getD #[]).push (.withdraw cw)
+  let records := all.filter fun r => !cfg.exclude.contains r.hash
+  return { cfg, byId, records, approves, withdrawn, entries, problems }
+
+def Ledger.entriesOf (l : Ledger) (name : String) : Array Ledger.Entry :=
+  l.entries.getD name #[]
 
 /-- Approve records listing `name`, with the claim hash they carry for it. -/
 def Ledger.approvalsOf (l : Ledger) (name : String) : Array (LoadedRecord × ApproveRecord × String) :=
-  l.records.filterMap fun r => do
-    let .approve a := r.record | none
-    let (_, claim) ← a.constants.find? (·.1 == name)
-    return (r, a, claim)
+  (l.entriesOf name).filterMap fun | .approve r a claim => some (r, a, claim) | .withdraw _ => none
 
 def Ledger.isLive (l : Ledger) (recordHash : String) (signer : String) (name : String) : Bool :=
   l.cfg.allows signer && !l.withdrawn.contains (recordHash, name)
 
-/-- Counting withdraws that cover `name`, with the approve record they withdraw. -/
+/-- Counting withdraws that cover `name`. -/
 def Ledger.withdrawalsOf (l : Ledger) (name : String) : Array CountingWithdraw :=
-  l.withdraws.filter (·.constants.contains name)
+  (l.entriesOf name).filterMap fun | .withdraw w => some w | .approve .. => none
 
 end LeanBlame
