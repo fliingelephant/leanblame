@@ -131,7 +131,8 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
-  let mut missingWarned : Std.HashSet String := {}
+  -- (export, boundary list) pairs of records whose causes cannot be computed.
+  let mut unknown : Std.HashSet (String × String) := {}
   -- Each tagged declaration's closure, walked once: (cut, untagged constants).
   let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
   for (n, d) in names.zip boundary.declarations do
@@ -157,13 +158,21 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
           let (br, b, _) := best
           let (xr, xa, _) := x
           if b.date < xa.date || (b.date == xa.date && br.hash < xr.hash) then x else best
-        if lastClaim != claim then
-          if (← Store.has root last.exportHash) && (← Store.has root last.boundary) then
-            let old ← hashed root cache last.exportHash last.boundary
-            change := Walk.changes old new n
-          else if !missingWarned.contains last.exportHash then
-            missingWarned := missingWarned.insert last.exportHash
-            IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash} is not in the store; causes unknown"
+        let key := (last.exportHash, last.boundary)
+        if lastClaim != claim && !unknown.contains key then
+          -- A record from elsewhere may name objects this store lacks, or that do not hash.
+          let old? ← try
+              if (← Store.has root last.exportHash) && (← Store.has root last.boundary) then
+                some <$> hashed root cache last.exportHash last.boundary
+              else
+                IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash} is not in the store; causes unknown"
+                pure none
+            catch e =>
+              IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash}: {e}; causes unknown"
+              pure none
+          match old? with
+          | some old => change := Walk.changes old new n
+          | none => unknown := unknown.insert key
     let isThm := d.kind == "theorem"
     let (cut, untagged) := Walk.closureOf new n
     closures := closures.insert n (cut, untagged)
