@@ -1,0 +1,4 @@
+/.lake/
+/test/Sample/.lake/
+/test/Sample/lake-manifest.json
+/test/Sample/.leanblame/

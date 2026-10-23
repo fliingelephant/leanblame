@@ -1,0 +1,14 @@
+name = "leanblame"
+version = "0.1.0"
+defaultTargets = ["LeanBlameAttr", "leanblame"]
+
+# The `@[trusted]` attribute. Imports only Lean, never Lake, so libraries that
+# tag declarations do not pull Lake into their import closure.
+[[lean_lib]]
+name = "LeanBlameAttr"
+roots = ["LeanBlame.Attr"]
+
+# The command-line tool.
+[[lean_exe]]
+name = "leanblame"
+root = "Main"
