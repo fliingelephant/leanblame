@@ -3,6 +3,7 @@
 -/
 import LeanBlame.Cli.Export
 import LeanBlame.Cli.Status
+import LeanBlame.Cli.Validate
 
 open LeanBlame
 
@@ -76,13 +77,19 @@ def cmdBlame (args : List String) : IO UInt32 := do
   let #[name] := a.positional | throw (IO.userError "usage: leanblame blame NAME")
   Status.blame (← IO.currentDir) name
 
+def cmdValidate (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #["--base-ref"] #[] args)
+  unless a.positional.isEmpty do throw (IO.userError "validate takes no positional arguments")
+  Validate.run (← IO.currentDir) (a.get? "--base-ref")
+
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0
   | "export" :: args => cmdExport args
   | "status" :: args => cmdStatus args
   | "blame" :: args => cmdBlame args
+  | "validate" :: args => cmdValidate args
   | cmd :: _ =>
-    if #["init", "equiv", "sign", "validate", "release"].contains cmd then
+    if #["init", "equiv", "sign", "release"].contains cmd then
       notImplemented cmd
     else do
       IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
