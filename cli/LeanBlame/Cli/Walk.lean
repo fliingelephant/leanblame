@@ -158,22 +158,21 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
   let mut st : TState := {}
   for root in roots do
     if st.idx.contains root then continue
-    -- Frames: (vertex, index of the next successor to look at).
-    let mut frames : Array (Name × Nat) := #[(root, 0)]
+    -- Frames: (vertex, its successors, index of the next one to look at).
+    let mut frames : Array (Name × Array Name × Nat) := #[(root, succ root, 0)]
     st := { st with idx := st.idx.insert root st.index, low := st.low.insert root st.index,
                     index := st.index + 1, stack := st.stack.push root,
                     onStack := st.onStack.insert root }
     while h : frames.size > 0 do
-      let (v, i) := frames[frames.size - 1]
-      let ss := succ v
+      let (v, ss, i) := frames[frames.size - 1]
       if hi : i < ss.size then
-        frames := frames.set! (frames.size - 1) (v, i + 1)
+        frames := frames.set! (frames.size - 1) (v, ss, i + 1)
         let w := ss[i]
         if !st.idx.contains w then
           st := { st with idx := st.idx.insert w st.index, low := st.low.insert w st.index,
                           index := st.index + 1, stack := st.stack.push w,
                           onStack := st.onStack.insert w }
-          frames := frames.push (w, 0)
+          frames := frames.push (w, succ w, 0)
         else if st.onStack.contains w then
           st := { st with low := st.low.insert v (min st.low[v]! st.idx[w]!) }
       else
@@ -187,7 +186,7 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
             if w == v then break
           st := { st with sccs := st.sccs.push comp }
         if h' : frames.size > 0 then
-          let (u, _) := frames[frames.size - 1]
+          let (u, _, _) := frames[frames.size - 1]
           st := { st with low := st.low.insert u (min st.low[u]! st.low[v]!) }
   return st.sccs
 
