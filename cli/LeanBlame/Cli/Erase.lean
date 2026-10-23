@@ -40,6 +40,8 @@ structure St where
   nextId : Nat := 0
   fuel : Nat := 0
   inferCache : Std.HashMap Expr Expr := {}
+  /-- Results of `erase`. Terms share subterms; without it, `erase` walks the tree. -/
+  eraseCache : Std.HashMap Expr Expr := {}
 
 abbrev M := ReaderT Ctx (StateT St (Except String))
 
@@ -255,21 +257,30 @@ def isProof (e : Expr) : M Bool := do
   -- theorem is a proof.
   if let .const c _ := e.getAppFn then
     if let some (.thmInfo _) ← getConst? c then return true
-  let saved ← get
   modify fun s => { s with fuel := stepBudget }
-  let attempt : M Bool := do
+  -- On failure `StateT` rolls the state back to this point, so the locals and cache entries
+  -- of the failed attempt are dropped with it.
+  try
     let ty ← inferType e
     match ← whnf (← inferType ty) with
     | .sort l => return levelIsZero l
     | _ => return false
-  try attempt catch _ => do
-    -- Drop locals and cache entries made by the failed attempt; keep the counter fresh.
-    let n := (← get).nextId
-    set { saved with nextId := n }
-    return false
+  catch _ => return false
 
-/-- Replace every proof subterm by `proofMarker`. -/
+mutual
+
+/--
+Replace every proof subterm by `proofMarker`. Terms reach here closed but for locals, so the
+result depends on the term alone and is cached: shared subterms are erased once.
+-/
 partial def erase (e : Expr) : M Expr := do
+  if let some r := (← get).eraseCache[e]? then return r
+  let r ← eraseCore e
+  modify fun s => { s with eraseCache := s.eraseCache.insert e r }
+  return r
+
+/-- One step of `erase`; the recursive calls go through its cache. -/
+partial def eraseCore (e : Expr) : M Expr := do
   if ← isProof e then return proofMarker
   match e with
   | .app .. =>
@@ -295,6 +306,8 @@ partial def erase (e : Expr) : M Expr := do
   | .proj s i st => return .proj s i (← erase st)
   | .mdata _ b => erase b
   | _ => return e
+
+end
 
 /-- Erase the proofs in a closed definition body. -/
 def eraseBody (consts : Std.HashMap Name ConstantInfo) (body : Expr) : Expr :=
