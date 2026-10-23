@@ -73,7 +73,7 @@ def optField : Option String → String
   | some s => netstr "+" s
   | none => "-"
 
-/-- What enters `own`, `spec` and `core` for one constant. -/
+/-- What enters `own` and `spec` for one constant. `status` compares them to charge `own-body`. -/
 structure Fields where
   kind : String
   name : Name
@@ -84,12 +84,7 @@ structure Fields where
   (theorems, axioms, `opaque` and `partial` definitions, constructors, recursors). -/
   bodyHash : Option String
   safety : String
-  deriving Inhabited
-
-/-- `core(c)`: own(c) without the informal text. `status` compares it to charge `own-body`. -/
-def core (f : Fields) : String :=
-  hashFields "leanblame.core.1"
-    [f.kind, name "" f.name, toString f.uparams, f.typeHash, optField f.bodyHash, f.safety]
+  deriving Inhabited, BEq
 
 /-- `own(c) = H(kind, name, uparams, type, body-with-proofs-erased, safety, informal-if-tagged)`. -/
 def own (f : Fields) (informal? : Option String) : String :=

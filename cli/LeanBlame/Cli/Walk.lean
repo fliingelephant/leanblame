@@ -44,7 +44,6 @@ structure Node where
   informal : Option String
   /-- Direct hash dependencies, sorted by printed name. -/
   deps : Array Name
-  core : String
   own : String
   /-- Tagged declarations only. -/
   spec : Option String
@@ -120,7 +119,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
     kind := kindOf info, name := info.name, uparams := ups.length, typeHash, bodyHash, safety }
   return {
     fields, informal, deps := directDeps
-    core := Canon.core fields, own := Canon.own fields informal
+    own := Canon.own fields informal
     spec := informal.map (Canon.spec fields ·) }
 
 /-- comparator's worklist loop, cut at tagged declarations (each is a seed of its own). -/
@@ -276,7 +275,7 @@ def changes (old new : Hashed) (x : Name) : Array Change := Id.run do
   let some o := old.nodes[x]? | return #[{ cause := "own-body", names := #[x.toString] }]
   let mut out : Array Change := #[]
   if o.informal != n.informal then out := out.push { cause := "own-text", names := #[x.toString] }
-  if o.core != n.core then out := out.push { cause := "own-body", names := #[x.toString] }
+  if o.fields != n.fields then out := out.push { cause := "own-body", names := #[x.toString] }
   let (cut0, unt0) := closureOf old x
   let (cut1, unt1) := closureOf new x
   let cut0s : Std.HashSet Name := cut0.foldl (·.insert ·) {}
