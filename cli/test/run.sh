@@ -42,7 +42,7 @@ expect_line() {
   ok "$want"
 }
 export_lib() { "$lb" export >/dev/null 2>"$work/export.log" || { cat "$work/export.log" >&2; fail "export"; }; }
-current_export() { awk '/^export /{print $2}' .leanblame/current; }
+current_export() { python3 -c 'import json; print(json.load(open(".leanblame/current"))["exportHash"])'; }
 
 echo "== init"
 run init
@@ -56,9 +56,9 @@ commit "sample library"
 
 echo "== export"
 export_lib
-grep -q "^export sha256:[0-9a-f]\{64\}$" .leanblame/current || fail "no current export"
+[[ "$(current_export)" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "no current export"
 first_export="$(current_export)"
-ok "export stored $(head -1 .leanblame/current)"
+ok "export stored $first_export"
 
 echo "== sign"
 run sign --signer local:alice --note "first review"

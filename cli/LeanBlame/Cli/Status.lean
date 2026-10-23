@@ -213,14 +213,8 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   let report : StatusReport := {
     library := boundary.library, commit := boundary.commit, exportHash := cur.exportHash
     generated := ← UtcTime.now, declarations := decls }
-  let warnings ← match cur.owned with
-    | some ownedHash =>
-      if ← Store.has root ownedHash then
-        let owned : Std.HashSet String :=
-          (strLines (← Store.readString root ownedHash)).foldl (·.insert ·) {}
-        pure (untaggedWarnings new closures boundary cur.modules owned)
-      else pure #[]
-    | none => pure #[]
+  let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
+  let warnings := untaggedWarnings new closures boundary cur.modules owned
   return { report, badRecords := bad, warnings }
 
 /-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
@@ -238,7 +232,7 @@ def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt
   for (p, _) in r.badRecords do
     IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
   for w in r.warnings do IO.eprintln w
-  let text := r.report.toOJson.renderFile
+  let text := jsonText r.report
   -- Every run leaves a log in the object store.
   let logHash ← Store.putString root text
   IO.eprintln s!"leanblame: status log {logHash}"

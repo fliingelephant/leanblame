@@ -109,8 +109,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
       pure ds
     else
       -- Default: every tagged declaration of the library's own modules.
-      pure <| if cur.modules.isEmpty then boundary.declarations
-        else boundary.declarations.filter (cur.modules.contains ·.module)
+      pure <| boundary.declarations.filter (cur.modules.contains ·.module)
   if selected.isEmpty then fail "nothing to sign"
   let modules := selected.foldl (fun acc d => if acc.contains d.module then acc else acc.push d.module) #[]
   let dir ← recordsDir root cfg

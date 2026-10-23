@@ -205,7 +205,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     | none =>
       let decls ← collectTrusted env
       let b : BoundaryList := { library, commit, toolchain, deps, declarations := decls }
-      pure (b.toOJson.renderFile, b)
+      pure (jsonText b, b)
   -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
   -- Every constant of the library's own modules, for `status`'s untagged-dependency warning.
@@ -235,7 +235,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let boundary ← Store.putString root boundaryText
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, modules := mods.map toString, owned := some ownedHash } commit
+    { exportHash, boundary, modules := mods.map toString, owned := ownedHash } commit
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

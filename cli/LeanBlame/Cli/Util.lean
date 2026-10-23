@@ -1,6 +1,7 @@
 /-
-Small helpers shared by the commands: strings, hashes, files, processes.
+Small helpers shared by the commands: strings, hashes, JSON, files, processes.
 -/
+import Lean.Data.Json
 import LeanBlame.Cli.Sha256
 
 namespace LeanBlame
@@ -34,6 +35,11 @@ def hashHex (s : String) : String :=
 def sha256OfString (s : String) : String := mkHash (Sha256.hexOfString s)
 
 def sha256OfBytes (b : ByteArray) : String := mkHash (Sha256.hexOfBytes b)
+
+/-! JSON. Key order is not part of any schema. -/
+
+/-- The text the commands write: pretty-printed JSON and a final newline. -/
+def jsonText [Lean.ToJson α] (a : α) : String := (Lean.toJson a).pretty ++ "\n"
 
 /-! Errors. -/
 

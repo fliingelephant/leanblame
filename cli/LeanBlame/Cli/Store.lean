@@ -4,7 +4,7 @@ status logs, each in `.leanblame/store/<hex>` where `<hex>` is the SHA-256 of
 the file's bytes.
 
 Two small local files point into it:
-* `.leanblame/current`: the export and boundary list of the last `export` run;
+* `.leanblame/current` (JSON): the export and boundary list of the last `export` run;
 * `.leanblame/exports`: one line per `export` run, `<export> <boundary> <commit>`,
   so `status --base A` can find the boundary list exported with export `A`.
 -/
@@ -58,17 +58,14 @@ object listing the constants defined in them. -/
 structure Current where
   exportHash : String
   boundary : String
-  modules : Array String := #[]
-  owned : Option String := none
+  modules : Array String
+  owned : String
+  deriving Lean.ToJson, Lean.FromJson
 
 def currentPath (root : System.FilePath) : System.FilePath := dir root / "current"
 
 def writeCurrent (root : System.FilePath) (c : Current) (commit : String) : IO Unit := do
-  let owned := match c.owned with
-    | some h => s!"owned {h}\n"
-    | none => ""
-  writeFileMkdirs (currentPath root)
-    (s!"export {c.exportHash}\nboundary {c.boundary}\nmodules {" ".intercalate c.modules.toList}\n" ++ owned)
+  writeFileMkdirs (currentPath root) (jsonText c)
   -- The log keeps one line per (export, boundary list, commit), the latest run last.
   let log := dir root / "exports"
   let line := s!"{c.exportHash} {c.boundary} {commit}"
@@ -78,19 +75,10 @@ def writeCurrent (root : System.FilePath) (c : Current) (commit : String) : IO U
 def readCurrent (root : System.FilePath) : IO Current := do
   let some text ← readFileIfExists (currentPath root)
     | fail s!"no export yet: run `leanblame export` first"
-  let mut e := ""
-  let mut b := ""
-  let mut mods := #[]
-  let mut owned := none
-  for l in strLines text do
-    match l.splitOn " " with
-    | ["export", h] => e := h
-    | ["boundary", h] => b := h
-    | ["owned", h] => owned := some h
-    | "modules" :: ms => mods := (ms.filter (· != "")).toArray
-    | _ => pure ()
-  unless isHash e && isHash b do fail s!"{currentPath root} is malformed; run `leanblame export`"
-  return { exportHash := e, boundary := b, modules := mods, owned }
+  match Lean.Json.parse text >>= Lean.fromJson? with
+  | .ok (c : Current) => if isHash c.exportHash && isHash c.boundary then return c
+  | .error _ => pure ()
+  fail s!"{currentPath root} is malformed; run `leanblame export`"
 
 /-- The boundary lists exported together with `exportHash`, from the local export log, latest
 first. Docstrings are not in exports, so a docstring edit pairs a new list with the same export. -/

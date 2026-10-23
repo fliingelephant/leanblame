@@ -1,21 +1,20 @@
 /-
 The interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML) and
-status (JSON), each a Lean structure with an emitter that writes the fields in
-the order docs/14 lists them; the boundary list and the record have a strict
-reader. The release manifest comes with `release`.
+status (JSON), each a Lean structure with an emitter; the boundary list and the
+record have a strict reader. Records keep the field order of docs/05; JSON key
+order is not part of the schema. The release manifest comes with `release`.
 
 Declaration names are kept as strings, exactly as `Lean.Name.toString` prints
 them; the commands map them back to constants through the export.
 -/
 import Lake.Toml
-import LeanBlame.Cli.Json
+import Lean.Data.Json
 import LeanBlame.Cli.Time
 import LeanBlame.Cli.Util
 
 namespace LeanBlame
 
-open Lean (Json)
-open JsonRead
+open Lean (Json ToJson toJson)
 
 /-! ## 1. Boundary list -/
 
@@ -44,25 +43,29 @@ structure BoundaryList where
 
 def BoundaryList.schemaId : String := "leanblame.boundary.1"
 
-def BoundaryDecl.toOJson (d : BoundaryDecl) : OJson :=
-  .obj #[("name", .str d.name), ("module", .str d.module), ("kind", .str d.kind),
-    ("informal", .str d.informal), ("informal_source", .str d.informalSource)]
+instance : ToJson BoundaryDecl where
+  toJson d := Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind),
+    ("informal", d.informal), ("informal_source", d.informalSource)]
 
-def BoundaryList.toOJson (b : BoundaryList) : OJson :=
-  .obj #[("schema", .str BoundaryList.schemaId), ("library", .str b.library),
-    ("commit", .str b.commit), ("toolchain", .str b.toolchain), ("deps", .strMap b.deps),
-    ("declarations", .arr (b.declarations.map (·.toOJson)))]
+instance : ToJson BoundaryList where
+  toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
+    ("commit", b.commit), ("toolchain", b.toolchain),
+    ("deps", Json.mkObj (b.deps.toList.map fun (k, v) => (k, v))),
+    ("declarations", toJson b.declarations)]
+
+/-- Field `k` of the object `j` as a string; errors name the field. -/
+def getStrField (j : Json) (what k : String) : Except String String :=
+  (j.getObjValAs? String k).mapError (s!"{what}.{k}: " ++ ·)
 
 def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
-  let o ← obj j "declaration"
-  let name ← strField o "name" "declaration"
+  let name ← getStrField j "declaration" "name"
   let what := s!"declaration {name}"
   let d : BoundaryDecl := {
     name
-    module := ← strField o "module" what
-    kind := ← strField o "kind" what
-    informal := ← strField o "informal" what
-    informalSource := ← strField o "informal_source" what }
+    module := ← getStrField j what "module"
+    kind := ← getStrField j what "kind"
+    informal := ← getStrField j what "informal"
+    informalSource := ← getStrField j what "informal_source" }
   unless boundaryKinds.contains d.kind do
     throw s!"{what}: kind `{d.kind}` is not one of {", ".intercalate boundaryKinds.toList}"
   if strTrim d.informal == "" then
@@ -72,21 +75,23 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   return d
 
 def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
-  let o ← obj j "boundary list"
-  let schema ← strField o "schema" "boundary list"
+  let w := "boundary list"
+  let schema ← getStrField j w "schema"
   unless schema == BoundaryList.schemaId do
     throw s!"boundary list: schema is `{schema}`, expected `{BoundaryList.schemaId}`"
-  let decls ← (← arr (← field o "declarations" "boundary list") "boundary list.declarations").mapM
-    BoundaryDecl.fromJson?
+  let decls ← (j.getObjVal? "declarations" >>= (·.getArr?)).mapError (s!"{w}.declarations: " ++ ·)
+  let decls ← decls.mapM BoundaryDecl.fromJson?
   let mut seen : Std.HashSet String := {}
   for d in decls do
     if seen.contains d.name then throw s!"boundary list: `{d.name}` listed twice"
     seen := seen.insert d.name
+  let deps ← (j.getObjVal? "deps" >>= (·.getObj?)).mapError (s!"{w}.deps: " ++ ·)
   return {
-    library := ← strField o "library" "boundary list"
-    commit := ← strField o "commit" "boundary list"
-    toolchain := ← strField o "toolchain" "boundary list"
-    deps := ← strMap (← field o "deps" "boundary list") "boundary list.deps"
+    library := ← getStrField j w "library"
+    commit := ← getStrField j w "commit"
+    toolchain := ← getStrField j w "toolchain"
+    deps := ← deps.toList.toArray.mapM fun (k, v) => do
+      return (k, ← v.getStr?.mapError (s!"{w}.deps.{k}: " ++ ·))
     declarations := decls }
 
 def BoundaryList.parse (contents : String) : Except String BoundaryList := do
@@ -306,7 +311,7 @@ end Record
 structure Change where
   cause : String
   names : Array String
-  deriving Inhabited, Repr, BEq
+  deriving Inhabited, Repr, BEq, ToJson
 
 structure HistoryEntry where
   record : String
@@ -351,28 +356,25 @@ structure StatusReport where
 
 def StatusReport.schemaId : String := "leanblame.status.1"
 
-def HistoryEntry.toOJson (h : HistoryEntry) : OJson :=
-  .obj (#[("record", .str h.record), ("action", .str h.action), ("signer", .str h.signer),
-    ("date", .str h.date.toIso), ("claim", .optStr h.claim)] ++
-    (h.note.toArray.map fun n => ("note", .str n)))
+/-- `claim`, `evidence` and `proof.export` are `null` when absent; `note` is omitted. -/
+instance : ToJson HistoryEntry where
+  toJson h := Json.mkObj <| ([("record", h.record), ("action", h.action), ("signer", h.signer),
+    ("date", h.date.toIso), ("claim", toJson h.claim)] : List (String × Json)) ++
+    Json.opt "note" h.note
 
-def StatusDecl.toOJson (d : StatusDecl) : OJson :=
-  .obj #[("module", .str d.module), ("kind", .str d.kind), ("informal", .str d.informal),
-    ("informal_source", .str d.informalSource), ("claim", .str d.claim), ("state", .str d.state),
-    ("flags", .strs d.flags),
-    ("change", .arr (d.change.map fun c => .obj #[("cause", .str c.cause), ("names", .strs c.names)])),
-    ("signers", .strs d.signers),
-    ("history", .arr (d.history.map (·.toOJson))),
-    ("blocked_by", .strs d.blockedBy),
-    ("proof", .obj #[("status", .str d.proof.status), ("axioms", .strs d.proof.axioms),
-      ("export", .optStr d.proof.exportHash)]),
-    ("evidence", .optStr d.evidence),
-    ("tagged_deps", .strs d.taggedDeps),
-    ("closure_size", .num d.closureSize)]
+instance : ToJson StatusDecl where
+  toJson d := Json.mkObj [("module", d.module), ("kind", d.kind), ("informal", d.informal),
+    ("informal_source", d.informalSource), ("claim", d.claim), ("state", d.state),
+    ("flags", toJson d.flags), ("change", toJson d.change), ("signers", toJson d.signers),
+    ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
+    ("proof", Json.mkObj [("status", d.proof.status), ("axioms", toJson d.proof.axioms),
+      ("export", toJson d.proof.exportHash)]),
+    ("evidence", toJson d.evidence), ("tagged_deps", toJson d.taggedDeps),
+    ("closure_size", d.closureSize)]
 
-def StatusReport.toOJson (s : StatusReport) : OJson :=
-  .obj #[("schema", .str StatusReport.schemaId), ("library", .str s.library),
-    ("commit", .str s.commit), ("export", .str s.exportHash), ("generated", .str s.generated.toIso),
-    ("declarations", .obj (s.declarations.map fun (n, d) => (n, d.toOJson)))]
+instance : ToJson StatusReport where
+  toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
+    ("commit", s.commit), ("export", s.exportHash), ("generated", s.generated.toIso),
+    ("declarations", Json.mkObj (s.declarations.toList.map fun (n, d) => (n, toJson d)))]
 
 end LeanBlame
