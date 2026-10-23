@@ -203,7 +203,7 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     decls := decls.push (n.toString, { sd with blockedBy := (Walk.sortNames blocked).map (·.toString) })
   let report : StatusReport := {
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
-    generated := ← UtcTime.now, declarations := decls }
+    generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }
   let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
   let warnings := untaggedWarnings new closures cur.modules owned
   return { report, warnings }
@@ -266,7 +266,7 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
         let withdrawn := ledger.withdrawn.contains (h.record, name)
         if withdrawn then " withdrawn" else if cfg.allows h.signer then " live" else " signer-not-allowed"
       | _ => ""
-    IO.println s!"  {h.date}  {h.action}  {h.signer}  claim {h.claim.getD "-"}{current}  record {h.record}{live}"
+    IO.println s!"  {h.date.toIso}  {h.action}  {h.signer}  claim {h.claim.getD "-"}{current}  record {h.record}{live}"
     if let some note := h.note then IO.println s!"      note: {note}"
   return 0
 

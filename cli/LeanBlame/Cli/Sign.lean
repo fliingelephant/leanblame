@@ -112,7 +112,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   if selected.isEmpty then fail "nothing to sign"
   let modules := dedup (selected.map (·.module))
   let dir ← recordsDir root cfg
-  let date ← UtcTime.now
+  let date ← Std.Time.Timestamp.nowSeconds
   for m in modules.qsort (· < ·) do
     let constants := (selected.filter (·.module == m)).map (fun d => (d.name, claimOf[d.name]!))
       |>.qsort (fun a b => a.1 < b.1)
@@ -139,7 +139,7 @@ def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
   let refersTo ← recordId ref
   let (all, _) ← loadAllRecords root cfg
   let ledger := Ledger.build cfg all
-  let w : WithdrawRecord := { signer, date := ← UtcTime.now, refersTo, constants := constants?, note := note? }
+  let w : WithdrawRecord := { signer, date := ← Std.Time.Timestamp.nowSeconds, refersTo, constants := constants?, note := note? }
   if let .error ps := withdrawCovers ledger.byId w then
     fail s!"cannot withdraw: {"; ".intercalate ps.toList}"
   let (id, path) ← writeRecord (← recordsDir root cfg) (.withdraw w)

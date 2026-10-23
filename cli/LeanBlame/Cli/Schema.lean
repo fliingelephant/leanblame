@@ -158,7 +158,7 @@ def isSignerId (s : String) : Bool :=
 
 structure ApproveRecord where
   signer : String
-  date : UtcTime
+  date : Std.Time.Timestamp
   module : String
   commit : String
   toolchain : String
@@ -173,7 +173,7 @@ structure ApproveRecord where
 
 structure WithdrawRecord where
   signer : String
-  date : UtcTime
+  date : Std.Time.Timestamp
   refersTo : String
   /-- `none`: every constant of the withdrawn record. -/
   constants : Option (Array String) := none
@@ -191,7 +191,7 @@ def signer : Record → String
   | .approve r => r.signer
   | .withdraw r => r.signer
 
-def date : Record → UtcTime
+def date : Record → Std.Time.Timestamp
   | .approve r => r.date
   | .withdraw r => r.date
 
@@ -250,7 +250,7 @@ def decode (t : Table) : DecodeM Record := do
   discard <| decodeStr t `schema (· == schemaId) (s!"is `{·}`, expected `{schemaId}`")
   let signer ← decodeStr t `signer isSignerId (s!"`{·}` is not provider:id")
   let dt : Lake.Toml.DateTime ← t.tryDecode `date
-  let date ← match UtcTime.ofToml? dt with
+  let date ← match Std.Time.Timestamp.ofToml? dt with
     | .ok d => pure d
     | .error e => logDecodeErrorAt (refOf t `date) s!"`date`: {e}"; pure default
   let note ← t.tryDecode? `note
@@ -295,7 +295,7 @@ structure HistoryEntry where
   record : String
   action : String
   signer : String
-  date : UtcTime
+  date : Std.Time.Timestamp
   claim : Option String
   note : Option String
   deriving Inhabited, Repr
@@ -328,7 +328,7 @@ structure StatusReport where
   library : String
   commit : String
   exportHash : String
-  generated : UtcTime
+  generated : Std.Time.Timestamp
   declarations : Array (String × StatusDecl)
   deriving Inhabited, Repr
 

@@ -1,77 +1,29 @@
 /-
-UTC timestamps. Records carry native TOML datetimes in UTC; JSON carries the
-same instant as an ISO 8601 string. Both render as `YYYY-MM-DDTHH:MM:SSZ`.
+UTC instants, `Std.Time.Timestamp` with one-second resolution. Records carry
+native TOML datetimes in UTC; JSON carries the same instant as an ISO 8601
+string. Both render as `YYYY-MM-DDTHH:MM:SSZ`.
 -/
 import Std.Time
 import Lake.Toml
 
-namespace LeanBlame
+namespace Std.Time.Timestamp
 
-/-- A UTC instant with one-second resolution. -/
-structure UtcTime where
-  year : Nat
-  month : Nat
-  day : Nat
-  hour : Nat
-  minute : Nat
-  second : Nat
-  deriving Inhabited, DecidableEq, Repr
-
-namespace UtcTime
-
-instance : Ord UtcTime where
-  compare a b :=
-    (compare a.year b.year).then <| (compare a.month b.month).then <|
-      (compare a.day b.day).then <| (compare a.hour b.hour).then <|
-        (compare a.minute b.minute).then (compare a.second b.second)
-
-instance : LT UtcTime := ltOfOrd
-instance : LE UtcTime := leOfOrd
-
-private def pad (n width : Nat) : String :=
-  let s := toString n
-  "".pushn '0' (width - s.length) ++ s
+/-- The current instant, truncated to seconds. -/
+def nowSeconds : IO Timestamp :=
+  return .ofSecondsSinceUnixEpoch (← Timestamp.now).toSecondsSinceUnixEpoch
 
 /-- `YYYY-MM-DDTHH:MM:SSZ`: the TOML datetime and the ISO 8601 string. -/
-def toIso (t : UtcTime) : String :=
-  s!"{pad t.year 4}-{pad t.month 2}-{pad t.day 2}T{pad t.hour 2}:{pad t.minute 2}:{pad t.second 2}Z"
+def toIso (t : Timestamp) : String := (DateTime.ofTimestamp t .UTC).toISO8601String
 
-instance : ToString UtcTime := ⟨toIso⟩
-
-/-- Civil date from days since 1970-01-01 (Howard Hinnant's algorithm), for days ≥ 0. -/
-def ofEpochSeconds (secs : Nat) : UtcTime :=
-  let days := secs / 86400
-  let rem := secs % 86400
-  let z := days + 719468
-  let era := z / 146097
-  let doe := z - era * 146097
-  let yoe := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-  let doy := doe - (365 * yoe + yoe / 4 - yoe / 100)
-  let mp := (5 * doy + 2) / 153
-  let d := doy - (153 * mp + 2) / 5 + 1
-  let m := if mp < 10 then mp + 3 else mp - 9
-  let y := yoe + era * 400 + (if m ≤ 2 then 1 else 0)
-  { year := y, month := m, day := d, hour := rem / 3600, minute := rem % 3600 / 60, second := rem % 60 }
-
-/-- The current instant. -/
-def now : IO UtcTime := do
-  let ts ← Std.Time.Timestamp.now
-  let secs := ts.toSecondsSinceUnixEpoch.val
-  return ofEpochSeconds secs.toNat
-
-/-- From a TOML datetime; only offset datetimes in UTC (`Z` or `+00:00`) are accepted. -/
-def ofToml? (dt : Lake.Toml.DateTime) : Except String UtcTime :=
-  match dt with
+/-- From a TOML datetime; only offset datetimes in UTC (`Z` or `+00:00`) are accepted. Fractions of
+a second are dropped. -/
+def ofToml? : Lake.Toml.DateTime → Except String Timestamp
   | .offsetDateTime d t offset? =>
-    let utc := match offset? with
-      | none => true
-      | some (_, o) => o.hour == 0 && o.minute == 0
-    if utc then
-      .ok { year := d.year, month := d.month, day := d.day,
-            hour := t.hour, minute := t.minute, second := t.second }
-    else .error "date must be in UTC (offset Z)"
+    if offset?.any fun (_, o) => o.hour != 0 || o.minute != 0 then .error "date must be in UTC (offset Z)"
+    else .ok <| PlainDateTime.toTimestamp (zr := .UTC)
+      { date := .ofYearMonthDayClip (.ofNat d.year) (.clip d.month (by decide)) (.clip d.day (by decide))
+        time := .ofHourMinuteSeconds (.clip t.hour (by decide)) (.clip t.minute (by decide))
+          (.clip t.second (by decide)) }
   | _ => .error "date must be an offset datetime in UTC, e.g. 2026-10-23T14:02:11Z"
 
-end UtcTime
-
-end LeanBlame
+end Std.Time.Timestamp
