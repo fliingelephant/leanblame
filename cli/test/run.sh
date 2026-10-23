@@ -42,6 +42,7 @@ expect_line() {
   ok "$want"
 }
 export_lib() { "$lb" export >/dev/null 2>"$work/export.log" || { cat "$work/export.log" >&2; fail "export"; }; }
+current_export() { awk '/^export /{print $2}' .leanblame/current; }
 
 echo "== init"
 run init
@@ -56,6 +57,7 @@ commit "sample library"
 echo "== export"
 export_lib
 grep -q "^export sha256:[0-9a-f]\{64\}$" .leanblame/current || fail "no current export"
+first_export="$(current_export)"
 ok "export stored $(head -1 .leanblame/current)"
 
 echo "== sign"
@@ -101,6 +103,11 @@ export_lib
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"
+# --base compares with an export, not with the records.
+run status --base "$first_export"
+expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
+run status --base "$(current_export)"
+expect_line Sample.pointEnergy "Sample.pointEnergy outdated"
 
 echo "== edit a dependency body: energy"
 sed -i.bak 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/' Sample/Basic.lean
@@ -124,7 +131,12 @@ expect_line Sample.energy "Sample.energy outdated change=own-body:Sample.energy;
 echo "== edit informal text: energy's docstring"
 sed -i.bak 's/two units per site\./two units of energy per site./' Sample/Basic.lean && rm Sample/Basic.lean.bak
 commit "energy: new docstring"
+before="$(current_export)"
 export_lib
+[[ "$(current_export)" == "$before" ]] || fail "a docstring edit changed the export"
+"$lb" status --base "$before" >/dev/null 2>"$work/status.err" || fail "status --base $before"
+grep -q "pairs with 2 boundary lists" "$work/status.err" || fail "no ambiguity warning: $(cat "$work/status.err")"
+ok "a docstring edit keeps the export; --base says which of its two boundary lists it takes"
 run status
 expect_line Sample.energy \
   "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
