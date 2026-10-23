@@ -140,6 +140,17 @@ def checkBoundary (env : Environment) (b : BoundaryList) : IO Unit := do
   unless errors.isEmpty do
     fail ("boundary list does not match the library:\n" ++ "\n".intercalate (errors.toList.map ("  " ++ ·)))
 
+/-- Whether a user could tag `n`, that is, Lean did not generate it (docs/03): not a compiler
+auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
+reserved name, nor anything Lean's own `isAutoDeclOrPrivate_Internal` counts as generated
+(`T.brecOn.go`, `T.ctorIdx`, …). Constructors are tagged with their type. -/
+def taggable (n : Name) (ci : ConstantInfo) : CoreM Bool := do
+  let env ← getEnv
+  if n.isInternalDetail || isAuxRecursor env n || isNoConfusion env n || isRecCore env n ||
+      Meta.isMatcherCore env n || ci.isCtor || isReservedName env n then
+    return false
+  return !(← isAutoDeclOrPrivate_Internal n)
+
 /-- A constant name `leanexport` can read back from its command line. -/
 def roundTrips (n : Name) : Bool :=
   Syntax.decodeNameLit ("`" ++ n.toString) == some n
@@ -190,14 +201,16 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
       pure (jsonText b, b)
   -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
-  -- Every constant of the library's own modules, for `status`'s untagged-dependency warning.
-  let mut owned : Array String := #[]
-  for (n, _) in env.constants.map₁.toList do
+  let mut own : Array (Name × ConstantInfo) := #[]
+  for (n, ci) in env.constants.map₁.toList do
     if let some idx := env.getModuleIdxFor? n then
       if modSet.contains env.header.moduleNames[idx.toNat]! then
-        owned := owned.push n.toString
+        own := own.push (n, ci)
         if !n.isInternal && roundTrips n then
           roots := roots.push n
+  -- The library's taggable constants, for `status`'s untagged-dependency warning.
+  let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
+    { fileName := "", fileMap := default } { env }
   for d in boundaryList.declarations do
     let some n := Syntax.decodeNameLit ("`" ++ d.name) | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name cannot be passed to leanexport"

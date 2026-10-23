@@ -83,34 +83,16 @@ structure Result where
   /-- Untagged declarations of this library used by tagged ones (docs/03). -/
   warnings : Array String := #[]
 
-/--
-Constants Lean generates, which are never tagged and never warned about (docs/03): compiler
-auxiliaries (`match_n`, `_proof_n`, `_unary`, …), recursors, constructors, and everything
-derived from a tagged declaration (`T.casesOn`, `T.mk.injEq`, `f.match_1`, …).
--/
-def isGenerated (h : Walk.Hashed) (u : Name) : Bool :=
-  let suffixes := #["rec", "recOn", "casesOn", "brecOn", "binductionOn", "below", "ibelow",
-    "noConfusion", "noConfusionType", "injEq", "inj", "sizeOf_spec", "ctorIdx", "toCtorIdx",
-    "eq_def", "induct", "mutual_induct", "elim"]
-  let lastIsAux := match u with
-    | .str _ s => s.startsWith "match_" || s.startsWith "proof_" || s.startsWith "eq_" ||
-        suffixes.contains s
-    | _ => true
-  let rec taggedPrefix : Name → Bool
-    | .anonymous => false
-    | p@(.str q _) | p@(.num q _) => h.isTagged p || taggedPrefix q
-  u.isInternal || lastIsAux || taggedPrefix u.getPrefix ||
-    (h.nodes[u]?.any fun n => n.fields.kind == "rec" || n.fields.kind == "ctor")
-
-/-- `status` warns when a tagged declaration of this library uses an untagged one of it.
-`closures` holds `Walk.closureOf` of each tagged declaration. -/
+/-- `status` warns when a tagged declaration of this library uses an untagged one of it that could
+be tagged: `owned` lists the library's taggable constants, from `export`. `closures` holds
+`Walk.closureOf` of each tagged declaration. -/
 def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name × Array Name))
     (modules : Array String) (owned : Std.HashSet String) : Array String := Id.run do
   let mut users : Std.HashMap Name (Array Name) := {}
   for (x, d) in h.declarations do
     unless modules.contains d.module do continue
     for u in (closures[x]?.map (·.2)).getD #[] do
-      if owned.contains u.toString && !isGenerated h u then
+      if owned.contains u.toString then
         users := users.insert u ((users.getD u #[]).push x)
   let mut out := #[]
   for u in Walk.sortNames (users.fold (init := #[]) fun acc u _ => acc.push u) do
