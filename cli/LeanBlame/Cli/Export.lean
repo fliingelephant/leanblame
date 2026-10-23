@@ -226,7 +226,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     | .error e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   let exportHash ← Store.putFile root tmp
   let boundary ← Store.putString root boundaryText
-  Store.writeCurrent root { exportHash, boundary } commit
+  Store.writeCurrent root { exportHash, boundary, modules := mods.map toString } commit
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

@@ -4,6 +4,7 @@
 import LeanBlame.Cli.Export
 import LeanBlame.Cli.Status
 import LeanBlame.Cli.Validate
+import LeanBlame.Cli.Sign
 
 open LeanBlame
 
@@ -82,14 +83,35 @@ def cmdValidate (args : List String) : IO UInt32 := do
   unless a.positional.isEmpty do throw (IO.userError "validate takes no positional arguments")
   Validate.run (← IO.currentDir) (a.get? "--base-ref")
 
+def cmdInit (args : List String) : IO UInt32 := do
+  unless args.isEmpty do throw (IO.userError "init takes no arguments")
+  Sign.init (← IO.currentDir)
+
+def cmdSign (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #["--signer", "--module", "--note", "--withdraw", "--constants"] #[] args)
+  let root ← IO.currentDir
+  match a.get? "--withdraw" with
+  | some ref =>
+    unless a.positional.isEmpty && (a.get? "--module").isNone do
+      throw (IO.userError "sign --withdraw RECORD takes --constants A,B instead of names or --module")
+    let constants? := (a.get? "--constants").map fun s =>
+      ((s.splitOn ",").map strTrim |>.filter (· != "")).toArray
+    Sign.withdraw root (a.get? "--signer") ref constants? (a.get? "--note")
+  | none =>
+    if (a.get? "--constants").isSome then
+      throw (IO.userError "--constants goes with --withdraw; to approve, list the names")
+    Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
+
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0
+  | "init" :: args => cmdInit args
   | "export" :: args => cmdExport args
   | "status" :: args => cmdStatus args
   | "blame" :: args => cmdBlame args
+  | "sign" :: args => cmdSign args
   | "validate" :: args => cmdValidate args
   | cmd :: _ =>
-    if #["init", "equiv", "sign", "release"].contains cmd then
+    if #["equiv", "release"].contains cmd then
       notImplemented cmd
     else do
       IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
