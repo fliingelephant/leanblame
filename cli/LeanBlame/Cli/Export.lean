@@ -1,11 +1,13 @@
 /-
 `leanblame export [--boundary FILE] [--lib NAME]...` (docs/04-architecture.md).
 
-Builds the library with `lake build`, imports its modules, collects the
-boundary list from `@[trusted]` (own and imported, with structure expansion)
-or reads it from `--boundary`, runs the toolchain's `leanexport` on the
-library's constants and the boundary list, and writes both files into the
-object store. Prints the two hashes.
+Builds the library with `lake build`, imports its modules, and makes the
+boundary list: the declarations tagged `@[trusted]` (own and imported) or
+listed in `--boundary FILE`, plus the members of tagged structures and
+inductives, with `module`, `kind` and the provenance fields from the library
+itself. Runs the toolchain's `leanexport` on the library's constants and the
+boundary list, and writes both files into the object store. Prints the two
+hashes.
 -/
 import Lean
 import Lake.Load.Manifest
@@ -85,60 +87,72 @@ def moduleOf (env : Environment) (n : Name) : Name :=
   | some idx => env.header.moduleNames[idx.toNat]!
   | none => env.mainModule
 
-/-- The boundary list from `@[trusted]`, own and imported, with structure expansion. -/
-def collectTrusted (env : Environment) : IO (Array BoundaryDecl) := do
-  let tagged := (LeanBlame.trustedDecls env).qsort (fun a b => a.cmp b == .lt)
-  let mut out : Array BoundaryDecl := #[]
-  let mut seen : NameSet := {}
-  let mut errors : Array String := #[]
-  -- Explicit tags first: each needs its own docstring.
-  let mut expansions : Array (Name × Name) := #[]  -- (member, tagged parent)
-  for n in tagged do
-    let some ci := env.find? n | errors := errors.push s!"{n}: tagged but not in the environment"; continue
-    if ci.isUnsafe then
-      errors := errors.push s!"{n}: `unsafe` declarations cannot be tagged"; continue
-    if ci matches .recInfo _ then
-      errors := errors.push s!"{n}: recursors cannot be tagged"; continue
+/-- A declaration put on the boundary, by `@[trusted]` or by a boundary-list file. -/
+structure Tag where
+  name : Name
+  informal : String
+  informalSource : String
+
+/-- The `@[trusted]` declarations, own and imported, with their docstrings; and the problems. -/
+def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
+  let mut tags := #[]
+  let mut errors := #[]
+  for n in (trustedDecls env).qsort (·.cmp · == .lt) do
     let some doc ← findSimpleDocString? env n
       | errors := errors.push s!"{n}: tagged declarations need a docstring (the informal text)"; continue
     let informal := normalizeInformal doc
     if informal.isEmpty then
       errors := errors.push s!"{n}: tagged declarations need a non-empty docstring"; continue
-    out := out.push { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci,
-                      informal, informalSource := "docstring" }
-    seen := seen.insert n
-    if let .inductInfo iv := ci then
-      for c in iv.ctors do expansions := expansions.push (c, n)
-      if let some si := getStructureInfo? env n then
-        for f in si.fieldInfo do expansions := expansions.push (f.projFn, n)
-  -- Members of tagged structures and inductives: own docstring, else the parent's.
-  for (m, parent) in expansions do
-    if seen.contains m then continue
-    let some ci := env.find? m | errors := errors.push s!"{m}: member of {parent} not found"; continue
-    let doc := (← findSimpleDocString? env m).map normalizeInformal |>.filter (!·.isEmpty)
-    let parentDoc := (out.find? (·.name == parent.toString)).map (·.informal)
-    let some informal := doc <|> parentDoc | continue
-    out := out.push { name := m.toString, module := (moduleOf env m).toString, kind := Walk.kindOf ci,
-                      informal, informalSource := "docstring" }
-    seen := seen.insert m
-  unless errors.isEmpty do
-    fail ("export failed:\n" ++ "\n".intercalate (errors.toList.map ("  " ++ ·)))
-  return out.qsort (fun a b => a.name < b.name)
+    tags := tags.push { name := n, informal, informalSource := "docstring" }
+  return (tags, errors)
 
-/-- Check an adapter's boundary list against the environment. -/
-def checkBoundary (env : Environment) (b : BoundaryList) : IO Unit := do
-  let mut errors : Array String := #[]
+/-- The declarations of a boundary-list file, whose `module` and `kind` must agree with `env`; and
+the problems. -/
+def fileTags (env : Environment) (b : BoundaryList) : Array Tag × Array String := Id.run do
+  let mut tags := #[]
+  let mut errors := #[]
   for d in b.declarations do
     let some n := Syntax.decodeNameLit ("`" ++ d.name)
       | errors := errors.push s!"{d.name}: not a constant name"; continue
-    match env.find? n with
-    | none => errors := errors.push s!"{d.name}: not in the environment"
-    | some ci =>
-      if ci.isUnsafe then errors := errors.push s!"{d.name}: `unsafe` declarations cannot be tagged"
-      else if Walk.kindOf ci != d.kind then
-        errors := errors.push s!"{d.name}: kind is {Walk.kindOf ci}, the list says {d.kind}"
-  unless errors.isEmpty do
-    fail ("boundary list does not match the library:\n" ++ "\n".intercalate (errors.toList.map ("  " ++ ·)))
+    let some ci := env.find? n | errors := errors.push s!"{d.name}: not in the environment"; continue
+    if Walk.kindOf ci != d.kind then
+      errors := errors.push s!"{d.name}: kind is {Walk.kindOf ci}, the list says {d.kind}"
+    else if (moduleOf env n).toString != d.module then
+      errors := errors.push s!"{d.name}: module is {moduleOf env n}, the list says {d.module}"
+    else
+      tags := tags.push { name := n, informal := d.informal, informalSource := d.informalSource }
+  return (tags, errors)
+
+/-- The boundary list's declarations, sorted by name: the tagged ones, and the constructors and
+projections of tagged inductives and structures that are not tagged themselves, with their own
+docstring or else the parent's text. `module` and `kind` come from `env`. Also the problems. -/
+def expand (env : Environment) (tags : Array Tag) : IO (Array BoundaryDecl × Array String) := do
+  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : BoundaryDecl :=
+    { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci, informal,
+      informalSource }
+  let tagged : NameSet := tags.foldl (·.insert ·.name) {}
+  let mut out := #[]
+  let mut errors := #[]
+  let mut members : Array (Name × Tag) := #[]
+  for t in tags do
+    let some ci := env.find? t.name
+      | errors := errors.push s!"{t.name}: tagged but not in the environment"; continue
+    if ci.isUnsafe then
+      errors := errors.push s!"{t.name}: `unsafe` declarations cannot be tagged"; continue
+    if ci matches .recInfo _ then
+      errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
+    out := out.push (decl t.name ci t.informal t.informalSource)
+    if let .inductInfo iv := ci then
+      let projs := ((getStructureInfo? env t.name).map (·.fieldInfo.map (·.projFn))).getD #[]
+      for m in iv.ctors.toArray ++ projs do
+        unless tagged.contains m do members := members.push (m, t)
+  for (m, parent) in members do
+    let some ci := env.find? m | errors := errors.push s!"{m}: member of {parent.name} not found"; continue
+    out := out.push <| match (← findSimpleDocString? env m).map normalizeInformal with
+      | some doc => if doc.isEmpty then decl m ci parent.informal parent.informalSource
+        else decl m ci doc "docstring"
+      | none => decl m ci parent.informal parent.informalSource
+  return (out.qsort (·.name < ·.name), errors)
 
 /-- Whether a user could tag `n`, that is, Lean did not generate it (docs/03): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
@@ -187,18 +201,16 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let deps ← manifestDeps root
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
-  let (boundaryText, boundaryList) ← match boundaryFile? with
-    | some f =>
-      let text ← IO.FS.readFile f
-      let b ← match BoundaryList.parse text with
-        | .ok b => pure b
-        | .error e => fail s!"{f}: {e}"
-      checkBoundary env b
-      pure (text, b)
-    | none =>
-      let decls ← collectTrusted env
-      let b : BoundaryList := { library, commit, toolchain, deps, declarations := decls }
-      pure (jsonText b, b)
+  let (tags, errors) ← match boundaryFile? with
+    | some f => match BoundaryList.parse (← IO.FS.readFile f) with
+      | .ok b => pure (fileTags env b)
+      | .error e => fail s!"{f}: {e}"
+    | none => trustedTags env
+  let (declarations, errors') ← expand env tags
+  unless (errors ++ errors').isEmpty do
+    fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
+  let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations }
+  let boundaryText := jsonText boundaryList
   -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
