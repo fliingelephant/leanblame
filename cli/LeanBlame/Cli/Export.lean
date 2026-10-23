@@ -18,11 +18,9 @@ namespace LeanBlame.Export
 
 open Lean
 
-/-- Unicode-normalization is not available in Lean core; we trim ASCII whitespace
-and normalize line endings. See the report on approximations. -/
-def normalizeInformal (s : String) : String :=
-  strTrim ((s.splitOn "\r\n").foldl (init := "") fun acc part =>
-    if acc.isEmpty then part else acc ++ "\n" ++ part)
+/-- The informal text of a docstring. docs/03 asks for Unicode normalization, which Lean core
+does not have: ASCII whitespace is trimmed and line endings are normalized. -/
+def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
 /-- Library names: `--lib` flags, else the default `lean_lib` targets of `lakefile.toml`. -/
 def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array String) := do
