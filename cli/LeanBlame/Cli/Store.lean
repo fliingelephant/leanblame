@@ -19,9 +19,8 @@ def objectsDir (root : System.FilePath) : System.FilePath := dir root / "store"
 def objectPath (root : System.FilePath) (hash : String) : System.FilePath :=
   objectsDir root / hashHex hash
 
-/-- Move a finished file into the store under its hash; returns `sha256:<hex>`. -/
-def putFile (root : System.FilePath) (tmp : System.FilePath) : IO String := do
-  let hex ← Sha256.hexOfFile tmp
+/-- Move a finished file, whose SHA-256 is `hex`, into the store; returns `sha256:<hex>`. -/
+def putFile (root : System.FilePath) (tmp : System.FilePath) (hex : String) : IO String := do
   let dest := objectsDir root / hex
   IO.FS.createDirAll (objectsDir root)
   if ← dest.pathExists then

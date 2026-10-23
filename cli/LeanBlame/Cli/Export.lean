@@ -5,14 +5,15 @@ Builds the library with `lake build`, imports its modules, and makes the
 boundary list: the declarations tagged `@[trusted]` (own and imported) or
 listed in `--boundary FILE`, plus the members of tagged structures and
 inductives, with `module`, `kind` and the provenance fields from the library
-itself. Runs the toolchain's `leanexport` on the library's constants and the
-boundary list, and writes both files into the object store. Prints the two
-hashes.
+itself. Exports the library's constants and the boundary list with the
+toolchain's `leanexport` writer (in-process), and writes both files into the
+object store. Prints the two hashes.
 -/
 import Lean
 import Lake.Load.Manifest
 import Lake.Toml
 import Lake.Util.Git
+import LeanExport.Basic
 import LeanBlame.Attr
 import LeanBlame.Cli.Schema
 import LeanBlame.Cli.Store
@@ -166,7 +167,8 @@ def taggable (n : Name) (ci : ConstantInfo) : CoreM Bool := do
     return false
   return !(← isAutoDeclOrPrivate_Internal n)
 
-/-- A constant name `leanexport` can read back from its command line. -/
+/-- A constant name that reads back from its printed form, as boundary lists name constants. (Roots
+are restricted to these names as when `leanexport` ran as a command, so exports are unchanged.) -/
 def roundTrips (n : Name) : Bool :=
   Syntax.decodeNameLit ("`" ++ n.toString) == some n
 
@@ -183,17 +185,16 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   -- docs/04: build using the mathlib cache, when the library depends on mathlib.
   if (← manifestDeps root).any (·.1 == "mathlib") then
     IO.eprintln "leanblame: lake exe cache get"
-    try runInto "lake" #["exe", "cache", "get"] root #[] (← IO.getStderr) "`lake exe cache get`"
+    try runToStderr "lake" #["exe", "cache", "get"] root "`lake exe cache get`"
     catch e => IO.eprintln s!"warning: could not fetch the mathlib cache: {e}"
   IO.eprintln "leanblame: lake build"
-  runInto "lake" #["build"] root #[] (← IO.getStderr) "`lake build`"
+  runToStderr "lake" #["build"] root "`lake build`"
   let libs ← libraryNames root libsGiven
   let mods ← libraryModules root libs
   let leanPath := strTrim (← IO.Process.run
     { cmd := "lake", args := #["env", "printenv", "LEAN_PATH"], cwd := root })
   let sp : SearchPath := (leanPath.splitOn ":").filter (· != "") |>.map System.FilePath.mk
-  let sysroot ← findSysroot
-  initSearchPath sysroot sp
+  initSearchPath (← findSysroot) sp
   IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
   let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
   let modSet : NameSet := mods.foldl (·.insert ·) {}
@@ -225,21 +226,22 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     { fileName := "", fileMap := default } { env }
   for d in boundaryList.declarations do
     let some n := Syntax.decodeNameLit ("`" ++ d.name) | fail s!"{d.name}: not a constant name"
-    unless roundTrips n do fail s!"{d.name}: this name cannot be passed to leanexport"
+    unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     unless roots.contains n do roots := roots.push n
   roots := roots.qsort (fun a b => a.cmp b == .lt)
-  -- Run the toolchain's exporter.
-  let exporter := sysroot / "bin" / ("leanexport" ++ (if System.Platform.isWindows then ".exe" else ""))
+  -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
+  let sha ← IO.mkRef ({} : Sha256.State)
   IO.FS.withFile tmp .write fun h =>
-    runInto exporter.toString (mods.map toString ++ #["--"] ++ roots.map toString) root
-      #[("LEAN_PATH", some leanPath)] (.ofHandle h) "leanexport"
+    let write (b : ByteArray) : IO Unit := do h.write b; sha.modify (·.update b)
+    IO.withStdout { IO.FS.Stream.ofHandle h with write, putStr := (write ·.toUTF8) }
+      (LeanExport.dumpEnv env (some roots.toList))
   -- Compute every claim hash now, so that problems surface at export time.
   let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
   let hashed ← try Walk.hashExport exported boundaryList
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
-  let exportHash ← Store.putFile root tmp
+  let exportHash ← Store.putFile root tmp (Sha256.toHex (← sha.get).finish)
   let boundary ← Store.putString root boundaryText
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root

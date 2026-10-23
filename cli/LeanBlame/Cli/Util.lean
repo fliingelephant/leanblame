@@ -60,11 +60,12 @@ def fail {α : Type} (msg : String) : IO α := throw (IO.userError msg)
 
 /-! Processes. -/
 
-/-- Run a command, copying its stdout to `out` as it comes; fail with `what` on a non-zero exit.
-Its stderr is ours. -/
-partial def runInto (cmd : String) (args : Array String) (cwd : Option System.FilePath)
-    (env : Array (String × Option String)) (out : IO.FS.Stream) (what : String) : IO Unit := do
-  let child ← IO.Process.spawn { cmd, args, cwd, env, stdin := .null, stdout := .piped }
+/-- Run a command, copying its stdout to our stderr as it comes (our stdout carries results); fail
+with `what` on a non-zero exit. Its stderr is ours. -/
+partial def runToStderr (cmd : String) (args : Array String) (cwd : Option System.FilePath)
+    (what : String) : IO Unit := do
+  let child ← IO.Process.spawn { cmd, args, cwd, stdin := .null, stdout := .piped }
+  let out ← IO.getStderr
   let rec copy : IO Unit := do
     let chunk ← child.stdout.read (1024 * 1024)
     unless chunk.isEmpty do

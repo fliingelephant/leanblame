@@ -120,12 +120,4 @@ def hexOfBytes (bytes : ByteArray) : String :=
 def hexOfString (s : String) : String :=
   hexOfBytes s.toUTF8
 
-/-- Lowercase hex SHA-256 of a file, read in chunks. -/
-partial def hexOfFile (path : System.FilePath) : IO String := do
-  let h ← IO.FS.Handle.mk path .read
-  let rec go (s : State) : IO State := do
-    let chunk ← h.read (1024 * 1024)
-    if chunk.isEmpty then return s else go (s.update chunk)
-  return toHex (← go {}).finish
-
 end LeanBlame.Sha256
