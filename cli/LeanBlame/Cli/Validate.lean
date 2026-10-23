@@ -23,20 +23,20 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
     unless ← dir.isDir do
       errors := errors.push s!"{dir}: records directory missing"
       continue
-    -- Every visible file in a records directory must be a record.
-    for e in ← dir.readDir do
+    -- Every visible file in a records directory must be a record named by its hash.
+    for e in (← dir.readDir).qsort (fun a b => a.fileName < b.fileName) do
       if e.fileName.startsWith "." then continue
       if ← e.path.isDir then
         errors := errors.push s!"{e.path}: unexpected directory in a records directory"
       else if e.path.extension != some "toml" then
         errors := errors.push s!"{e.path}: not a record file (expected <sha256>.toml)"
+      else
+        let expected := Sha256.hexOfBytes (← IO.FS.readBinFile e.path) ++ ".toml"
+        if e.fileName != expected then
+          errors := errors.push s!"{e.path}: file name must be the sha256 of its bytes, {expected}"
     let (good, bad) ← loadRecordDir dir
     for (p, es) in bad do
       for msg in es do errors := errors.push s!"{p}: {msg}"
-    for r in good do
-      let expected := hashHex r.hash ++ ".toml"
-      if r.path.fileName != some expected then
-        errors := errors.push s!"{r.path}: file name must be the sha256 of its bytes, {expected}"
     loaded := loaded ++ good
   -- Authority rules.
   let byHash : Std.HashMap String LoadedRecord := loaded.foldl (fun m r => m.insert r.hash r) {}

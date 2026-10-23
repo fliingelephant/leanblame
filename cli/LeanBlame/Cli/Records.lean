@@ -26,6 +26,8 @@ def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePa
     if r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@" then
       IO.eprintln s!"warning: records repository {r} skipped: only local directories are supported"
     else
+      -- `records/` and `records` name the same directory.
+      let r := if r.endsWith "/" && r.length > 1 then (r.dropEnd 1).copy else r
       out := out.push (root / r)
   return out
 
