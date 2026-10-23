@@ -1,11 +1,12 @@
 # LeanBlame
 
-Infrastructure for curated, reviewer-signed formalization libraries in Lean 4.
+Infrastructure for reviewer-signed formalization libraries in Lean 4.
 
 Machines check proofs. Named humans sign off on the trusted boundary:
-definitions, theorem statements, conventions, axioms, imports, and checker
-configuration. Every signoff is a permanent record bound to a kernel-level
-hash, so it survives or fails library upgrades in a checkable way.
+definitions, theorem statements, conventions, axioms. Every signoff is a
+permanent record bound to a kernel-level hash. Trust flows through people: you
+sign your own declaration fully, only the spec of signed declarations you use,
+and everything of unsigned ones.
 
 LeanBlame is field-independent. The first library built on it is OpenPhysics.
 

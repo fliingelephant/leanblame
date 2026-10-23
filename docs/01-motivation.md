@@ -32,7 +32,7 @@ needs a named human behind every trusted claim, and an institution behind the
 human.
 
 This is the same reason a licensed engineer stamps a drawing, an audit partner
-signs an opinion, and a Linux kernel patch carries `Signed-off-by:`.
+signs an opinion, and a Linux kernel patch carries `Reviewed-by:`.
 
 ## Why now
 
