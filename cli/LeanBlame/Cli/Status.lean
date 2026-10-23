@@ -47,15 +47,25 @@ def hashed (root : System.FilePath) (cache : Cache) (exportHash boundary : Strin
   cache.modify (·.insert (exportHash, boundary) h)
   return h
 
-/-- The boundary list exported with `exportHash`: from a record naming it, else the local log. -/
+/--
+The boundary list to compare with for `--base A`: the one of the latest local `export` of `A`,
+else the one of the latest record naming `A`. A docstring edit leaves the export unchanged, so
+several lists can pair with one export; `status` then says which one it took.
+-/
 def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : String) :
     IO String := do
-  for r in ledger.records do
-    if let .approve a := r.record then
-      if a.exportHash == exportHash then return a.boundary
-  match ← Store.boundaryForExport? root exportHash with
-  | some b => return b
-  | none => fail s!"no boundary list known for export {exportHash}"
+  let fromLog ← Store.boundariesForExport root exportHash
+  let named := ledger.records.filterMap fun r => match r.record with
+    | .approve a => if a.exportHash == exportHash then some (a.date, r.hash, a.boundary) else none
+    | .withdraw _ => none
+  let fromRecords := (named.qsort fun x y => x.1 > y.1 || (x.1 == y.1 && x.2.1 > y.2.1)).map (·.2.2)
+  let candidates := (fromLog ++ fromRecords).foldl
+    (fun acc b => if acc.contains b then acc else acc.push b) #[]
+  let some b := candidates[0]? | fail s!"no boundary list known for export {exportHash}"
+  if candidates.size > 1 then
+    let source := if fromLog.contains b then "the latest local export" else "the latest record"
+    IO.eprintln s!"warning: export {exportHash} pairs with {candidates.size} boundary lists (docstring edits); comparing with {b}, from {source}"
+  return b
 
 def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
   let approvals := (ledger.approvalsOf name).map fun (r, a, claim) =>

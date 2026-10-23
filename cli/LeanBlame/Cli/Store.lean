@@ -69,11 +69,11 @@ def writeCurrent (root : System.FilePath) (c : Current) (commit : String) : IO U
     | none => ""
   writeFileMkdirs (currentPath root)
     (s!"export {c.exportHash}\nboundary {c.boundary}\nmodules {" ".intercalate c.modules.toList}\n" ++ owned)
+  -- The log keeps one line per (export, boundary list, commit), the latest run last.
   let log := dir root / "exports"
-  let line := s!"{c.exportHash} {c.boundary} {commit}\n"
-  let old := (← readFileIfExists log).getD ""
-  unless (strLines old).contains (strTrim line) do
-    IO.FS.writeFile log (old ++ line)
+  let line := s!"{c.exportHash} {c.boundary} {commit}"
+  let old := ((← readFileIfExists log).getD "" |> strLines).filter (fun l => l != "" && l != line)
+  IO.FS.writeFile log ("\n".intercalate (old ++ [line]) ++ "\n")
 
 def readCurrent (root : System.FilePath) : IO Current := do
   let some text ← readFileIfExists (currentPath root)
@@ -92,13 +92,15 @@ def readCurrent (root : System.FilePath) : IO Current := do
   unless isHash e && isHash b do fail s!"{currentPath root} is malformed; run `leanblame export`"
   return { exportHash := e, boundary := b, modules := mods, owned }
 
-/-- The boundary list exported together with `exportHash`, from the local export log. -/
-def boundaryForExport? (root : System.FilePath) (exportHash : String) : IO (Option String) := do
-  let some text ← readFileIfExists (dir root / "exports") | return none
+/-- The boundary lists exported together with `exportHash`, from the local export log, latest
+first. Docstrings are not in exports, so a docstring edit pairs a new list with the same export. -/
+def boundariesForExport (root : System.FilePath) (exportHash : String) : IO (Array String) := do
+  let some text ← readFileIfExists (dir root / "exports") | return #[]
+  let mut out := #[]
   for l in (strLines text).reverse do
     match l.splitOn " " with
-    | e :: b :: _ => if e == exportHash then return some b
+    | e :: b :: _ => if e == exportHash && !out.contains b then out := out.push b
     | _ => pure ()
-  return none
+  return out
 
 end LeanBlame.Store
