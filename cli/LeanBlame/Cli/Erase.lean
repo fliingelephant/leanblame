@@ -251,6 +251,8 @@ def isProof (e : Expr) : M Bool := do
   match e with
   | .sort _ | .forallE .. | .lit _ => return false
   | _ => pure ()
+  -- The kernel rejects theorems whose type is not a proposition, so any application of a
+  -- theorem is a proof.
   if let .const c _ := e.getAppFn then
     if let some (.thmInfo _) ← getConst? c then return true
   let saved ← get

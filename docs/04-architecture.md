@@ -11,8 +11,10 @@
 
 ### 1. `cli` (Lean package)
 
-Two Lake targets. A tiny library with the `@[trusted]` attribute and nothing
-else, so user modules never import Lake. And the executable.
+Two Lake targets users see. A tiny library with the `@[trusted]` attribute and
+nothing else, so user modules never import Lake. And the executable, whose own
+modules sit in an internal third library: Lake builds an executable's imports
+only from library targets.
 
 The executable reads a **boundary list**, an **export**, and **records**. It
 uses the toolchain's export parser and its own closure walk, adapted from
