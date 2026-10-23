@@ -30,6 +30,20 @@ structure State where
   /-- Total message length in bytes. -/
   length : Nat := 0
 
+/-- Rounds `i` to 63 on working variables `a` to `hh`, then add them to `h`. A tail-recursive
+function over unboxed words: the loop allocates nothing. -/
+private def rounds (h w : Array UInt32) (i : Nat) (a b c d e f g hh : UInt32) : Array UInt32 :=
+  if _ : i < 64 then
+    let S1 := rotr e 6 ^^^ rotr e 11 ^^^ rotr e 25
+    let ch := (e &&& f) ^^^ ((~~~ e) &&& g)
+    let t1 := hh + S1 + ch + k[i]! + w[i]!
+    let S0 := rotr a 2 ^^^ rotr a 13 ^^^ rotr a 22
+    let maj := (a &&& b) ^^^ (a &&& c) ^^^ (b &&& c)
+    rounds h w (i + 1) (t1 + S0 + maj) a b c (d + t1) e f g
+  else
+    #[h[0]! + a, h[1]! + b, h[2]! + c, h[3]! + d, h[4]! + e, h[5]! + f, h[6]! + g, h[7]! + hh]
+termination_by 64 - i
+
 /-- Compress the 64-byte block of `data` starting at `off` into `h`. -/
 private def compress (h : Array UInt32) (data : ByteArray) (off : Nat) : Array UInt32 := Id.run do
   let mut w : Array UInt32 := Array.mkEmpty 64
@@ -45,30 +59,7 @@ private def compress (h : Array UInt32) (data : ByteArray) (off : Nat) : Array U
     let s0 := rotr w15 7 ^^^ rotr w15 18 ^^^ (w15 >>> 3)
     let s1 := rotr w2 17 ^^^ rotr w2 19 ^^^ (w2 >>> 10)
     w := w.push (w[i-16]! + s0 + w[i-7]! + s1)
-  let mut a := h[0]!
-  let mut b := h[1]!
-  let mut c := h[2]!
-  let mut d := h[3]!
-  let mut e := h[4]!
-  let mut f := h[5]!
-  let mut g := h[6]!
-  let mut hh := h[7]!
-  for i in [0:64] do
-    let S1 := rotr e 6 ^^^ rotr e 11 ^^^ rotr e 25
-    let ch := (e &&& f) ^^^ ((~~~ e) &&& g)
-    let t1 := hh + S1 + ch + k[i]! + w[i]!
-    let S0 := rotr a 2 ^^^ rotr a 13 ^^^ rotr a 22
-    let maj := (a &&& b) ^^^ (a &&& c) ^^^ (b &&& c)
-    let t2 := S0 + maj
-    hh := g
-    g := f
-    f := e
-    e := d + t1
-    d := c
-    c := b
-    b := a
-    a := t1 + t2
-  return #[h[0]! + a, h[1]! + b, h[2]! + c, h[3]! + d, h[4]! + e, h[5]! + f, h[6]! + g, h[7]! + hh]
+  return rounds h w 0 h[0]! h[1]! h[2]! h[3]! h[4]! h[5]! h[6]! h[7]!
 
 /-- Feed bytes into the state. -/
 def State.update (s : State) (bytes : ByteArray) : State := Id.run do
