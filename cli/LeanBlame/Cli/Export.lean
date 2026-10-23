@@ -82,9 +82,10 @@ def manifestDeps (root : System.FilePath) : IO (Array (String × String)) := do
     | .git (rev := rev) .. => some (p.name.toString (escape := false), rev)
     | .path .. => none
 
+/-- The module defining `n`. (`env.header.moduleNames` would copy the module list on every call.) -/
 def moduleOf (env : Environment) (n : Name) : Name :=
   match env.getModuleIdxFor? n with
-  | some idx => env.header.moduleNames[idx.toNat]!
+  | some idx => env.header.modules[idx.toNat]!.module
   | none => env.mainModule
 
 /-- A declaration put on the boundary, by `@[trusted]` or by a boundary-list file. -/
@@ -215,11 +216,10 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
   for (n, ci) in env.constants.map₁.toList do
-    if let some idx := env.getModuleIdxFor? n then
-      if modSet.contains env.header.moduleNames[idx.toNat]! then
-        own := own.push (n, ci)
-        if !n.isInternal && roundTrips n then
-          roots := roots.push n
+    if modSet.contains (moduleOf env n) then
+      own := own.push (n, ci)
+      if !n.isInternal && roundTrips n then
+        roots := roots.push n
   -- The library's taggable constants, for `status`'s untagged-dependency warning.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
