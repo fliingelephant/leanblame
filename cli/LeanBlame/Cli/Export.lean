@@ -49,7 +49,8 @@ def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array
 
 /-- The modules of each library, from Lake (`lake query --json LIB:modules`). -/
 def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Name) := do
-  let out ← runCapture "lake" (#["query", "--json"] ++ libs.map (· ++ ":modules")) root
+  let out ← IO.Process.run
+    { cmd := "lake", args := #["query", "--json"] ++ libs.map (· ++ ":modules"), cwd := root }
   let mut mods := #[]
   for line in strLines out do
     if strTrim line == "" then continue
@@ -161,13 +162,14 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   -- docs/04: build using the mathlib cache, when the library depends on mathlib.
   if (← manifestDeps root).any (·.1 == "mathlib") then
     IO.eprintln "leanblame: lake exe cache get"
-    try runToStderr "lake" #["exe", "cache", "get"] root
+    try runInto "lake" #["exe", "cache", "get"] root #[] (← IO.getStderr) "`lake exe cache get`"
     catch e => IO.eprintln s!"warning: could not fetch the mathlib cache: {e}"
   IO.eprintln "leanblame: lake build"
-  runToStderr "lake" #["build"] root
+  runInto "lake" #["build"] root #[] (← IO.getStderr) "`lake build`"
   let libs ← libraryNames root libsGiven
   let mods ← libraryModules root libs
-  let leanPath := strTrim (← runCapture "lake" #["env", "printenv", "LEAN_PATH"] root)
+  let leanPath := strTrim (← IO.Process.run
+    { cmd := "lake", args := #["env", "printenv", "LEAN_PATH"], cwd := root })
   let sp : SearchPath := (leanPath.splitOn ":").filter (· != "") |>.map System.FilePath.mk
   let sysroot ← findSysroot
   initSearchPath sysroot sp
@@ -210,8 +212,9 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let exporter := sysroot / "bin" / ("leanexport" ++ (if System.Platform.isWindows then ".exe" else ""))
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
-  runToFile exporter.toString (mods.map toString ++ #["--"] ++ roots.map toString) tmp root
-    (env := #[("LEAN_PATH", some leanPath)])
+  IO.FS.withFile tmp .write fun h =>
+    runInto exporter.toString (mods.map toString ++ #["--"] ++ roots.map toString) root
+      #[("LEAN_PATH", some leanPath)] (.ofHandle h) "leanexport"
   -- Compute every claim hash now, so that problems surface at export time.
   let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
   let hashed ← try Walk.hashExport exported boundaryList

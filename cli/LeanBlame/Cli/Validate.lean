@@ -28,7 +28,9 @@ def appendOnlyErrors (root : System.FilePath) (base : String) (loaded : Array Lo
   if dirs.isEmpty then return #[]
   let ids : Std.HashSet String := loaded.foldl (·.insert ·.hash) {}
   let mut errors := #[]
-  for path in strLines (← runCapture "git" (#["ls-tree", "-r", "--name-only", base, "--"] ++ dirs) root) do
+  let out ← IO.Process.run
+    { cmd := "git", args := #["ls-tree", "-r", "--name-only", base, "--"] ++ dirs, cwd := root }
+  for path in strLines out do
     let name := (System.FilePath.mk path).fileName.getD ""
     let id := mkHash (name.dropEnd ".toml".length).copy
     if name.endsWith ".toml" && isHash id && !ids.contains id then
@@ -59,7 +61,8 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
               unless a.constants.any (·.1 == c) do
                 errors := errors.push s!"{r.path}: {c} is not in the withdrawn record"
   if let some baseRef := baseRef? then
-    let mb := strTrim (← runCapture "git" #["merge-base", baseRef, "HEAD"] root)
+    let mb := strTrim (← IO.Process.run
+      { cmd := "git", args := #["merge-base", baseRef, "HEAD"], cwd := root })
     errors := errors ++ (← appendOnlyErrors root mb loaded)
   if errors.isEmpty then
     IO.println s!"{loaded.size} records valid"
