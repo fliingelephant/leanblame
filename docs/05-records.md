@@ -72,9 +72,11 @@ may write declarations. Only humans sign.
 ## Several records for one declaration
 
 A record is **live** if no valid withdraw points at it, or at this constant in
-it. A declaration is `valid` if any live approve record carries its current
-claim hash. Otherwise `outdated` if live records exist, `unsigned` if none.
-Flag `withdrawn` if any record for it was ever withdrawn.
+it, and its signer is allowed by `leanblame.toml`. A declaration is `valid` if
+at least `required_signers` distinct signers have live approve records carrying
+its current claim hash (default one). Otherwise `outdated` if live records
+exist, `unsigned` if none. Flag `withdrawn` if any record for it was ever
+withdrawn.
 
 ## Storage
 

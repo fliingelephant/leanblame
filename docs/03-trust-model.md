@@ -97,8 +97,8 @@ A record is live if no withdraw record by the same signer points at it. See
 A release requires every tagged declaration `valid`, which implies no blocks.
 
 Validity is relative to a trust policy: which records repositories the library
-accepts and which records it excludes. Hashes are not. Hashes depend only on
-the code.
+accepts, which records it excludes, who may sign, how many signers it needs.
+Hashes are not. Hashes depend only on the code.
 
 ## The hash, precisely
 

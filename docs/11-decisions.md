@@ -139,7 +139,8 @@ LeanSearch, LeanCopilot. **OpenPhysics**: the first library. Rejected:
 OpenBlame (physicists parse "blame" better next to "Lean"), leanit (says
 nothing).
 
-### Open policy questions
+### Who may sign, and how many
 
-- Who may sign: anyone with an account, or institution-vouched only?
-- Quorum: one signer now; the format allows more.
+Per library, in `leanblame.toml`: `allowed_signers` (any, a list, or a repo)
+and `required_signers` (default 1). Pure rule over records, no Lean in it.
+Reviewer assignment is a web queue and never affects validity.

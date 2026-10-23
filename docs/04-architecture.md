@@ -60,7 +60,13 @@ records = ["records/", "https://github.com/some-institute/records"]
 exclude = ["sha256:…"]          # records this library refuses to count
 conventions = "OpenPhysics.Conventions"
 providers = ["openreview", "orcid", "github"]
+required_signers = 1            # distinct live approvals a declaration needs
+allowed_signers = "any"         # or a list of provider:id, or a records repo
 ```
+
+Validity is a rule over records. The two signer knobs are the whole policy;
+`status` reads them. Who gets *asked* to review is a queue in the web, not
+part of validity.
 
 No axiom list. Permitted axioms are the three standard ones plus any tagged,
 signed `axiom` in the library or its tagged dependencies.
