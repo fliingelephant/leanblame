@@ -58,13 +58,15 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   -- Append-only.
   if let some baseRef := baseRef? then
     let mb := strTrim (← runCapture "git" #["merge-base", baseRef, "HEAD"] root)
-    let rel := cfg.records.filter fun r => !(r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@")
+    let rel := cfg.records.filterMap localRecordDir?
     let out ← runCapture "git" (#["diff", "--name-status", "--no-renames", mb, "--"] ++ rel) root
     for line in strLines out do
       let line := strTrim line
       if line.isEmpty then continue
       let status := line.take 1 |>.copy
       let path := strTrim (strDrop line 1)
+      -- Only record files are append-only; `.gitkeep` may go.
+      unless isRecordFile ((System.FilePath.mk path).fileName.getD "") do continue
       match status with
       | "A" => pure ()
       | "D" => errors := errors.push s!"{path}: existing record deleted (records are append-only)"

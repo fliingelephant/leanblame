@@ -169,6 +169,14 @@ if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a delet
 grep -q "existing record deleted" "$work/validate.log" || fail "deletion not reported: $(cat "$work/validate.log")"
 git checkout -q HEAD -- "$record_file"
 ok "validate refuses modified and deleted records"
+git rm -q records/.gitkeep
+printf 'not a record\n' > records/.notes.toml
+run validate --base-ref HEAD
+"$lb" status >/dev/null 2>"$work/status.err" || fail "status with a hidden file in records/"
+if grep -q "notes" "$work/status.err"; then fail "status read a hidden file: $(cat "$work/status.err")"; fi
+rm records/.notes.toml
+git checkout -q HEAD -- records/.gitkeep
+ok "hidden files in records/ are not records: .gitkeep may go, .notes.toml is ignored"
 
 echo "== export refuses undocumented and unsafe tagged declarations"
 cat >> Sample/Basic.lean <<'EOF'

@@ -19,17 +19,25 @@ structure LoadedRecord where
   record : Record
   deriving Inhabited
 
+/-- A local records directory of `leanblame.toml`, without trailing slash (`records/` and
+`records` name the same directory); `none` for a remote repository. -/
+def localRecordDir? (r : String) : Option String :=
+  if r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@" then none
+  else some (if r.endsWith "/" && r.length > 1 then (r.dropEnd 1).copy else r)
+
 /-- The records directories of the configuration. Remote repositories are not supported yet. -/
 def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePath) := do
   let mut out := #[]
   for r in cfg.records do
-    if r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@" then
-      IO.eprintln s!"warning: records repository {r} skipped: only local directories are supported"
-    else
-      -- `records/` and `records` name the same directory.
-      let r := if r.endsWith "/" && r.length > 1 then (r.dropEnd 1).copy else r
-      out := out.push (root / r)
+    match localRecordDir? r with
+    | some d => out := out.push (root / d)
+    | none => IO.eprintln s!"warning: records repository {r} skipped: only local directories are supported"
   return out
+
+/-- The files of a records directory that hold records: visible `*.toml` files. Hidden files,
+such as the `.gitkeep` that `init` writes, are not records, for `status` and `validate` alike. -/
+def isRecordFile (fileName : String) : Bool :=
+  !fileName.startsWith "." && fileName.endsWith ".toml"
 
 /-- Parse every `*.toml` file of `dir`. Returns the records and, per bad file, its problems. -/
 def loadRecordDir (dir : System.FilePath) :
@@ -39,7 +47,7 @@ def loadRecordDir (dir : System.FilePath) :
   let mut good := #[]
   let mut bad := #[]
   for e in entries do
-    unless e.path.extension == some "toml" do continue
+    unless isRecordFile e.fileName do continue
     let bytes ← IO.FS.readBinFile e.path
     let hash := sha256OfBytes bytes
     let some text := String.fromUTF8? bytes
