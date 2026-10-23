@@ -96,13 +96,15 @@ def isGenerated (h : Walk.Hashed) (u : Name) : Bool :=
   u.isInternal || lastIsAux || taggedPrefix u.getPrefix ||
     (h.nodes[u]?.any fun n => n.fields.kind == "rec" || n.fields.kind == "ctor")
 
-/-- `status` warns when a tagged declaration of this library uses an untagged one of it. -/
-def untaggedWarnings (h : Walk.Hashed) (boundary : BoundaryList) (modules : Array String)
-    (owned : Std.HashSet String) : Array String := Id.run do
+/-- `status` warns when a tagged declaration of this library uses an untagged one of it.
+`closures` holds `Walk.closureOf` of each tagged declaration. -/
+def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name × Array Name))
+    (boundary : BoundaryList) (modules : Array String) (owned : Std.HashSet String) :
+    Array String := Id.run do
   let mut users : Std.HashMap Name (Array Name) := {}
   for (x, d) in h.boundary.zip boundary.declarations do
     unless modules.contains d.module do continue
-    for u in (Walk.closureOf h x).2 do
+    for u in (closures[x]?.map (·.2)).getD #[] do
       if owned.contains u.toString && !isGenerated h u then
         users := users.insert u ((users.getD u #[]).push x)
   let mut out := #[]
@@ -130,6 +132,8 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   let mut states : Std.HashMap Name String := {}
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
   let mut missingWarned : Std.HashSet String := {}
+  -- Each tagged declaration's closure, walked once: (cut, untagged constants).
+  let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
   for (n, d) in names.zip boundary.declarations do
     let node := new.nodes[n]!
     let claim := node.claim
@@ -161,7 +165,8 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
             missingWarned := missingWarned.insert last.exportHash
             IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash} is not in the store; causes unknown"
     let isThm := d.kind == "theorem"
-    let (cut, _) := Walk.closureOf new n
+    let (cut, untagged) := Walk.closureOf new n
+    closures := closures.insert n (cut, untagged)
     states := states.insert n state
     entries := entries.push (n, d, {
       module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
@@ -170,9 +175,10 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
       proof := { status := if isThm then "unchecked" else "n/a" }
       evidence := none
       taggedDeps := cut.map (·.toString)
-      closureSize := Walk.closureSize new n })
+      -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
+      closureSize := 1 + cut.size + untagged.size })
   -- Pass 2: blocked_by, following tagged dependencies transitively.
-  let cutOf (n : Name) : Array Name := (Walk.closureOf new n).1
+  let cutOf (n : Name) : Array Name := (closures[n]?.map (·.1)).getD #[]
   let mut decls := #[]
   for (n, _, sd) in entries do
     let mut seen : Std.HashSet Name := {}
@@ -194,7 +200,7 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
       if ← Store.has root ownedHash then
         let owned : Std.HashSet String :=
           (strLines (← Store.readString root ownedHash)).foldl (·.insert ·) {}
-        pure (untaggedWarnings new boundary cur.modules owned)
+        pure (untaggedWarnings new closures boundary cur.modules owned)
       else pure #[]
     | none => pure #[]
   return { report, badRecords := bad, warnings }

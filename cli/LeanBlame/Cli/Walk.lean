@@ -64,7 +64,7 @@ structure Hashed where
 def Hashed.isTagged (h : Hashed) (n : Name) : Bool := h.tagged.contains n
 
 def sortNames (xs : Array Name) : Array Name :=
-  xs.qsort fun a b => a.toString < b.toString
+  (xs.map fun n => (n.toString, n)).qsort (fun a b => a.1 < b.1) |>.map (·.2)
 
 def dedupNames (xs : Array Name) : Array Name := Id.run do
   let mut seen : Std.HashSet Name := {}
@@ -269,11 +269,6 @@ def closureOf (h : Hashed) (x : Name) : Array Name × Array Name := Id.run do
       untagged := untagged.insert d
       worklist := worklist ++ ((h.nodes[d]?.map (·.deps)).getD #[])
   return (sortNames cut.toArray, sortNames untagged.toArray)
-
-/-- Constants hashed into `claim(x)`, proofs excluded: `x`, its untagged closure, its cut. -/
-def closureSize (h : Hashed) (x : Name) : Nat :=
-  let (cut, untagged) := closureOf h x
-  1 + cut.size + untagged.size
 
 /--
 Why `claim(x)` differs between `old` and `new` (docs/03, "Why a hash moved"). Collects every
