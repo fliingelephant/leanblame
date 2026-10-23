@@ -173,6 +173,11 @@ structure Result where
 /-- Run the export in library root `root`. -/
 def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsGiven : Array String) :
     IO Result := do
+  -- docs/04: build using the mathlib cache, when the library depends on mathlib.
+  if (← manifestDeps root).any (·.1 == "mathlib") then
+    IO.eprintln "leanblame: lake exe cache get"
+    try runToStderr "lake" #["exe", "cache", "get"] root
+    catch e => IO.eprintln s!"warning: could not fetch the mathlib cache: {e}"
   IO.eprintln "leanblame: lake build"
   runToStderr "lake" #["build"] root
   let libs ← libraryNames root libsGiven

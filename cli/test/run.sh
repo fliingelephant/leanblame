@@ -164,6 +164,23 @@ grep -q "existing record deleted" "$work/validate.log" || fail "deletion not rep
 git checkout -q HEAD -- "$record_file"
 ok "validate refuses modified and deleted records"
 
+echo "== export refuses undocumented and unsafe tagged declarations"
+cat >> Sample/Basic.lean <<'EOF'
+
+namespace Sample
+@[trusted] def undocumented (n : Nat) : Nat := n
+/-- Unsafe code never reaches the kernel. -/
+@[trusted] unsafe def unsafeEnergy (n : Nat) : Nat := n
+end Sample
+EOF
+if "$lb" export >/dev/null 2>"$work/export.log"; then fail "export accepted bad tags"; fi
+grep -q "Sample.undocumented: tagged declarations need a docstring" "$work/export.log" \
+  || fail "missing docstring not reported: $(cat "$work/export.log")"
+grep -q "Sample.unsafeEnergy: \`unsafe\` declarations cannot be tagged" "$work/export.log" \
+  || fail "unsafe tag not reported: $(cat "$work/export.log")"
+git checkout -q -- Sample/Basic.lean
+ok "export refuses a tagged declaration without docstring and an unsafe one"
+
 echo "== stubs"
 for c in equiv release; do
   set +e; "$lb" "$c" >/dev/null 2>&1; code=$?; set -e
