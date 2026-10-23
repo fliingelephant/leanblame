@@ -15,9 +15,8 @@ Per tagged declaration X of the current boundary list:
 * blocked_by: tagged dependencies, followed transitively, that are not valid;
 * proof: `unchecked` for theorems (no axiom report in this slice), `n/a` otherwise.
 -/
+import LeanBlame.Cli.Cache
 import LeanBlame.Cli.Records
-import LeanBlame.Cli.Store
-import LeanBlame.Cli.Walk
 
 namespace LeanBlame.Status
 
@@ -33,20 +32,25 @@ def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.Export
   unless ← p.pathExists do fail s!"export {hash} is not in the store"
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk p .read))
 
-/-- Hashed exports, by (export, boundary list). `none` remembers a failure, reported by whoever
-saw it happen. -/
-abbrev Cache := IO.Ref (Std.HashMap (String × String) (Option Walk.Hashed))
+/-- Hashed exports of this run, by (export, boundary list). `none` remembers a failure, reported
+by whoever saw it happen. -/
+abbrev Memo := IO.Ref (Std.HashMap (String × String) (Option Walk.Hashed))
 
-/-- Export `exportHash` hashed against boundary list `boundary`, both from the object store; throws
-if that fails, and is `none` if it failed before. -/
-def hashed (root : System.FilePath) (cache : Cache) (exportHash boundary : String) :
+/-- Export `exportHash` hashed against boundary list `boundary`, from the local cache or else from
+the object store; throws if that fails, and is `none` if it failed before. -/
+def hashed (root : System.FilePath) (memo : Memo) (exportHash boundary : String) :
     IO (Option Walk.Hashed) := do
-  if let some h? := (← cache.get)[(exportHash, boundary)]? then return h?
-  cache.modify (·.insert (exportHash, boundary) none)
+  if let some h? := (← memo.get)[(exportHash, boundary)]? then return h?
+  memo.modify (·.insert (exportHash, boundary) none)
   let b ← loadBoundary root boundary
-  let h ← try Walk.hashExport (← loadExported root exportHash) b
-    catch e => fail s!"cannot hash export {exportHash}: {e}"
-  cache.modify (·.insert (exportHash, boundary) (some h))
+  let h ← match ← Cache.load? root exportHash boundary b with
+    | some h => pure h
+    | none =>
+      let h ← try Walk.hashExport (← loadExported root exportHash) b
+        catch e => fail s!"cannot hash export {exportHash}: {e}"
+      Cache.save root exportHash boundary h
+      pure h
+  memo.modify (·.insert (exportHash, boundary) (some h))
   return some h
 
 /--
@@ -104,15 +108,16 @@ def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name 
     out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate (xs.toList.map toString)}; tag it so it gets its own signer"
   return out
 
-def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : Option String) :
-    IO Result := do
+/-- The status report; `causes := false` leaves every `change` empty and hashes no other export. -/
+def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : Option String)
+    (causes := true) : IO Result := do
   let cur ← Store.readCurrent root
-  let cache : Cache ← IO.mkRef {}
-  let some new ← hashed root cache cur.exportHash cur.boundary | unreachable!
+  let memo : Memo ← IO.mkRef {}
+  let some new ← hashed root memo cur.exportHash cur.boundary | unreachable!
   let base ← match base? with
     | some a =>
       let a := if isHash a then a else mkHash a
-      hashed root cache a (← boundaryForExport root ledger a)
+      hashed root memo a (← boundaryForExport root ledger a)
     | none => pure none
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}
@@ -138,10 +143,10 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     | none =>
       -- The last live approval: the ledger's records are in (date, id) order.
       if let some (lastRec, last, lastClaim) := live.back? then
-        if state != "valid" && lastClaim != claim then
+        if causes && state != "valid" && lastClaim != claim then
           -- A record from elsewhere may name objects this store lacks, or that do not hash.
           try
-            if let some old ← hashed root cache last.exportHash last.boundary then
+            if let some old ← hashed root memo last.exportHash last.boundary then
               change := Walk.changes old new n
           catch e =>
             IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
@@ -217,7 +222,7 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
   let (all, _) ← loadAllRecords root cfg
   let ledger := Ledger.build cfg all
   let current? ← if (← (Store.currentPath root).pathExists) then
-      some <$> compute root cfg ledger none
+      some <$> compute root cfg ledger none (causes := false)
     else pure none
   let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let history := historyOf ledger name

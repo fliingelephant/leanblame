@@ -15,9 +15,8 @@ import Lake.Toml
 import Lake.Util.Git
 import LeanExport.Basic
 import LeanBlame.Attr
+import LeanBlame.Cli.Cache
 import LeanBlame.Cli.Schema
-import LeanBlame.Cli.Store
-import LeanBlame.Cli.Walk
 
 namespace LeanBlame.Export
 
@@ -243,6 +242,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   let exportHash ← Store.putFile root tmp (Sha256.toHex (← sha.get).finish)
   let boundary ← Store.putString root boundaryText
+  Cache.save root exportHash boundary hashed
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
     { exportHash, boundary, modules := mods.map toString, owned := ownedHash } commit
