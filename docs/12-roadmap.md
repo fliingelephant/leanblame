@@ -2,8 +2,8 @@
 
 ## Used as is
 
-`leanexport` and its parser, `lake check --paranoid`, `lake comparator`,
-mathlib cache, doc-gen4, OpenID Connect and OAuth libraries, git.
+`leanexport` and its parser, `leanchecker`, `lake comparator`, mathlib cache,
+doc-gen4, OpenID Connect and OAuth libraries, git.
 
 ## Copied
 
@@ -14,15 +14,15 @@ comparator's closure walk (`Compare.lean`, Apache-2.0). lean-eval's
 
 | # | Item | Size |
 |---|------|------|
-| 1 | `@[trusted]` in a Lake-free target; validators for the four schemas in [14-schemas.md](14-schemas.md) | small |
-| 2 | Record schema, validator, CI check that rejects edits to `records/` | small |
-| 3 | `cli export` and claim hash: canonical term printing, structure expansion, spec cut | medium |
-| 4 | `cli status` (states, flags, `--base`, `--json`) and `blame` | medium |
-| 5 | `cli release` with `lake check --paranoid` proof gate and manifest | small |
+| 1 | `@[trusted]` in a Lake-free target; `init`; the four schemas in [14-schemas.md](14-schemas.md) | small |
+| 2 | `validate`: schema, authority rules, no edits to existing records; CI job | small |
+| 3 | `export` and claim hash: canonical printing, proof erasure, group hashes, structure expansion, spec cut | medium |
+| 4 | `status` (states, flags, causes, `--base`, `--json`) and `blame` | medium |
+| 5 | `release`: `leanchecker` replay, axiom report, manifest | small |
 | 6 | Web page: doc-gen4 plus overlay | small |
-| 7 | Sign server: `local`, then `openreview`, `orcid`, `github` | medium |
-| 8 | `cli equiv`: `Old.` reconstruction from export, agent prompt, comparator check, object store | medium |
-| 9 | Blueprint adapter: `blueprint-manifest.json` → boundary list | small |
+| 7 | Sign server: `local`, then `openreview`, `orcid`, `github`; `sign --withdraw` | medium |
+| 8 | `equiv`: shared/duplicated `Old.` reconstruction, goal by kind, agent prompt, comparator check, object store | medium |
+| 9 | Blueprint adapter and manual list adapter → boundary list | small |
 | 10 | OpenPhysics: first tagged modules, conventions module, memo text | content |
 
 ## Later, if needed

@@ -25,11 +25,8 @@ Nothing else. Humans never read proof bodies. That is the kernel's job.
 
 ## Responsibility
 
-An agent cannot be blamed. It has no career, no institution, no future.
-Society distributes credit and blame over long time scales through people and
-the institutions that employ them. A verification system for science therefore
-needs a named human behind every trusted claim, and an institution behind the
-human.
+An agent cannot be blamed. Only people and institutions can. So every
+trusted claim needs a named human, and an institution behind the human.
 
 This is the same reason a licensed engineer stamps a drawing, an audit partner
 signs an opinion, and a Linux kernel patch carries `Reviewed-by:`.

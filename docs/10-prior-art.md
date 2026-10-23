@@ -44,6 +44,6 @@ Read on 2026-10-23 unless marked otherwise.
 | **IETF** | RFC | Never changes; `Updates`/`Obsoletes` | Reputational |
 | **Crossmark**, **Zenodo**, **Registered Reports** | Article version; protocol | Typed update links; one DOI per version; protocol accepted before results | Public retractions |
 
-What LeanBlame adds: a named human bound to a kernel-level claim hash, cut at
-signed dependencies, tracked across upstream versions, with machine-assisted
-but human-decided carry-over, for reviewers without GitHub accounts.
+What LeanBlame adds: a named human bound to a kernel-level claim hash. The
+hash cuts at signed dependencies. It is tracked across upstream versions.
+Agents help; the human decides. Reviewers do not need GitHub.

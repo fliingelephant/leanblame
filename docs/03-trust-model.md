@@ -1,11 +1,11 @@
 # 3. Trust model
 
-This is the heart of LeanBlame. Everything else serves it.
+Every other file depends on this one.
 
 ## The rule, three lines
 
 - You sign your own declaration fully: type, body, informal text.
-- For **tagged** declarations you use, you sign only their name, type, informal text. Not the body.
+- For **tagged** declarations you use, you sign only their name, kind, type, informal text. Not the body.
 - For **untagged** declarations you use, you sign all of it, recursively, until you reach a tagged one.
 
 "Tagged" means: on the boundary list. `@[trusted]` puts a declaration there;
@@ -15,8 +15,8 @@ hash.
 
 ## Why these three lines
 
-A signoff is a conditional claim: "X means what its docstring says, given
-that the declarations X uses mean what *their* docstrings say."
+A signoff is a conditional claim: "X means what its informal text says, given
+that the declarations X uses mean what *their* informal text says."
 
 To use Bob's `Hamiltonian`, Alice read its name, type and docstring. That is
 the spec. She never opened the body. Bob owns the body. So Alice's hash
@@ -34,89 +34,131 @@ Tagged but not yet signed still cuts. Alice's theorem then shows
 "blocked by Hamiltonian, unsigned." Her own signoff is unaffected.
 
 Any library that publishes a boundary list becomes "signed stuff" for its
-users automatically. "Untagged" is not a fixed list of libraries. Mathlib is
-untagged today because it publishes none.
+users automatically. `export` collects tags from imported libraries too.
+"Untagged" is not a fixed list of libraries. Mathlib is untagged today because
+it publishes none.
 
-A `structure` expands to its generated constants: the type, `mk`, the
-projections, `rec`, `noConfusion`. Tagging the structure tags them all. Their
-spec is their types plus the structure's informal text.
+## What is tagged when you tag a structure
+
+Tagging an `inductive` or `structure` tags the type, its constructors and its
+projections. Everything else Lean generates for it (`rec`, `casesOn`,
+`noConfusion`, `injEq`, `sizeOf`, …) is derived from those and stays untagged.
+Compiler auxiliaries (`match_n`, `proof_n`, `_unary`, …) are never tagged and
+never trigger the warning below.
 
 `status` warns when a tagged declaration uses an untagged declaration from the
 same library. Usually that declaration should be tagged too, so it gets its own
 signer instead of being re-owned by everyone who uses it.
+
+`unsafe` declarations cannot be tagged; they never reach the kernel. For
+`opaque` and `partial` the body is hidden from the kernel, so the hash covers
+kind, type and informal text only.
 
 ## What happens on change
 
 | Change | Who acts |
 |--------|----------|
 | Bob edits the body of `Hamiltonian`, spec unchanged | Bob re-signs. Alice's hash did not move. Her theorem is blocked until Bob signs, then valid. No click from Alice. |
-| Bob edits its type or docstring | Bob re-signs. Alice's hash moved. She re-signs too, shown the diff. |
-| Mathlib changes a definition under Alice | Alice's hash moved. `equiv` rebuilds the old meaning from the old export and tries to prove it equal to the new one. Alice clicks, or reads. See [06-versioning.md](06-versioning.md). |
+| Bob edits its type, kind or informal text | Bob re-signs. Alice's hash moved. She re-signs too, shown the diff. |
+| Mathlib changes a definition under Alice | Alice's hash moved. `equiv` rebuilds the old meaning and tries to prove it equal to the new one. Alice clicks, or reads. |
 | Mathlib rewrites a proof | Nothing. Proofs are not hashed. |
-| Bob withdraws his signoff | Alice's theorem is blocked until someone re-approves `Hamiltonian` at its current hash. Alice's record still stands. |
+| Someone removes the tag from a declaration Alice uses | Alice's hash moved: she now owns a body she never read. She reads it. `equiv` is not offered. |
+| Bob withdraws his signoff | Alice's theorem is blocked until `Hamiltonian` is approved again. Alice's record still stands. |
+
+## Why a hash moved
+
+`status` charges every hash change to one or more causes, by comparing the
+parts of the hash:
+
+| Cause | What moved | Machine help |
+|-------|------------|--------------|
+| `own-text` | your informal text | none, read it |
+| `own-body` | your type or body | none, read it |
+| `dep-spec` | name, kind, type or text of a tagged dependency | the diff is shown |
+| `cut-moved` | a dependency gained or lost its tag | none, read it |
+| `untagged` | something untagged underneath changed | `equiv` may prove meaning unchanged |
+
+The `equiv-proven` flag is set only when `untagged` is the sole cause and the
+proof succeeded.
 
 ## Validity
 
-Per tagged constant X, `status` computes:
+Per tagged declaration X, `status` computes:
 
-- **own state**: `valid` if a live approve record carries X's current hash;
+- **state**: `valid` if a live approve record carries X's current hash;
   `outdated` if live records exist but none match; `unsigned` if none exist.
-  A record is live if no withdraw record points at it.
-- **flags**: `equiv-proven` (an `old = new` proof exists for the outdated
-  hash), `withdrawn` (a record existed and was withdrawn), `blocked-by [Y…]`
-  (tagged dependencies whose own state is not `valid`, recursively).
+- **flags**: `equiv-proven`, `withdrawn` (a record for X was withdrawn),
+  `blocked-by [Y…]` (tagged dependencies whose state is not `valid`,
+  recursively).
 
-A library release requires every tagged constant `valid`. That implies no
-blocks.
+A record is live if no withdraw record by the same signer points at it. See
+[05-records.md](05-records.md) for who may do what.
 
-Validity is relative to a trust policy: which records repositories you
-accept. The hashes are not. Hashes depend only on the code.
+A release requires every tagged declaration `valid`, which implies no blocks.
+
+Validity is relative to a trust policy: which records repositories the library
+accepts and which records it excludes. Hashes are not. Hashes depend only on
+the code.
 
 ## The hash, precisely
 
-For a constant `c`, computed from the parsed export plus the boundary list:
+Rule: hash everything that changes meaning, nothing else.
+
+**In:** kind, name, ordered universe parameters, type, body of a def with
+proof subterms erased, safety (`partial`, `opaque`), informal text (tagged
+declarations only, Unicode-normalized and trimmed).
+
+**Out:** theorem proofs, proof subterms inside bodies, binder names, argument
+implicitness, kernel height hints, recursor rules. None of these change
+meaning; all of them churn on toolchain bumps.
 
 ```
-own(c)   = H(kind, name, type, body-unless-theorem, informal-text)
-spec(c)  = H(name, type, informal-text)
+own(c)   = H(kind, name, uparams, type, body-with-proofs-erased, safety,
+             informal-text-if-tagged)
+spec(c)  = H(kind, name, uparams, type, informal-text)
 claim(c) = H(own(c), sorted over direct dependencies d of c:
                tagged(d)   -> ("spec", spec(d))
                untagged(d) -> ("full", claim(d)))
 ```
 
-Constants are referenced by name, never by export index. Terms are printed
-canonically from the parsed export. Dependencies are sorted by name. Renaming
-a dependency changes the hash; `equiv` proves such cases in one line.
+Terms are printed canonically from the parsed export with de Bruijn indices;
+constants by name, never by export index; universe parameters by position.
+Dependencies of a theorem are those of its type only.
 
-A record stores `claim(c)` for each constant it covers, plus the library
-commit, toolchain and dependency commits for reproducibility.
+Cycles: an inductive type and its constructors reference each other, and
+mutual definitions do too. Such a group is hashed as one unit; each member's
+hash is the group hash plus its name.
+
+A record stores `claim(c)` for each constant it covers, plus the export hash,
+the boundary-list hash, the library commit, toolchain and dependency commits.
 
 ## Blame
 
-- **Alice** owns: her declaration's text and docstring, her reading of her
+- **Alice** owns: her declaration's text and informal text, her reading of her
   dependencies' specs, and every untagged declaration under hers.
 - **Bob** owns: his body matching his spec. When he re-signs after a body
   change, the page shows him everything that depends on `Hamiltonian`.
 - **A spec change** is owned by Bob (new spec) and by every user who
   re-signs against it.
+- **Who wrote the code** is a separate trail: the git author. An agent may
+  write anything. Only a human signs.
 
-No meaning change passes without a named person re-signing something. The
-one thing hashing cannot catch is an original signoff that was wrong. That is
-what withdrawals and disputes are for.
+No meaning change passes without a named person re-signing something. The one
+thing hashing cannot catch is an original signoff that was wrong. That is what
+withdrawals are for.
 
 ## Rejected alternatives
 
 - **Full-closure hash.** Alice's hash includes Bob's body. Bob fixes a typo
-  in the body, twenty downstream signers re-click. Contradicts "trust the
-  signer, don't re-read."
+  in the body, twenty downstream signers re-click.
 - **Names only for tagged dependencies.** Bob rewrites his docstring to mean
-  something else. Alice is never told. Hole.
+  something else. Alice is never told.
 - **Trust people, no hashes.** Nobody is told anything changed.
 
 ## Known costs
 
 - The informal text is the spec. Vague text is a vague claim. Tagged
-  declarations must have some.
+  declarations without informal text are an error.
 - A wording-only edit of that text cascades re-signs. The page makes that a
   one-click diff.
 - Mathlib definition refactors cascade. `equiv` catches most. Fewer upstream

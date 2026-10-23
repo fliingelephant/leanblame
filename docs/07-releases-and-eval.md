@@ -2,25 +2,38 @@
 
 ## Stable and dev
 
-- **`main`**: grows every day. New declarations land here.
-- **Release tag `R`**: a frozen snapshot. Fully signed and kernel-checked.
+- **`main`**: grows every day.
+- **Release tag**, e.g. `2027.04`, patches `2027.04.1`: a frozen snapshot,
+  fully signed and kernel-checked.
 
 Development never stops for a release.
 
-## A release is a fully signed, fully checked snapshot
+## What `release` does
 
-`release` does two things and fails if either fails:
+Two gates, then a report.
 
-1. **Signoff gate.** Every tagged declaration is `valid`.
-2. **Proof gate.** `lake check --paranoid` with the library's permitted axioms.
-   Each theorem is recorded as **proven** (axioms listed) or **open** (`sorry`).
-   A theorem whose informal text claims a result but is open fails the release.
+1. **Signoff gate.** Every tagged declaration is `valid`. Fails otherwise.
+2. **Kernel gate.** `leanchecker --from-export` replays the whole export. Fails
+   on a kernel error.
+3. **Axiom report.** From the export, per theorem, the axioms it rests on:
+   - only the three standard axioms: **proven**;
+   - includes `sorryAx`: **open**;
+   - includes a tagged, signed `axiom`: **proven relative to** it, listed;
+   - anything else: **fail**. The three standard axioms plus tagged, signed
+     axioms are the whole permitted set. No config.
 
-Manifest fields in [14-schemas.md](14-schemas.md).
+`release` never fails on open theorems. It reports how many are proven and
+how many are open, by name. A reader who wants only proven results filters the
+manifest. Whether a declaration claims a theorem or a conjecture is in its
+informal text, which its signer signed.
 
-**Patch releases** (`R.1`, `R.2`): fixes to existing declarations, dependency
-bumps whose changes passed `equiv` and were re-approved, withdrawals. No new
-declarations.
+Manifest fields in [14-schemas.md](14-schemas.md). The axiom report is bound
+to the export hash it was computed on; `status` shows `unchecked` for any
+export without one.
+
+**Patch releases**: fixes to existing declarations, dependency bumps whose
+changes were re-approved. A withdrawal makes a release impossible until the
+declaration is approved again or removed.
 
 **Downstream** pins a release. Mathlib tags one commit per Lean release but has
 no version scheme of its own; a LeanBlame release is what gives users
@@ -39,7 +52,7 @@ Question: how good is the library at expressing new results in its field?
    |--------|-----|
    | New declarations needed | Zero is perfect. The missing ones are the to-add list. |
    | Size of what the reviewer must read | Smaller means better abstractions. |
-   | Closure size | Number of constants under the statement. `status` reports it. |
+   | Closure size, proofs excluded | `status` reports it. |
    | Review minutes | Actual human time to sign. The real objective. |
    | Later withdrawals | Did the library prevent mis-formalization? |
    | Signoff survival | How many signoffs stayed valid across upstream bumps. |

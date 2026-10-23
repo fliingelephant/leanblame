@@ -6,8 +6,9 @@ Seven terms. Everything else is built from these. The trust model itself is
 ## Trusted boundary
 
 The declarations a human must read for a result to mean anything:
-definitions, structures, axioms, theorem statements, instances, notation and
-conventions, plus the imports and checker configuration that fix their meaning.
+definitions, structures, axioms, theorem statements, instances, conventions
+written as declarations, plus the imports that fix their meaning. Notation is
+surface syntax and is not on the boundary.
 
 ## Boundary list
 
@@ -38,8 +39,9 @@ accepts `--challenge-from-export` and `--solution-from-export`.
 What comparator cannot check: that the Challenge means what you intended. The
 Lean reference manual says this explicitly.
 
-LeanBlame uses comparator for one job: checking proofs, including the
-`old = new` proofs produced by `equiv`. Hashing is LeanBlame's own walk.
+LeanBlame uses comparator for one job: checking the `old = new` proofs
+produced by `equiv`. The library's own proofs are replayed by `leanchecker`.
+Hashing is LeanBlame's own walk.
 
 ## Claim hash
 
@@ -59,8 +61,8 @@ the result matters (nobody's job here).
 
 If your module uses a tagged declaration someone already signed, you read its
 name, type and informal text, not its body. You trust the body through its
-signer. Their name is on it. Each body is read carefully once, by a named
-person, and reused many times.
+signer. Their name is on it. Each body is read once, by a named person.
+Everyone else reuses that reading.
 
 ## Append-only
 

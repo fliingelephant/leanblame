@@ -15,8 +15,9 @@ Approximate.
 | nanoda / con-ron / con-leche, 4 threads | 1.3–4.2 / 1.4–4.4 / 2.5–8.7 s |
 | Replay of only the new constants (prototype) | 12–19 ms |
 
-The closure is 13k–43k mathlib constants. Exporting, parsing and replaying it is
-60–90% of a 25–65 s check. The submitted proof itself is about 1 s. The AXLE
+The closure with proofs is 13k–43k mathlib constants; without proofs, which is
+what the claim hash walks, about 3,400 for the same statement. Exporting,
+parsing and replaying the full closure is 60–90% of a 25–65 s check. The submitted proof itself is about 1 s. The AXLE
 paper reports a comparator median of 95.7 s end to end, with 62 of 1000 runs
 hitting a 600 s timeout.
 
@@ -27,7 +28,7 @@ hitting a 600 s timeout.
 - **Per-check overlay.** Comparator Live's pattern: prebuilt project mounted
   read-only, each check writes to its own layer.
 - **Parallel checkers.** Run the external checkers concurrently. con-ron and
-  nanoda were 6–15× faster than the official kernel in the agent's runs.
+  nanoda were roughly 2–6× faster than the official kernel in the runs above.
 
 ## Fast checkers are filters, not gates
 
@@ -38,7 +39,7 @@ turned off. Kimina, the Lean REPL and Pantograph with saved environments share
 this weakness.
 
 Use them to reject bad proofs early. Never accept on them. The kernel, through
-`lake check` and `lake comparator`, stays the gate.
+`leanchecker` and `lake comparator`, stays the gate.
 
 ## Delta replay (later, if volume demands)
 

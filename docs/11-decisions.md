@@ -10,6 +10,29 @@ Full text: [03-trust-model.md](03-trust-model.md). Rejected: full-closure hash
 (re-sign on body changes you never read); names-only (not told when the
 informal text changes meaning).
 
+### Three kinds of authority
+
+Over a record: its signer only. Over a library: its maintainers via git, who
+tag, choose records repos, exclude records, release. Over identity: the login
+provider and the hosting institution. Nobody edits another person's record;
+a maintainer excludes it. Who wrote a declaration (git author, possibly an
+agent) is separate from who signed it (always a human).
+
+### What goes into the hash
+
+Everything that changes meaning, nothing else. In: kind, name, universe
+parameters, type, body with proof subterms erased, safety, informal text of
+tagged declarations. Out: proofs, binder names, implicitness, kernel hints,
+recursor rules. Cycles hashed as groups. `unsafe` cannot be tagged.
+
+### `equiv` says why, and only for untagged causes
+
+A hash move is charged to causes: own text, own body, dependency spec, cut
+moved, untagged. `equiv` runs only when `untagged` is the sole cause, shares
+unchanged constants, duplicates changed ones under `Old.`, and states equality
+for same-typed values or `↔` for statements. Everything else is read by a
+human.
+
 ### Humans never read proofs
 
 The kernel checks them. Human reading adds nothing and costs the scarcest
@@ -57,15 +80,29 @@ The signer of the module where the clash first appears owns that module. The
 later signer owns compatibility with the conventions module. Nobody is blamed
 retroactively.
 
-### Proof gate
+### Kernel gate and axiom report
 
-`release` runs `lake check --paranoid` with the permitted axioms and records
-proven/open per theorem. Needed because proofs are outside the hash by design.
+`lake check` hard-codes the three standard axioms and fails on `sorry`, so it
+cannot serve a library with open theorems or signed axioms. `release` replays
+with `leanchecker` and computes the axiom report itself. Permitted axioms are
+the standard three plus tagged, signed axioms. Open theorems are reported,
+never a failure. No axiom config.
 
 ### `equiv` rebuilds old meaning from the old export
 
 Never from old source, which re-elaborates against new mathlib and makes
-`old = new` trivially true.
+`old = new` trivially true. Records store the export and boundary hashes so
+the old meaning can be found.
+
+### Notation is not on the boundary
+
+It never reaches the kernel. Conventions are declarations. The sign server
+shows types with notation off.
+
+### Formats and commands
+
+TOML for records and config, JSON for machine output. Eight commands: `init`,
+`export`, `status`, `blame`, `equiv`, `sign`, `validate`, `release`.
 
 ### No forks
 

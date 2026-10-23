@@ -25,8 +25,8 @@ One-paragraph summary:
 > declarations, at which kernel-level hash, and when. Trust flows through
 > people like `git blame`: you sign your own declaration fully, you sign only
 > the name, type and informal text of signed declarations you use, and you sign
-> everything of unsigned ones. When upstream changes, `status`
-> names the changed constant, `equiv` has an agent try to prove old equals
-> new, and a human decides whether the old signoff carries. Records are never
-> deleted. Three parts: a Lean CLI, signoff records in git, a web sign server
-> and page.
+> everything of unsigned ones. When upstream changes, `status` says what moved
+> and why. If only unsigned code underneath changed, `equiv` has an agent try
+> to prove the meaning is the same, and a human approves the new hash with one
+> click. Records are never deleted. Three parts: a Lean CLI, signoff records
+> in git, a web sign server and page.

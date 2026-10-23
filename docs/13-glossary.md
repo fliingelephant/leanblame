@@ -16,7 +16,11 @@
 | **live record** | An approve record no withdraw points at. |
 | **blocked** | Your hash is fine but a tagged dependency isn't valid. Wait for its signer. |
 | **`equiv`** | Command that rebuilds an old meaning and asks an agent to prove it equal to the new one. |
-| **proof gate** | `lake check --paranoid`: kernel replay plus axiom check of the whole library. |
+| **kernel gate** | `leanchecker --from-export` replaying the whole export inside `release`. |
+| **axiom report** | Per theorem, the axioms it rests on: proven, open (`sorryAx`), or relative to a signed axiom. |
+| **cause** | Why a hash moved: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`. |
+| **group hash** | Hash of a cycle (an inductive with its constructors, or mutual definitions) as one unit. |
+| **exclude** | A maintainer's decision in `leanblame.toml` to stop counting a record. The dispute mechanism. |
 | **comparator** | Lean FRO's checker for untrusted proofs against a trusted statement file. |
 | **nanoda, con-ron, con-leche** | Independent re-implementations of the Lean kernel, used as extra checkers. |
 | **AXLE, Kimina, Pantograph** | Fast proof-check services that trust the elaborator. Filters, not gates. |
@@ -26,4 +30,3 @@
 | **OpenID Connect / OAuth 2.0** | Login protocols. OpenReview and ORCID speak the first; GitHub only the second. |
 | **ORCID / ROR** | Persistent ids for researchers / institutions. |
 | **Sigstore** | Keyless cryptographic signing with an email login. Parked. |
-| **RSS** | Resident memory of a process. |
