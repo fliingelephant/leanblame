@@ -7,12 +7,24 @@ Checks every file in the records directories:
 * the file name is the SHA-256 of the file bytes (`<hex>.toml`);
 * authority: `refers_to` names an approve record, the withdraw's signer equals that
   record's signer, and listed constants are in that record;
-* with `--base-ref REF`: no file under the records directories was modified or
-  deleted relative to the merge base of REF and the work tree. Only additions pass.
+* with `--base-ref REF`: no record file in the records directories of the merge
+  base of REF or of the work tree was modified or deleted since that merge base.
+  Only additions pass.
 -/
 import LeanBlame.Cli.Records
 
 namespace LeanBlame.Validate
+
+/-- `leanblame.toml` at revision `rev`, if it is there and parses. -/
+def configAt (root : System.FilePath) (rev : String) : IO (Option Config) := do
+  let out ← IO.Process.output
+    { cmd := "git", args := #["show", s!"{rev}:./{Config.fileName}"], cwd := root }
+  if out.exitCode != 0 then return none
+  match ← Config.parse out.stdout s!"{rev}:{Config.fileName}" with
+  | .ok cfg => return some cfg
+  | .error e =>
+    IO.eprintln s!"warning: {Config.fileName} at {rev} does not parse, so only today's records directories are checked: {e}"
+    return none
 
 def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   let cfg ← Config.load root
@@ -58,8 +70,12 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   -- Append-only.
   if let some baseRef := baseRef? then
     let mb := strTrim (← runCapture "git" #["merge-base", baseRef, "HEAD"] root)
-    let rel := cfg.records.filterMap localRecordDir?
-    let out ← runCapture "git" (#["diff", "--name-status", "--no-renames", mb, "--"] ++ rel) root
+    -- The merge base's records directories count too: a pull request that renames the
+    -- directory in leanblame.toml must not hide a deletion.
+    let baseDirs := ((← configAt root mb).map (·.records)).getD #[]
+    let dirs := (baseDirs ++ cfg.records).filterMap localRecordDir? |>.foldl
+      (fun acc d => if acc.contains d then acc else acc.push d) #[]
+    let out ← runCapture "git" (#["diff", "--name-status", "--no-renames", mb, "--"] ++ dirs) root
     for line in strLines out do
       let line := strTrim line
       if line.isEmpty then continue

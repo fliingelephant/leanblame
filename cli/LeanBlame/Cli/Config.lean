@@ -70,20 +70,22 @@ def Config.ofTable (t : Lake.Toml.Table) : Except String Config := do
     | key, _ => throw s!"unknown or ill-typed key `{key}`"
   return cfg
 
+/-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/
+def Config.parse (contents path : String) : IO (Except String Config) := do
+  let ictx := Lean.Parser.mkInputContext contents path
+  match ← (Lake.Toml.loadToml ictx).toBaseIO with
+  | .error log =>
+    let msgs ← log.toList.mapM fun m => m.toString
+    return .error ("\n".intercalate msgs)
+  | .ok t => return Config.ofTable t
+
 def Config.load (root : System.FilePath) : IO Config := do
   let path := root / Config.fileName
   unless ← path.pathExists do
     fail s!"{path} not found; run `leanblame init` first"
-  let contents ← IO.FS.readFile path
-  let ictx := Lean.Parser.mkInputContext contents path.toString
-  match ← (Lake.Toml.loadToml ictx).toBaseIO with
-  | .error log =>
-    let msgs ← log.toList.mapM fun m => m.toString
-    fail s!"{path}: {"\n".intercalate msgs}"
-  | .ok t =>
-    match Config.ofTable t with
-    | .ok cfg => return cfg
-    | .error e => fail s!"{path}: {e}"
+  match ← Config.parse (← IO.FS.readFile path) path.toString with
+  | .ok cfg => return cfg
+  | .error e => fail s!"{path}: {e}"
 
 def Config.allows (cfg : Config) (signer : String) : Bool :=
   match cfg.allowedSigners with

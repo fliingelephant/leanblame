@@ -177,6 +177,16 @@ if grep -q "notes" "$work/status.err"; then fail "status read a hidden file: $(c
 rm records/.notes.toml
 git checkout -q HEAD -- records/.gitkeep
 ok "hidden files in records/ are not records: .gitkeep may go, .notes.toml is ignored"
+# Renaming the records directory in leanblame.toml must not hide a deletion.
+git mv records r
+sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
+grep -q '^records = \["r/"\]' leanblame.toml || fail "test setup: records directory not renamed"
+git rm -q -f "r/${basic_record#sha256:}.toml"
+if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a renamed records directory hid a deletion"; fi
+grep -q "records/${basic_record#sha256:}.toml: existing record deleted" "$work/validate.log" \
+  || fail "deletion under the old records directory not reported: $(cat "$work/validate.log")"
+git reset -q --hard HEAD
+ok "validate checks the merge base's records directories too"
 
 echo "== export refuses undocumented and unsafe tagged declarations"
 cat >> Sample/Basic.lean <<'EOF'

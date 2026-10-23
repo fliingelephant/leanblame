@@ -11,6 +11,9 @@ namespace LeanBlame.Sign
 /-- The CI job `init` writes: `validate` on every pull request. -/
 def ciWorkflow : String :=
   "# Written by `leanblame init`. Make this a required check.
+# A pull request runs this job as the pull request changed it, with its own lakefile and
+# leanblame.toml. Protect .github/, the lakefile, lake-manifest.json and leanblame.toml
+# with CODEOWNERS and required reviews.
 name: leanblame validate
 on: pull_request
 jobs:
