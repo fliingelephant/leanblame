@@ -26,6 +26,7 @@ cp -R "$here/Sample/Sample" "$here/Sample/Sample.lean" "$here/Sample/lean-toolch
 # Point the dependency on the attribute at this checkout.
 sed "s|path = \"../..\"|path = \"$cli\"|" "$here/Sample/lakefile.toml" > "$work/lakefile.toml"
 cd "$work"
+printf '/.lake/\n' > .gitignore
 git init -q
 git config user.name "LeanBlame test"
 git config user.email "test@example.invalid"
@@ -48,6 +49,7 @@ for f in leanblame.toml records/.gitkeep .github/workflows/leanblame.yml; do
   [[ -e "$f" ]] || fail "init did not create $f"
 done
 grep -qx ".leanblame/" .gitignore || fail "init did not ignore .leanblame/"
+grep -qx "/.lake/" .gitignore || fail "init dropped the existing .gitignore entries"
 ok "init created leanblame.toml, records/, the CI job, .gitignore entry"
 commit "sample library"
 
