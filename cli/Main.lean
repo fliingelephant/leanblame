@@ -2,6 +2,7 @@
 `leanblame`: command-line entry point (docs/04-architecture.md, eight commands).
 -/
 import LeanBlame.Cli.Export
+import LeanBlame.Cli.Status
 
 open LeanBlame
 
@@ -65,11 +66,23 @@ def cmdExport (args : List String) : IO UInt32 := do
   IO.println s!"boundary {r.boundary}"
   return 0
 
+def cmdStatus (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #["--base"] #["--json"] args)
+  unless a.positional.isEmpty do throw (IO.userError "status takes no positional arguments")
+  Status.run (← IO.currentDir) (a.get? "--base") (a.has "--json")
+
+def cmdBlame (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #[] #[] args)
+  let #[name] := a.positional | throw (IO.userError "usage: leanblame blame NAME")
+  Status.blame (← IO.currentDir) name
+
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0
   | "export" :: args => cmdExport args
+  | "status" :: args => cmdStatus args
+  | "blame" :: args => cmdBlame args
   | cmd :: _ =>
-    if #["init", "status", "blame", "equiv", "sign", "validate", "release"].contains cmd then
+    if #["init", "equiv", "sign", "validate", "release"].contains cmd then
       notImplemented cmd
     else do
       IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
