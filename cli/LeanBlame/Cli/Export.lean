@@ -208,11 +208,14 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
       pure (b.toOJson.renderFile, b)
   -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
+  -- Every constant of the library's own modules, for `status`'s untagged-dependency warning.
+  let mut owned : Array String := #[]
   for (n, _) in env.constants.map₁.toList do
-    if n.isInternal then continue
     if let some idx := env.getModuleIdxFor? n then
-      if modSet.contains env.header.moduleNames[idx.toNat]! && roundTrips n then
-        roots := roots.push n
+      if modSet.contains env.header.moduleNames[idx.toNat]! then
+        owned := owned.push n.toString
+        if !n.isInternal && roundTrips n then
+          roots := roots.push n
   for d in boundaryList.declarations do
     let some n := Syntax.decodeNameLit ("`" ++ d.name) | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name cannot be passed to leanexport"
@@ -231,7 +234,9 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     | .error e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   let exportHash ← Store.putFile root tmp
   let boundary ← Store.putString root boundaryText
-  Store.writeCurrent root { exportHash, boundary, modules := mods.map toString } commit
+  let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
+  Store.writeCurrent root
+    { exportHash, boundary, modules := mods.map toString, owned := some ownedHash } commit
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

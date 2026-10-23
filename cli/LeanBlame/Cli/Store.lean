@@ -53,17 +53,22 @@ def readString (root : System.FilePath) (hash : String) : IO String := do
     fail s!"object {hash} is not in the store {objectsDir root}"
   IO.FS.readFile p
 
-/-- The export and boundary list of the last `export`, and the library's own modules. -/
+/-- The export and boundary list of the last `export`, the library's own modules, and the
+object listing the constants defined in them. -/
 structure Current where
   exportHash : String
   boundary : String
   modules : Array String := #[]
+  owned : Option String := none
 
 def currentPath (root : System.FilePath) : System.FilePath := dir root / "current"
 
 def writeCurrent (root : System.FilePath) (c : Current) (commit : String) : IO Unit := do
+  let owned := match c.owned with
+    | some h => s!"owned {h}\n"
+    | none => ""
   writeFileMkdirs (currentPath root)
-    s!"export {c.exportHash}\nboundary {c.boundary}\nmodules {" ".intercalate c.modules.toList}\n"
+    (s!"export {c.exportHash}\nboundary {c.boundary}\nmodules {" ".intercalate c.modules.toList}\n" ++ owned)
   let log := dir root / "exports"
   let line := s!"{c.exportHash} {c.boundary} {commit}\n"
   let old := (← readFileIfExists log).getD ""
@@ -76,14 +81,16 @@ def readCurrent (root : System.FilePath) : IO Current := do
   let mut e := ""
   let mut b := ""
   let mut mods := #[]
+  let mut owned := none
   for l in strLines text do
     match l.splitOn " " with
     | ["export", h] => e := h
     | ["boundary", h] => b := h
+    | ["owned", h] => owned := some h
     | "modules" :: ms => mods := (ms.filter (· != "")).toArray
     | _ => pure ()
   unless isHash e && isHash b do fail s!"{currentPath root} is malformed; run `leanblame export`"
-  return { exportHash := e, boundary := b, modules := mods }
+  return { exportHash := e, boundary := b, modules := mods, owned }
 
 /-- The boundary list exported together with `exportHash`, from the local export log. -/
 def boundaryForExport? (root : System.FilePath) (exportHash : String) : IO (Option String) := do

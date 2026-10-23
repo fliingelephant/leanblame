@@ -31,8 +31,8 @@ git config user.name "LeanBlame test"
 git config user.email "test@example.invalid"
 commit() { git add -A && git commit -qm "$1"; }
 
-# Run a leanblame command; its stdout goes to $out.
-run() { out="$("$lb" "$@")"; }
+# Run a leanblame command; its stdout goes to $out, its stderr to stderr.log.
+run() { out="$("$lb" "$@" 2>>"$work/stderr.log")" || { tail -20 "$work/stderr.log" >&2; fail "leanblame $*"; }; }
 # Assert that the status line of a declaration is exactly the given text.
 expect_line() {
   local name="$1" want="$2" got
@@ -66,11 +66,15 @@ ok "validate: $out"
 commit "first signoff"
 
 echo "== status: everything valid"
-run status
+out="$("$lb" status 2>"$work/status.err")"
 for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
          Sample.energy Sample.energy_even Sample.pointEnergy; do
   expect_line "$n" "$n valid"
 done
+want="warning: untagged Sample.double of this library is used by tagged Sample.energy; tag it so it gets its own signer"
+grep -qxF "$want" "$work/status.err" || fail "no untagged-dependency warning: $(cat "$work/status.err")"
+[[ "$(grep -c '^warning' "$work/status.err")" == 1 ]] || fail "unexpected warnings: $(cat "$work/status.err")"
+ok "status warns that tagged Sample.energy uses untagged Sample.double, and nothing else"
 run status --json
 python3 - "$out" <<'PY' || fail "status --json does not match docs/14"
 import json, sys

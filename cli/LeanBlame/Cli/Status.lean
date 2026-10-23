@@ -74,6 +74,42 @@ structure Result where
   report : StatusReport
   /-- Records that did not parse: path and problems. -/
   badRecords : Array (System.FilePath × Array String)
+  /-- Untagged declarations of this library used by tagged ones (docs/03). -/
+  warnings : Array String := #[]
+
+/--
+Constants Lean generates, which are never tagged and never warned about (docs/03): compiler
+auxiliaries (`match_n`, `_proof_n`, `_unary`, …), recursors, constructors, and everything
+derived from a tagged declaration (`T.casesOn`, `T.mk.injEq`, `f.match_1`, …).
+-/
+def isGenerated (h : Walk.Hashed) (u : Name) : Bool :=
+  let suffixes := #["rec", "recOn", "casesOn", "brecOn", "binductionOn", "below", "ibelow",
+    "noConfusion", "noConfusionType", "injEq", "inj", "sizeOf_spec", "ctorIdx", "toCtorIdx",
+    "eq_def", "induct", "mutual_induct", "elim"]
+  let lastIsAux := match u with
+    | .str _ s => s.startsWith "match_" || s.startsWith "proof_" || s.startsWith "eq_" ||
+        suffixes.contains s
+    | _ => true
+  let rec taggedPrefix : Name → Bool
+    | .anonymous => false
+    | p@(.str q _) | p@(.num q _) => h.isTagged p || taggedPrefix q
+  u.isInternal || lastIsAux || taggedPrefix u.getPrefix ||
+    (h.nodes[u]?.any fun n => n.fields.kind == "rec" || n.fields.kind == "ctor")
+
+/-- `status` warns when a tagged declaration of this library uses an untagged one of it. -/
+def untaggedWarnings (h : Walk.Hashed) (boundary : BoundaryList) (modules : Array String)
+    (owned : Std.HashSet String) : Array String := Id.run do
+  let mut users : Std.HashMap Name (Array Name) := {}
+  for (x, d) in h.boundary.zip boundary.declarations do
+    unless modules.contains d.module do continue
+    for u in (Walk.closureOf h x).2 do
+      if owned.contains u.toString && !isGenerated h u then
+        users := users.insert u ((users.getD u #[]).push x)
+  let mut out := #[]
+  for u in Walk.sortNames (users.fold (init := #[]) fun acc u _ => acc.push u) do
+    let xs := Walk.sortNames (users.getD u #[])
+    out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate (xs.toList.map toString)}; tag it so it gets its own signer"
+  return out
 
 def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   let cfg ← Config.load root
@@ -153,7 +189,15 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   let report : StatusReport := {
     library := boundary.library, commit := boundary.commit, exportHash := cur.exportHash
     generated := ← UtcTime.now, declarations := decls }
-  return { report, badRecords := bad }
+  let warnings ← match cur.owned with
+    | some ownedHash =>
+      if ← Store.has root ownedHash then
+        let owned : Std.HashSet String :=
+          (strLines (← Store.readString root ownedHash)).foldl (·.insert ·) {}
+        pure (untaggedWarnings new boundary cur.modules owned)
+      else pure #[]
+    | none => pure #[]
+  return { report, badRecords := bad, warnings }
 
 /-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
 def textLine (name : String) (d : StatusDecl) : String :=
@@ -169,6 +213,7 @@ def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt
   let r ← compute root base?
   for (p, _) in r.badRecords do
     IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
+  for w in r.warnings do IO.eprintln w
   let text := r.report.toOJson.renderFile
   -- Every run leaves a log in the object store.
   let logHash ← Store.putString root text
