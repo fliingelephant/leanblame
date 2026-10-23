@@ -229,9 +229,8 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     (env := #[("LEAN_PATH", some leanPath)])
   -- Compute every claim hash now, so that problems surface at export time.
   let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
-  let hashed ← match Walk.hashExport exported boundaryList with
-    | .ok h => pure h
-    | .error e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
+  let hashed ← try Walk.hashExport exported boundaryList
+    catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   let exportHash ← Store.putFile root tmp
   let boundary ← Store.putString root boundaryText
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")

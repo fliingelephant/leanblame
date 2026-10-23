@@ -20,6 +20,7 @@ a declaration and charges it to a cause.
 import LeanExport.Parse
 import Lean.Util.FoldConsts
 import LeanBlame.Cli.Canon
+import LeanBlame.Cli.Load
 import LeanBlame.Cli.Schema
 
 namespace LeanBlame.Walk
@@ -87,7 +88,8 @@ structure State where
   checked : Std.HashSet Name
   nodes : Std.HashMap Name Node := {}
 
-abbrev HashM := ReaderT Context <| StateT State <| Except String
+/-- One `Meta` state for the whole export, so its caches serve every constant. -/
+abbrev HashM := ReaderT Context <| StateRefT State MetaM
 
 def addWorklist (n : Name) : HashM Unit := do
   if !(← get).checked.contains n then
@@ -103,7 +105,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
   let ctx ← read
   let informal := ctx.tagged[info.name]?
   if info.isUnsafe then
-    throw s!"'{info.name}' is unsafe: unsafe declarations cannot be tagged or hashed"
+    throwError s!"'{info.name}' is unsafe: unsafe declarations cannot be tagged or hashed"
   let ups := info.levelParams
   let typeHash := Canon.exprHash ups info.type
   let mut deps := info.type.getUsedConstants
@@ -113,7 +115,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
   | .defnInfo d =>
     match d.safety with
     | .safe =>
-      let body := Erase.eraseBody ctx.exported.constMap d.value
+      let body ← Erase.eraseBody d.value
       bodyHash := some (Canon.exprHash ups body)
       deps := deps ++ body.getUsedConstants
     | .partial => safety := "partial"
@@ -144,7 +146,7 @@ partial def loop : HashM Unit := do
     loop
   else
     let some info := (← read).exported.constMap[target]?
-      | throw s!"Const not found in export '{target}'"
+      | throwError s!"Const not found in export '{target}'"
     let node ← mkNode info
     for d in node.deps do
       unless (← read).tagged.contains d do addWorklist d
@@ -202,7 +204,7 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
   return st.sccs
 
 /-- Hash every constant reachable from the boundary list of `exported`. -/
-def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : Except String Hashed := do
+def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : IO Hashed := do
   -- Boundary names are strings; map them to the export's constants.
   let byString : Std.HashMap String Name :=
     exported.constMap.fold (init := {}) fun m n _ => m.insert n.toString n
@@ -210,24 +212,26 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : E
   let mut order : Array Name := #[]
   for d in boundary.declarations do
     let some n := byString[d.name]?
-      | throw s!"'{d.name}' is on the boundary list but not in the export"
+      | fail s!"'{d.name}' is on the boundary list but not in the export"
     tagged := tagged.insert n (strTrim d.informal)
     order := order.push n
   let ctx : Hash.Context := { exported, tagged }
-  let ((), st) ← (Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }
+  let env ← Load.environmentOfExport exported
+  let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }).toIO
+    { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
   let mut nodes := st.nodes
   let isTagged (n : Name) := tagged.contains n
   let succ (n : Name) : Array Name :=
     (nodes[n]?.map (·.deps) |>.getD #[]).filter fun d => !isTagged d && nodes.contains d
   let roots := sortNames (nodes.fold (init := #[]) fun acc n _ => acc.push n)
   let comps := tarjan roots succ
-  let entry (nodes : Std.HashMap Name Node) (d : Name) : Except String Canon.DepEntry := do
-    let some dn := nodes[d]? | throw s!"dependency '{d}' was not hashed"
+  let entry (nodes : Std.HashMap Name Node) (d : Name) : IO Canon.DepEntry := do
+    let some dn := nodes[d]? | fail s!"dependency '{d}' was not hashed"
     if isTagged d then
-      let some s := dn.spec | throw s!"tagged '{d}' has no spec"
+      let some s := dn.spec | fail s!"tagged '{d}' has no spec"
       return .spec s
     else
-      if dn.claim.isEmpty then throw s!"internal: claim of '{d}' needed before it was computed"
+      if dn.claim.isEmpty then fail s!"internal: claim of '{d}' needed before it was computed"
       return .full dn.claim
   for comp in comps do
     if h : comp.size = 1 then

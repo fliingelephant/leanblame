@@ -41,9 +41,8 @@ def hashed (root : System.FilePath) (cache : Cache) (exportHash boundary : Strin
   if let some h := (← cache.get)[(exportHash, boundary)]? then return h
   let b ← loadBoundary root boundary
   let exported ← loadExported root exportHash
-  let h ← match Walk.hashExport exported b with
-    | .ok h => pure h
-    | .error e => fail s!"cannot hash export {exportHash}: {e}"
+  let h ← try Walk.hashExport exported b
+    catch e => fail s!"cannot hash export {exportHash}: {e}"
   cache.modify (·.insert (exportHash, boundary) h)
   return h
 
