@@ -12,3 +12,9 @@ roots = ["LeanBlame.Attr"]
 [[lean_exe]]
 name = "leanblame"
 root = "Main"
+
+# The executable's own modules. Lake builds an executable's imports only from
+# library targets, so they need one. Internal: user libraries never import it.
+[[lean_lib]]
+name = "LeanBlameCli"
+globs = ["LeanBlame.Cli.+"]
