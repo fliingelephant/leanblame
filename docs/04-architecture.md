@@ -110,10 +110,8 @@ cli export
 
 ## Interfaces LeanBlame commits to
 
-1. Boundary list format.
-2. Record schema.
-3. Release manifest schema.
-4. `status --json` schema.
+Boundary list, record, release manifest, `status --json`. Exact fields in
+[14-schemas.md](14-schemas.md).
 
 ## Language
 

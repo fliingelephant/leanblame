@@ -8,19 +8,7 @@ Default: one record per module.
 
 ## Fields
 
-| Field | Meaning |
-|-------|---------|
-| `action` | `approve` or `withdraw` |
-| `signer` | `provider:id`, a stable id: `openreview:~Jane_Doe1`, `orcid:0000-0002-1825-0097`, `github:1234567` (numeric id, logins get reused), `local:alice` |
-| `date` | ISO 8601 |
-| `constants` | approve only: map from fully qualified name to claim hash |
-| `module` | approve only: Lean module name |
-| `commit` | approve only: library commit the signer saw |
-| `toolchain` | approve only: Lean version |
-| `deps` | approve only: dependency commits from `lake-manifest.json` |
-| `evidence` | approve only, optional: hash of an `equiv` proof the signer relied on |
-| `refers_to` | withdraw only: hash of the record being withdrawn |
-| `note` | optional free text |
+Exact schema in [14-schemas.md](14-schemas.md). Two examples:
 
 ### Approve
 

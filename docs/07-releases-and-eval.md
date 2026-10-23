@@ -16,9 +16,7 @@ Development never stops for a release.
    Each theorem is recorded as **proven** (axioms listed) or **open** (`sorry`).
    A theorem whose informal text claims a result but is open fails the release.
 
-Manifest contents: toolchain, dependency commits, library commit, export hash,
-boundary list, the records that cover every tagged declaration, the
-proven/open table.
+Manifest fields in [14-schemas.md](14-schemas.md).
 
 **Patch releases** (`R.1`, `R.2`): fixes to existing declarations, dependency
 bumps whose changes passed `equiv` and were re-approved, withdrawals. No new

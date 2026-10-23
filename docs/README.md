@@ -17,6 +17,7 @@ Read in order. Each file is short.
 | 11 | [11-decisions.md](11-decisions.md) | Decision log and FAQ. Why not X? |
 | 12 | [12-roadmap.md](12-roadmap.md) | What exists, what to build, in what order. |
 | 13 | [13-glossary.md](13-glossary.md) | Every term, one line. |
+| 14 | [14-schemas.md](14-schemas.md) | Exact fields of the four interfaces. For implementers. |
 
 One-paragraph summary:
 

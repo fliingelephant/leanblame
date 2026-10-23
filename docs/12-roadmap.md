@@ -14,7 +14,7 @@ comparator's closure walk (`Compare.lean`, Apache-2.0). lean-eval's
 
 | # | Item | Size |
 |---|------|------|
-| 1 | Write the four schemas: boundary list, record, release manifest, `status --json`; `@[trusted]` in a Lake-free target | small |
+| 1 | `@[trusted]` in a Lake-free target; validators for the four schemas in [14-schemas.md](14-schemas.md) | small |
 | 2 | Record schema, validator, CI check that rejects edits to `records/` | small |
 | 3 | `cli export` and claim hash: canonical term printing, structure expansion, spec cut | medium |
 | 4 | `cli status` (states, flags, `--base`, `--json`) and `blame` | medium |
