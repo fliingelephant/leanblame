@@ -8,7 +8,9 @@ library's constants and the boundary list, and writes both files into the
 object store. Prints the two hashes.
 -/
 import Lean
+import Lake.Load.Manifest
 import Lake.Toml
+import Lake.Util.Git
 import LeanBlame.Attr
 import LeanBlame.Cli.Schema
 import LeanBlame.Cli.Store
@@ -63,25 +65,20 @@ def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Na
 
 /-- The library's commit, with a warning when the work tree is dirty. -/
 def gitCommit (root : System.FilePath) : IO String := do
-  let out ← IO.Process.output { cmd := "git", args := #["rev-parse", "HEAD"], cwd := root }
-  if out.exitCode != 0 then
-    IO.eprintln "warning: not a git repository with commits; commit recorded as \"unknown\""
-    return "unknown"
-  let status ← IO.Process.output { cmd := "git", args := #["status", "--porcelain", "--untracked-files=no"], cwd := root }
-  if strTrim status.stdout != "" then
+  let repo : Lake.GitRepo := root
+  let some rev ← repo.getHeadRevision?
+    | IO.eprintln "warning: not a git repository with commits; commit recorded as \"unknown\""
+      return "unknown"
+  if ← repo.hasDiff then
     IO.eprintln "warning: uncommitted changes; the recorded commit does not contain them"
-  return strTrim out.stdout
+  return rev
 
 /-- Commits of git dependencies, from `lake-manifest.json`. Path dependencies have none. -/
 def manifestDeps (root : System.FilePath) : IO (Array (String × String)) := do
-  let some text ← readFileIfExists (root / "lake-manifest.json") | return #[]
-  let .ok j := Json.parse text | return #[]
-  let .ok pkgs := j.getObjValAs? (Array Json) "packages" | return #[]
-  return pkgs.filterMap fun p => do
-    let .ok "git" := p.getObjValAs? String "type" | none
-    let .ok name := p.getObjValAs? String "name" | none
-    let .ok rev := p.getObjValAs? String "rev" | none
-    return (name, rev)
+  let some m ← Lake.Manifest.load? (root / "lake-manifest.json") | return #[]
+  return m.packages.filterMap fun p => match p.src with
+    | .git (rev := rev) .. => some (p.name.toString (escape := false), rev)
+    | .path .. => none
 
 def moduleOf (env : Environment) (n : Name) : Name :=
   match env.getModuleIdxFor? n with
