@@ -41,6 +41,10 @@ A `structure` expands to its generated constants: the type, `mk`, the
 projections, `rec`, `noConfusion`. Tagging the structure tags them all. Their
 spec is their types plus the structure's informal text.
 
+`status` warns when a tagged declaration uses an untagged declaration from the
+same library. Usually that declaration should be tagged too, so it gets its own
+signer instead of being re-owned by everyone who uses it.
+
 ## What happens on change
 
 | Change | Who acts |

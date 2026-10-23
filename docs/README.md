@@ -5,7 +5,7 @@ Read in order. Each file is short.
 | # | File | Question it answers |
 |---|------|---------------------|
 | 1 | [01-motivation.md](01-motivation.md) | Why does this need to exist? |
-| 2 | [02-concepts.md](02-concepts.md) | What are the six words we use everywhere? |
+| 2 | [02-concepts.md](02-concepts.md) | What are the seven words we use everywhere? |
 | 3 | [03-trust-model.md](03-trust-model.md) | **What exactly does a signature cover, and what happens on change?** Read this one. |
 | 4 | [04-architecture.md](04-architecture.md) | What are the parts, and which repo owns what? |
 | 5 | [05-records.md](05-records.md) | How is a signoff stored? |
