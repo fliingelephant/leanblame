@@ -32,11 +32,6 @@ allowed_signers = \"any\"   # or a list of provider:id
 # providers = [\"openreview\", \"orcid\", \"github\"]
 "
 
-private def keyString (k : Lean.Name) : String :=
-  match k with
-  | .str .anonymous s => s
-  | _ => k.toString (escape := false)
-
 private def strArray (k : String) (v : Lake.Toml.Value) : Except String (Array String) :=
   match v with
   | .array _ vs => vs.mapM fun
@@ -72,11 +67,8 @@ def Config.ofTable (t : Lake.Toml.Table) : Except String Config := do
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/
 def Config.parse (contents path : String) : IO (Except String Config) := do
-  let ictx := Lean.Parser.mkInputContext contents path
-  match ← (Lake.Toml.loadToml ictx).toBaseIO with
-  | .error log =>
-    let msgs ← log.toList.mapM fun m => m.toString
-    return .error ("\n".intercalate msgs)
+  match ← parseToml contents path with
+  | .error msgs => return .error ("\n".intercalate msgs.toList)
   | .ok t => return Config.ofTable t
 
 def Config.load (root : System.FilePath) : IO Config := do

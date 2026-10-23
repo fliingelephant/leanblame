@@ -16,6 +16,20 @@ namespace LeanBlame
 
 open Lean (Json ToJson toJson)
 
+/-! TOML -/
+
+/-- Parse TOML text; `fileName` names it in messages. -/
+def parseToml (contents fileName : String) : IO (Except (Array String) Lake.Toml.Table) := do
+  match ← (Lake.Toml.loadToml (Lean.Parser.mkInputContext contents fileName)).toBaseIO with
+  | .ok t => return .ok t
+  | .error log => return .error ((← log.toList.mapM (·.toString)).toArray.map strTrim)
+
+/-- A TOML key as written: a bare key is not escaped. -/
+def keyString (k : Lean.Name) : String :=
+  match k with
+  | .str .anonymous s => s
+  | _ => k.toString (escape := false)
+
 /-! ## 1. Boundary list -/
 
 /-- Kinds a boundary-list entry may have: the export kinds of docs/14. -/
@@ -196,11 +210,6 @@ def toToml : Record → String
 
 /-! Reading records. Strict: unknown keys and keys of the other action are errors. -/
 
-private def keyString (k : Lean.Name) : String :=
-  match k with
-  | .str .anonymous s => s
-  | _ => k.toString (escape := false)
-
 private abbrev Decoder := StateT (Array String) Id
 
 private def report (msg : String) : Decoder Unit := modify (·.push msg)
@@ -296,13 +305,8 @@ def ofTable (t : Lake.Toml.Table) : Except (Array String) Record :=
   | (none, errs) => .error (if errs.isEmpty then #["not a record"] else errs)
 
 /-- Parse record text. -/
-def parse (contents : String) (fileName : String) : IO (Except (Array String) Record) := do
-  let ictx := Lean.Parser.mkInputContext contents fileName
-  match ← (Lake.Toml.loadToml ictx).toBaseIO with
-  | .ok t => return ofTable t
-  | .error log =>
-    let msgs ← log.toList.mapM fun m => m.toString
-    return .error (msgs.toArray.map strTrim)
+def parse (contents : String) (fileName : String) : IO (Except (Array String) Record) :=
+  return (← parseToml contents fileName) >>= ofTable
 
 end Record
 
