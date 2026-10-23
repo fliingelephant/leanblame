@@ -50,10 +50,19 @@ def runCapture (cmd : String) (args : Array String) (cwd : Option System.FilePat
     fail s!"`{cmd} {" ".intercalate args.toList}` failed (exit {out.exitCode}):\n{out.stderr}"
   return out.stdout
 
-/-- Run a command with inherited stdout and stderr; fail on a non-zero exit. -/
-def runInherit (cmd : String) (args : Array String) (cwd : Option System.FilePath := none) :
+/-- Run a command, its stdout copied to our stderr (our stdout stays for results); fail on a
+non-zero exit. -/
+partial def runToStderr (cmd : String) (args : Array String) (cwd : Option System.FilePath := none) :
     IO Unit := do
-  let child ← IO.Process.spawn { cmd, args, cwd, stdin := .null }
+  let child ← IO.Process.spawn { cmd, args, cwd, stdin := .null, stdout := .piped }
+  let err ← IO.getStderr
+  let rec copy : IO Unit := do
+    let chunk ← child.stdout.read 4096
+    unless chunk.isEmpty do
+      err.write chunk
+      err.flush
+      copy
+  copy
   let code ← child.wait
   if code != 0 then
     fail s!"`{cmd} {" ".intercalate args.toList}` failed (exit {code})"
