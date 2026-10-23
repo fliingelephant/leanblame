@@ -85,7 +85,7 @@ withdrawn.
 - Written by the sign server. Terminal `sign` writes `local:` records only,
   unless given a provider token.
 - `validate` runs as a required CI check: schema, authority rules, and no
-  modification or deletion of an existing record file.
+  modification or deletion of an existing record.
 - The party you trust is whoever holds the sign server's push credential,
   normally the hosting institution. Name it in the library's README.
 

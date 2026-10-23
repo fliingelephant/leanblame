@@ -43,8 +43,6 @@ def init (root : System.FilePath) : IO UInt32 := do
   if ← recordsDir.isDir then report "records/" false
   else
     IO.FS.createDirAll recordsDir
-    -- git does not keep empty directories
-    IO.FS.writeFile (recordsDir / ".gitkeep") ""
     report "records/" true
   let wf := root / ".github" / "workflows" / "leanblame.yml"
   if ← wf.pathExists then report ".github/workflows/leanblame.yml" false

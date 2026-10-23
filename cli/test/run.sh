@@ -46,7 +46,7 @@ current_export() { awk '/^export /{print $2}' .leanblame/current; }
 
 echo "== init"
 run init
-for f in leanblame.toml records/.gitkeep .github/workflows/leanblame.yml; do
+for f in leanblame.toml records .github/workflows/leanblame.yml; do
   [[ -e "$f" ]] || fail "init did not create $f"
 done
 grep -qx ".leanblame/" .gitignore || fail "init did not ignore .leanblame/"
@@ -146,6 +146,7 @@ expect_line Sample.energy_even \
 echo "== withdraw"
 run sign --withdraw "$basic_record" --signer local:alice --note "energy was wrong"
 grep -q "^withdraw sha256:" <<<"$out" || fail "no withdraw record: $out"
+withdraw_record="$(awk '/^withdraw /{print $2}' <<<"$out")"
 if "$lb" sign --withdraw "$basic_record" --signer local:bob >/dev/null 2>&1; then
   fail "bob withdrew alice's record"
 fi
@@ -173,32 +174,47 @@ ok "records added since $first: $out"
 record_file="records/${basic_record#sha256:}.toml"
 printf 'note = "edited"\n' >> "$record_file"
 if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "an edited record passed validate"; fi
-grep -q "existing record modified" "$work/validate.log" || fail "edit not reported: $(cat "$work/validate.log")"
+grep -q "record $basic_record of the merge base is missing" "$work/validate.log" \
+  || fail "edit not reported: $(cat "$work/validate.log")"
 grep -q "file name must be the sha256" "$work/validate.log" || fail "hash mismatch not reported"
 git checkout -q -- "$record_file"
 git rm -q "$record_file"
 if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a deleted record passed validate"; fi
-grep -q "existing record deleted" "$work/validate.log" || fail "deletion not reported: $(cat "$work/validate.log")"
+grep -q "record $basic_record of the merge base is missing" "$work/validate.log" \
+  || fail "deletion not reported: $(cat "$work/validate.log")"
 git checkout -q HEAD -- "$record_file"
 ok "validate refuses modified and deleted records"
-git rm -q records/.gitkeep
-printf 'not a record\n' > records/.notes.toml
-run validate --base-ref HEAD
-"$lb" status >/dev/null 2>"$work/status.err" || fail "status with a hidden file in records/"
-if grep -q "notes" "$work/status.err"; then fail "status read a hidden file: $(cat "$work/status.err")"; fi
-rm records/.notes.toml
-git checkout -q HEAD -- records/.gitkeep
-ok "hidden files in records/ are not records: .gitkeep may go, .notes.toml is ignored"
+printf 'not a record\n' > records/notes.toml
+if "$lb" validate >"$work/validate.log" 2>&1; then fail "a misnamed file passed validate"; fi
+grep -q "records/notes.toml: not a record: the file name must be the sha256" "$work/validate.log" \
+  || fail "misnamed file not reported: $(cat "$work/validate.log")"
+"$lb" status >/dev/null 2>"$work/status.err" || fail "status with a misnamed file in records/"
+grep -q "records/notes.toml is not a valid record and was ignored" "$work/status.err" \
+  || fail "status did not warn about the misnamed file: $(cat "$work/status.err")"
+rm records/notes.toml
+ok "a misnamed file is a problem for validate and a warning for status"
 # Renaming the records directory in leanblame.toml must not hide a deletion.
 git mv records r
 sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
 grep -q '^records = \["r/"\]' leanblame.toml || fail "test setup: records directory not renamed"
 git rm -q -f "r/${basic_record#sha256:}.toml"
 if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a renamed records directory hid a deletion"; fi
-grep -q "records/${basic_record#sha256:}.toml: existing record deleted" "$work/validate.log" \
-  || fail "deletion under the old records directory not reported: $(cat "$work/validate.log")"
+grep -q "records/${basic_record#sha256:}.toml: record $basic_record of the merge base is missing" \
+  "$work/validate.log" || fail "deletion under the old records directory not reported: $(cat "$work/validate.log")"
 git reset -q --hard HEAD
 ok "validate checks the merge base's records directories too"
+git mv records r
+sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
+run validate --base-ref HEAD
+git reset -q --hard HEAD
+ok "moving every record to a new records directory passes"
+mkdir r && cp records/*.toml r/ && rm "r/${withdraw_record#sha256:}.toml"
+sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
+if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a repointed directory dropped a withdraw"; fi
+grep -q "record $withdraw_record of the merge base is missing" "$work/validate.log" \
+  || fail "dropped withdraw not reported: $(cat "$work/validate.log")"
+rm -rf r && git checkout -q -- leanblame.toml
+ok "repointing the records directory to one without the withdraw fails"
 
 echo "== export refuses undocumented and unsafe tagged declarations"
 cat >> Sample/Basic.lean <<'EOF'

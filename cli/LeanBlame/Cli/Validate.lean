@@ -1,55 +1,46 @@
 /-
 `leanblame validate [--base-ref REF]` (docs/05-records.md, docs/14-schemas.md §2).
 
-Checks every file in the records directories:
-* the record schema (strict: unknown keys, wrong types, non-UTC dates, malformed
-  hashes and signer ids are errors);
-* the file name is the SHA-256 of the file bytes (`<hex>.toml`);
+Checks every entry of the records directories:
+* it is a record: a file named by the SHA-256 of its bytes (`<hex>.toml`) that
+  passes the record schema (strict: unknown keys, wrong types, non-UTC dates,
+  malformed hashes and signer ids are errors);
 * authority: `refers_to` names an approve record, the withdraw's signer equals that
   record's signer, and listed constants are in that record;
-* with `--base-ref REF`: no record file in the records directories of the merge
-  base of REF or of the work tree was modified or deleted since that merge base.
-  Only additions pass.
+* with `--base-ref REF`: every record of the merge base of REF and HEAD, in the
+  records directories its `leanblame.toml` names, is still a record. Records are
+  compared by id, so moving them passes; editing or deleting one does not.
 -/
+import Lake.Util.Git
 import LeanBlame.Cli.Records
 
 namespace LeanBlame.Validate
 
-/-- `leanblame.toml` at revision `rev`, if it is there and parses. -/
-def configAt (root : System.FilePath) (rev : String) : IO (Option Config) := do
-  let out ← IO.Process.output
-    { cmd := "git", args := #["show", s!"{rev}:./{Config.fileName}"], cwd := root }
-  if out.exitCode != 0 then return none
-  match ← Config.parse out.stdout s!"{rev}:{Config.fileName}" with
-  | .ok cfg => return some cfg
-  | .error e =>
-    IO.eprintln s!"warning: {Config.fileName} at {rev} does not parse, so only today's records directories are checked: {e}"
-    return none
+/-- Append-only: the records of revision `base` that are not among the records `loaded` now. -/
+def appendOnlyErrors (root : System.FilePath) (base : String) (loaded : Array LoadedRecord) :
+    IO (Array String) := do
+  let some text ← (root : Lake.GitRepo).captureGit? #["show", s!"{base}:./{Config.fileName}"]
+    | return #[]
+  let cfg ← match ← Config.parse text s!"{base}:{Config.fileName}" with
+    | .ok cfg => pure cfg
+    | .error e => return #[s!"{Config.fileName} at the merge base {base} does not parse: {e}"]
+  let dirs := cfg.records.filterMap localRecordDir?
+  if dirs.isEmpty then return #[]
+  let ids : Std.HashSet String := loaded.foldl (·.insert ·.hash) {}
+  let mut errors := #[]
+  for path in strLines (← runCapture "git" (#["ls-tree", "-r", "--name-only", base, "--"] ++ dirs) root) do
+    let name := (System.FilePath.mk path).fileName.getD ""
+    let id := mkHash (name.dropEnd ".toml".length).copy
+    if name.endsWith ".toml" && isHash id && !ids.contains id then
+      errors := errors.push s!"{path}: record {id} of the merge base is missing (records are append-only)"
+  return errors
 
 def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   let cfg ← Config.load root
-  let dirs ← recordDirs root cfg
+  let (loaded, bad) ← loadAllRecords root cfg
   let mut errors : Array String := #[]
-  let mut loaded : Array LoadedRecord := #[]
-  for dir in dirs do
-    unless ← dir.isDir do
-      errors := errors.push s!"{dir}: records directory missing"
-      continue
-    -- Every visible file in a records directory must be a record named by its hash.
-    for e in (← dir.readDir).qsort (fun a b => a.fileName < b.fileName) do
-      if e.fileName.startsWith "." then continue
-      if ← e.path.isDir then
-        errors := errors.push s!"{e.path}: unexpected directory in a records directory"
-      else if e.path.extension != some "toml" then
-        errors := errors.push s!"{e.path}: not a record file (expected <sha256>.toml)"
-      else
-        let expected := Sha256.hexOfBytes (← IO.FS.readBinFile e.path) ++ ".toml"
-        if e.fileName != expected then
-          errors := errors.push s!"{e.path}: file name must be the sha256 of its bytes, {expected}"
-    let (good, bad) ← loadRecordDir dir
-    for (p, es) in bad do
-      for msg in es do errors := errors.push s!"{p}: {msg}"
-    loaded := loaded ++ good
+  for (p, es) in bad do
+    for msg in es do errors := errors.push s!"{p}: {msg}"
   -- Authority rules.
   let byHash : Std.HashMap String LoadedRecord := loaded.foldl (fun m r => m.insert r.hash r) {}
   for r in loaded do
@@ -67,27 +58,9 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
             for c in cs do
               unless a.constants.any (·.1 == c) do
                 errors := errors.push s!"{r.path}: {c} is not in the withdrawn record"
-  -- Append-only.
   if let some baseRef := baseRef? then
     let mb := strTrim (← runCapture "git" #["merge-base", baseRef, "HEAD"] root)
-    -- The merge base's records directories count too: a pull request that renames the
-    -- directory in leanblame.toml must not hide a deletion.
-    let baseDirs := ((← configAt root mb).map (·.records)).getD #[]
-    let dirs := (baseDirs ++ cfg.records).filterMap localRecordDir? |>.foldl
-      (fun acc d => if acc.contains d then acc else acc.push d) #[]
-    let out ← runCapture "git" (#["diff", "--name-status", "--no-renames", mb, "--"] ++ dirs) root
-    for line in strLines out do
-      let line := strTrim line
-      if line.isEmpty then continue
-      let status := line.take 1 |>.copy
-      let path := strTrim (strDrop line 1)
-      -- Only record files are append-only; `.gitkeep` may go.
-      unless isRecordFile ((System.FilePath.mk path).fileName.getD "") do continue
-      match status with
-      | "A" => pure ()
-      | "D" => errors := errors.push s!"{path}: existing record deleted (records are append-only)"
-      | "M" => errors := errors.push s!"{path}: existing record modified (records are append-only)"
-      | _ => errors := errors.push s!"{path}: existing record changed ({status}) (records are append-only)"
+    errors := errors ++ (← appendOnlyErrors root mb loaded)
   if errors.isEmpty then
     IO.println s!"{loaded.size} records valid"
     return 0

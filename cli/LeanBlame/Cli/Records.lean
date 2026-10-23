@@ -1,8 +1,8 @@
 /-
 Loading records and deciding liveness (docs/05-records.md).
 
-A record's id is the SHA-256 of its file bytes. `exclude` drops records before
-anything else. A withdraw counts only if it refers to an approve record and is
+A record is a file of a records directory named `<sha256 of its bytes>.toml`
+that parses; that hash is its id. `exclude` drops records before anything else. A withdraw counts only if it refers to an approve record and is
 signed by that record's signer; it kills the listed constants of that record,
 or all of them. An approve record is live for a constant if no counting
 withdraw covers it and its signer is allowed by `leanblame.toml`.
@@ -11,7 +11,7 @@ import LeanBlame.Cli.Config
 
 namespace LeanBlame
 
-/-- A record file as loaded from a records directory. -/
+/-- A record as loaded from a records directory. -/
 structure LoadedRecord where
   /-- `sha256:` of the file bytes: the record's id. -/
   hash : String
@@ -34,12 +34,9 @@ def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePa
     | none => IO.eprintln s!"warning: records repository {r} skipped: only local directories are supported"
   return out
 
-/-- The files of a records directory that hold records: visible `*.toml` files. Hidden files,
-such as the `.gitkeep` that `init` writes, are not records, for `status` and `validate` alike. -/
-def isRecordFile (fileName : String) : Bool :=
-  !fileName.startsWith "." && fileName.endsWith ".toml"
-
-/-- Parse every `*.toml` file of `dir`. Returns the records and, per bad file, its problems. -/
+/-- Load a records directory. An entry is a record iff it is a file named `<sha256 of its
+bytes>.toml` that parses (docs/05); every other entry is a problem, returned with its path. A
+missing directory holds no records. -/
 def loadRecordDir (dir : System.FilePath) :
     IO (Array LoadedRecord × Array (System.FilePath × Array String)) := do
   unless ← dir.isDir do return (#[], #[])
@@ -47,13 +44,17 @@ def loadRecordDir (dir : System.FilePath) :
   let mut good := #[]
   let mut bad := #[]
   for e in entries do
-    unless isRecordFile e.fileName do continue
+    if ← e.path.isDir then
+      bad := bad.push (e.path, #["a directory, not a record"]); continue
     let bytes ← IO.FS.readBinFile e.path
-    let hash := sha256OfBytes bytes
+    let hex := Sha256.hexOfBytes bytes
+    unless e.fileName == hex ++ ".toml" do
+      bad := bad.push (e.path, #[s!"not a record: the file name must be the sha256 of its bytes, {hex}.toml"])
+      continue
     let some text := String.fromUTF8? bytes
       | bad := bad.push (e.path, #["not UTF-8"]); continue
     match ← Record.parse text e.path.toString with
-    | .ok r => good := good.push { hash, path := e.path, record := r }
+    | .ok r => good := good.push { hash := mkHash hex, path := e.path, record := r }
     | .error es => bad := bad.push (e.path, es)
   return (good, bad)
 
