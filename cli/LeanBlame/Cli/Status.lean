@@ -80,8 +80,6 @@ def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
 /-- Everything `status` computes. -/
 structure Result where
   report : StatusReport
-  /-- Records that did not parse: path and problems. -/
-  badRecords : Array (System.FilePath × Array String)
   /-- Untagged declarations of this library used by tagged ones (docs/03). -/
   warnings : Array String := #[]
 
@@ -107,10 +105,9 @@ def isGenerated (h : Walk.Hashed) (u : Name) : Bool :=
 /-- `status` warns when a tagged declaration of this library uses an untagged one of it.
 `closures` holds `Walk.closureOf` of each tagged declaration. -/
 def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name × Array Name))
-    (boundary : BoundaryList) (modules : Array String) (owned : Std.HashSet String) :
-    Array String := Id.run do
+    (modules : Array String) (owned : Std.HashSet String) : Array String := Id.run do
   let mut users : Std.HashMap Name (Array Name) := {}
-  for (x, d) in h.boundary.zip boundary.declarations do
+  for (x, d) in h.declarations do
     unless modules.contains d.module do continue
     for u in (closures[x]?.map (·.2)).getD #[] do
       if owned.contains u.toString && !isGenerated h u then
@@ -121,21 +118,17 @@ def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name 
     out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate (xs.toList.map toString)}; tag it so it gets its own signer"
   return out
 
-def compute (root : System.FilePath) (base? : Option String) : IO Result := do
-  let cfg ← Config.load root
+def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : Option String) :
+    IO Result := do
   let cur ← Store.readCurrent root
   let cache : Cache ← IO.mkRef {}
-  let boundary ← loadBoundary root cur.boundary
   let new ← hashed root cache cur.exportHash cur.boundary
-  let (all, bad) ← loadAllRecords root cfg
-  let ledger := Ledger.build cfg all
   let base ← match base? with
     | some a =>
       let a := if isHash a then a else mkHash a
       let b ← boundaryForExport root ledger a
       some <$> hashed root cache a b
     | none => pure none
-  let names := new.boundary
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
@@ -143,7 +136,7 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
   let mut unknown : Std.HashSet (String × String) := {}
   -- Each tagged declaration's closure, walked once: (cut, untagged constants).
   let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
-  for (n, d) in names.zip boundary.declarations do
+  for (n, d) in new.declarations do
     let node := new.nodes[n]!
     let claim := node.claim
     let approvals := ledger.approvalsOf d.name
@@ -209,11 +202,11 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
       stack := stack ++ cutOf y
     decls := decls.push (n.toString, { sd with blockedBy := (Walk.sortNames blocked).map (·.toString) })
   let report : StatusReport := {
-    library := boundary.library, commit := boundary.commit, exportHash := cur.exportHash
+    library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← UtcTime.now, declarations := decls }
   let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
-  let warnings := untaggedWarnings new closures boundary cur.modules owned
-  return { report, badRecords := bad, warnings }
+  let warnings := untaggedWarnings new closures cur.modules owned
+  return { report, warnings }
 
 /-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
 def textLine (name : String) (d : StatusDecl) : String :=
@@ -226,9 +219,11 @@ def textLine (name : String) (d : StatusDecl) : String :=
   " ".intercalate parts.toList
 
 def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt32 := do
-  let r ← compute root base?
-  for (p, _) in r.badRecords do
+  let cfg ← Config.load root
+  let (all, bad) ← loadAllRecords root cfg
+  for (p, _) in bad do
     IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
+  let r ← compute root cfg (Ledger.build cfg all) base?
   for w in r.warnings do IO.eprintln w
   let text := jsonText r.report
   -- Every run leaves a log in the object store.
@@ -247,12 +242,12 @@ def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt
 /-- `blame NAME`: who signed it, when, at which claim hash. -/
 def blame (root : System.FilePath) (name : String) : IO UInt32 := do
   let cfg ← Config.load root
-  let current? ← if (← (Store.currentPath root).pathExists) then
-      some <$> compute root none
-    else pure none
-  let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let (all, _) ← loadAllRecords root cfg
   let ledger := Ledger.build cfg all
+  let current? ← if (← (Store.currentPath root).pathExists) then
+      some <$> compute root cfg ledger none
+    else pure none
+  let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let history := historyOf ledger name
   if decl?.isNone && history.isEmpty then
     fail s!"{name} is not on the boundary list and no record mentions it"

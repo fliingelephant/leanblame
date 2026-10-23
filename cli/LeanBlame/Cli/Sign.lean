@@ -92,12 +92,11 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let cfg ← Config.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
-  let boundary ← Status.loadBoundary root cur.boundary
   let cache : Status.Cache ← IO.mkRef {}
   let hashed ← Status.hashed root cache cur.exportHash cur.boundary
+  let boundary := hashed.boundary
   let claimOf : Std.HashMap String String :=
-    (hashed.boundary.zip boundary.declarations).foldl (init := {}) fun m (n, d) =>
-      m.insert d.name hashed.nodes[n]!.claim
+    hashed.declarations.foldl (init := {}) fun m (n, d) => m.insert d.name hashed.nodes[n]!.claim
   let selected ← if !names.isEmpty then
       names.mapM fun n => do
         match boundary.declarations.find? (·.name == n) with

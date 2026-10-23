@@ -54,8 +54,10 @@ structure Node where
 structure Hashed where
   nodes : Std.HashMap Name Node
   tagged : Std.HashSet Name
-  /-- Boundary-list names, in list order. -/
-  boundary : Array Name
+  /-- The boundary list it was hashed with. -/
+  boundary : BoundaryList
+  /-- The boundary list's declarations with their constants, in list order. -/
+  declarations : Array (Name × BoundaryDecl)
 
 def Hashed.isTagged (h : Hashed) (n : Name) : Bool := h.tagged.contains n
 
@@ -195,12 +197,13 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
   let byString : Std.HashMap String Name :=
     exported.constMap.fold (init := {}) fun m n _ => m.insert n.toString n
   let mut tagged : Std.HashMap Name String := {}
-  let mut order : Array Name := #[]
+  let mut declarations : Array (Name × BoundaryDecl) := #[]
   for d in boundary.declarations do
     let some n := byString[d.name]?
       | fail s!"'{d.name}' is on the boundary list but not in the export"
     tagged := tagged.insert n (strTrim d.informal)
-    order := order.push n
+    declarations := declarations.push (n, d)
+  let order := declarations.map (·.1)
   let ctx : Hash.Context := { exported, tagged }
   let env ← Load.environmentOfExport exported
   let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }).toIO
@@ -237,7 +240,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
         let node := nodes[m]!
         nodes := nodes.insert m { node with claim := Canon.member g m }
   let taggedSet : Std.HashSet Name := order.foldl (·.insert ·) {}
-  return { nodes, tagged := taggedSet, boundary := order }
+  return { nodes, tagged := taggedSet, boundary, declarations }
 
 /--
 The closure under `x`: the tagged declarations where the walk stops (the cut), and the untagged
