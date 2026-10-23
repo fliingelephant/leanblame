@@ -27,7 +27,7 @@ namespace LeanBlame.Walk
 
 open Lean
 
-/-- The export kind of a constant. -/
+/-- The export kind of a constant, as the boundary list and the hash name it. -/
 def kindOf : ConstantInfo → String
   | .defnInfo _ => "def"
   | .thmInfo _ => "theorem"

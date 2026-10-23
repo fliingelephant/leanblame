@@ -18,17 +18,6 @@ namespace LeanBlame.Export
 
 open Lean
 
-/-- The export kind of a constant, as the boundary list and the hash name it. -/
-def constKind : ConstantInfo → String
-  | .defnInfo _ => "def"
-  | .thmInfo _ => "theorem"
-  | .axiomInfo _ => "axiom"
-  | .inductInfo _ => "inductive"
-  | .ctorInfo _ => "ctor"
-  | .opaqueInfo _ => "opaque"
-  | .quotInfo _ => "quot"
-  | .recInfo _ => "rec"
-
 /-- Unicode-normalization is not available in Lean core; we trim ASCII whitespace
 and normalize line endings. See the report on approximations. -/
 def normalizeInformal (s : String) : String :=
@@ -123,7 +112,7 @@ def collectTrusted (env : Environment) : IO (Array BoundaryDecl) := do
     let informal := normalizeInformal doc
     if informal.isEmpty then
       errors := errors.push s!"{n}: tagged declarations need a non-empty docstring"; continue
-    out := out.push { name := n.toString, module := (moduleOf env n).toString, kind := constKind ci,
+    out := out.push { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci,
                       informal, informalSource := "docstring" }
     seen := seen.insert n
     if let .inductInfo iv := ci then
@@ -137,7 +126,7 @@ def collectTrusted (env : Environment) : IO (Array BoundaryDecl) := do
     let doc := (← findSimpleDocString? env m).map normalizeInformal |>.filter (!·.isEmpty)
     let parentDoc := (out.find? (·.name == parent.toString)).map (·.informal)
     let some informal := doc <|> parentDoc | continue
-    out := out.push { name := m.toString, module := (moduleOf env m).toString, kind := constKind ci,
+    out := out.push { name := m.toString, module := (moduleOf env m).toString, kind := Walk.kindOf ci,
                       informal, informalSource := "docstring" }
     seen := seen.insert m
   unless errors.isEmpty do
@@ -154,8 +143,8 @@ def checkBoundary (env : Environment) (b : BoundaryList) : IO Unit := do
     | none => errors := errors.push s!"{d.name}: not in the environment"
     | some ci =>
       if ci.isUnsafe then errors := errors.push s!"{d.name}: `unsafe` declarations cannot be tagged"
-      else if constKind ci != d.kind then
-        errors := errors.push s!"{d.name}: kind is {constKind ci}, the list says {d.kind}"
+      else if Walk.kindOf ci != d.kind then
+        errors := errors.push s!"{d.name}: kind is {Walk.kindOf ci}, the list says {d.kind}"
   unless errors.isEmpty do
     fail ("boundary list does not match the library:\n" ++ "\n".intercalate (errors.toList.map ("  " ++ ·)))
 
