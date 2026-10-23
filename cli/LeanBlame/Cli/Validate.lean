@@ -43,23 +43,9 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   let mut errors : Array String := #[]
   for (p, es) in bad do
     for msg in es do errors := errors.push s!"{p}: {msg}"
-  -- Authority rules.
-  let byHash : Std.HashMap String LoadedRecord := loaded.foldl (fun m r => m.insert r.hash r) {}
-  for r in loaded do
-    if let .withdraw w := r.record then
-      match byHash[w.refersTo]? with
-      | none => errors := errors.push s!"{r.path}: refers_to {w.refersTo} names no record"
-      | some target =>
-        match target.record with
-        | .withdraw _ =>
-          errors := errors.push s!"{r.path}: refers_to must name an approve record, not a withdraw"
-        | .approve a =>
-          if a.signer != w.signer then
-            errors := errors.push s!"{r.path}: withdraw signer {w.signer} is not the approve record's signer {a.signer}"
-          if let some cs := w.constants then
-            for c in cs do
-              unless a.constants.any (·.1 == c) do
-                errors := errors.push s!"{r.path}: {c} is not in the withdrawn record"
+  -- Authority: the withdraw rule.
+  for (r, ps) in (Ledger.build cfg loaded).problems do
+    for p in ps do errors := errors.push s!"{r.path}: {p}"
   if let some baseRef := baseRef? then
     let mb := strTrim (← IO.Process.run
       { cmd := "git", args := #["merge-base", baseRef, "HEAD"], cwd := root })

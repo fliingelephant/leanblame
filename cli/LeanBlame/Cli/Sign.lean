@@ -124,34 +124,26 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
     IO.println s!"approve {id} {path} ({constants.size} constants of {m})"
   return 0
 
-/-- Find a record by id (`sha256:<hex>` or `<hex>`) or by file path. -/
-def findRecord (root : System.FilePath) (cfg : Config) (ref : String) : IO LoadedRecord := do
-  let (all, _) ← loadAllRecords root cfg
-  let id ← if isHash ref then pure ref
-    else if isHexDigest ref then pure (mkHash ref)
-    else if ← (System.FilePath.mk ref).pathExists then
-      pure (sha256OfBytes (← IO.FS.readBinFile ref))
-    else fail s!"{ref}: not a record id or file"
-  match all.find? (·.hash == id) with
-  | some r => return r
-  | none => fail s!"no record {id} in the records directories"
+/-- A record id from `sha256:<hex>`, `<hex>` or the path of a record file. -/
+def recordId (ref : String) : IO String := do
+  if isHash ref then return ref
+  if isHexDigest ref then return mkHash ref
+  if ← (System.FilePath.mk ref).pathExists then return sha256OfBytes (← IO.FS.readBinFile ref)
+  fail s!"{ref}: not a record id or file"
 
 /-- Withdraw some or all constants of one of your approve records. -/
 def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
     (constants? : Option (Array String)) (note? : Option String) : IO UInt32 := do
   let cfg ← Config.load root
   let signer ← resolveSigner signer?
-  let target ← findRecord root cfg ref
-  let .approve a := target.record | fail s!"{target.hash} is a withdraw; only approve records can be withdrawn"
-  unless a.signer == signer do
-    fail s!"{target.hash} was signed by {a.signer}; only its signer can withdraw it (pass --signer)"
-  if let some cs := constants? then
-    for c in cs do
-      unless a.constants.any (·.1 == c) do fail s!"{c} is not in record {target.hash}"
-  let r : Record := .withdraw {
-    signer, date := ← UtcTime.now, refersTo := target.hash, constants := constants?, note := note? }
-  let (id, path) ← writeRecord (← recordsDir root cfg) r
-  IO.println s!"withdraw {id} {path} (refers to {target.hash})"
+  let refersTo ← recordId ref
+  let (all, _) ← loadAllRecords root cfg
+  let ledger := Ledger.build cfg all
+  let w : WithdrawRecord := { signer, date := ← UtcTime.now, refersTo, constants := constants?, note := note? }
+  if let .error ps := withdrawCovers ledger.byId w then
+    fail s!"cannot withdraw: {"; ".intercalate ps.toList}"
+  let (id, path) ← writeRecord (← recordsDir root cfg) (.withdraw w)
+  IO.println s!"withdraw {id} {path} (refers to {refersTo})"
   return 0
 
 end LeanBlame.Sign

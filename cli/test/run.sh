@@ -147,9 +147,10 @@ echo "== withdraw"
 run sign --withdraw "$basic_record" --signer local:alice --note "energy was wrong"
 grep -q "^withdraw sha256:" <<<"$out" || fail "no withdraw record: $out"
 withdraw_record="$(awk '/^withdraw /{print $2}' <<<"$out")"
-if "$lb" sign --withdraw "$basic_record" --signer local:bob >/dev/null 2>&1; then
+if "$lb" sign --withdraw "$basic_record" --signer local:bob >/dev/null 2>"$work/sign.err"; then
   fail "bob withdrew alice's record"
 fi
+grep -q "only its signer can withdraw it" "$work/sign.err" || fail "bob's withdraw: $(cat "$work/sign.err")"
 ok "only the signer can withdraw"
 run validate
 ok "validate: $out"
