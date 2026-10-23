@@ -32,44 +32,35 @@ allowed_signers = \"any\"   # or a list of provider:id
 # providers = [\"openreview\", \"orcid\", \"github\"]
 "
 
-private def strArray (k : String) (v : Lake.Toml.Value) : Except String (Array String) :=
-  match v with
-  | .array _ vs => vs.mapM fun
-    | .string _ s => .ok s
-    | _ => .error s!"`{k}` must be a list of strings"
-  | _ => .error s!"`{k}` must be a list of strings"
-
-def Config.ofTable (t : Lake.Toml.Table) : Except String Config := do
-  let mut cfg : Config := {}
-  for (k, v) in t.items do
-    match keyString k, v with
-    | "records", v => cfg := { cfg with records := ← strArray "records" v }
-    | "exclude", v =>
-      let xs ← strArray "exclude" v
-      for x in xs do
-        unless isHash x do throw s!"`exclude`: `{x}` is not a sha256: record hash"
-      cfg := { cfg with exclude := xs }
-    | "conventions", .string _ s => cfg := { cfg with conventions := some s }
-    | "providers", v => cfg := { cfg with providers := ← strArray "providers" v }
-    | "required_signers", .integer _ n =>
-      if n < 1 then throw "`required_signers` must be at least 1"
-      cfg := { cfg with requiredSigners := n.toNat }
-    | "allowed_signers", .string _ "any" => cfg := { cfg with allowedSigners := none }
-    | "allowed_signers", .string _ s =>
-      throw s!"`allowed_signers = \"{s}\"`: a records repository as the signer list is not implemented yet; use \"any\" or a list of provider:id"
-    | "allowed_signers", v =>
-      let ids ← strArray "allowed_signers" v
+open Lake.Toml (DecodeM Table logDecodeErrorAt) in
+/-- Decode a parsed `leanblame.toml`, logging every problem. -/
+def Config.decode (t : Table) : DecodeM Config := do
+  checkKeys t #["records", "exclude", "conventions", "providers", "required_signers",
+    "allowed_signers"] Config.fileName
+  let d : Config := {}
+  let exclude : Array String ← t.tryDecodeD `exclude d.exclude
+  for x in exclude do
+    unless isHash x do logDecodeErrorAt (refOf t `exclude) s!"`exclude`: `{x}` is not a sha256: record hash"
+  let requiredSigners ← t.tryDecodeD `required_signers d.requiredSigners
+  if requiredSigners < 1 then
+    logDecodeErrorAt (refOf t `required_signers) "`required_signers` must be at least 1"
+  let allowedSigners ← match t.find? `allowed_signers with
+    | none | some (.string _ "any") => pure none
+    | some (.string ref s) =>
+      logDecodeErrorAt ref s!"`allowed_signers = \"{s}\"`: a records repository as the signer list is not implemented yet; use \"any\" or a list of provider:id"
+      pure none
+    | some v =>
+      let ids : Array String ← Lake.Toml.tryDecodeD #[] (Lake.decodeToml v)
       for id in ids do
-        unless isSignerId id do throw s!"`allowed_signers`: `{id}` is not provider:id"
-      cfg := { cfg with allowedSigners := some ids }
-    | key, _ => throw s!"unknown or ill-typed key `{key}`"
-  return cfg
+        unless isSignerId id do logDecodeErrorAt v.ref s!"`allowed_signers`: `{id}` is not provider:id"
+      pure (some ids)
+  return { records := ← t.tryDecodeD `records d.records, exclude
+           conventions := ← t.tryDecode? `conventions, providers := ← t.tryDecodeD `providers d.providers
+           requiredSigners, allowedSigners }
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/
-def Config.parse (contents path : String) : IO (Except String Config) := do
-  match ← parseToml contents path with
-  | .error msgs => return .error ("\n".intercalate msgs.toList)
-  | .ok t => return Config.ofTable t
+def Config.parse (contents path : String) : IO (Except String Config) :=
+  return (← parseToml contents path Config.decode).mapError ("\n".intercalate ·.toList)
 
 def Config.load (root : System.FilePath) : IO Config := do
   let path := root / Config.fileName

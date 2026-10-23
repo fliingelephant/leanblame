@@ -30,7 +30,7 @@ def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array
   let path := root / "lakefile.toml"
   unless ← path.pathExists do
     fail "cannot find the library: no lakefile.toml here (for lakefile.lean, pass --lib NAME)"
-  let .ok t ← parseToml (← IO.FS.readFile path) path.toString | fail s!"{path}: not valid TOML"
+  let .ok t ← parseToml (← IO.FS.readFile path) path.toString pure | fail s!"{path}: not valid TOML"
   let libs : Array String := match t.find? `lean_lib with
     | some (.array _ vs) => vs.filterMap fun
       | .table _ lt => match lt.find? `name with

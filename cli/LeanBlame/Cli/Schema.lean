@@ -18,17 +18,49 @@ open Lean (Json ToJson toJson)
 
 /-! TOML -/
 
-/-- Parse TOML text; `fileName` names it in messages. -/
-def parseToml (contents fileName : String) : IO (Except (Array String) Lake.Toml.Table) := do
-  match ← (Lake.Toml.loadToml (Lean.Parser.mkInputContext contents fileName)).toBaseIO with
-  | .ok t => return .ok t
+open Lake.Toml (DecodeM Table logDecodeErrorAt)
+
+/-- Parse TOML text and decode it, collecting every problem, each with its line and column.
+`fileName` names the text in messages. -/
+def parseToml (contents fileName : String) (decode : Table → DecodeM α) :
+    IO (Except (Array String) α) := do
+  let ictx := Lean.Parser.mkInputContext contents fileName
+  match ← (Lake.Toml.loadToml ictx).toBaseIO with
   | .error log => return .error ((← log.toList.mapM (·.toString)).toArray.map strTrim)
+  | .ok t =>
+    match (decode t).run #[] with
+    | .ok a errs =>
+      if errs.isEmpty then return .ok a
+      return .error <| errs.map fun e => match e.ref.getPos? with
+        | some p => let pos := ictx.fileMap.toPosition p; s!"{pos.line}:{pos.column}: {e.msg}"
+        | none => e.msg
+    | .error e _ => nomatch e
 
 /-- A TOML key as written: a bare key is not escaped. -/
 def keyString (k : Lean.Name) : String :=
   match k with
   | .str .anonymous s => s
   | _ => k.toString (escape := false)
+
+/-- Where key `k` of `t` is, for messages. -/
+def refOf (t : Table) (k : Lean.Name) : Lean.Syntax := (t.find? k).map (·.ref) |>.getD .missing
+
+/-- Log every key of `t` that is not in `allowed`. -/
+def checkKeys (t : Table) (allowed : Array String) (what : String) : DecodeM Unit :=
+  t.items.forM fun (k, v) => unless allowed.contains (keyString k) do
+    logDecodeErrorAt v.ref s!"unknown key `{keyString k}` in {what}"
+
+/-- The required string `k` of `t`; when it is a string that fails `ok`, log `msg` at it. -/
+def decodeStr (t : Table) (k : Lean.Name) (ok : String → Bool := fun _ => true)
+    (msg : String → String := fun _ => "") : DecodeM String := do
+  let s ← t.tryDecode k
+  if let some (.string ref _) := t.find? k then
+    unless ok s do logDecodeErrorAt ref s!"`{keyString k}`: {msg s}"
+  return s
+
+/-- The table `k` of `t`, empty when it is missing or not a table (the error is logged). -/
+def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
+  Lake.Toml.tryDecodeD .empty do (← t.decodeValue k).decodeTable
 
 /-! ## 1. Boundary list -/
 
@@ -210,103 +242,45 @@ def toToml : Record → String
 
 /-! Reading records. Strict: unknown keys and keys of the other action are errors. -/
 
-private abbrev Decoder := StateT (Array String) Id
+def hashMsg (s : String) : String := s!"`{s}` is not sha256: plus 64 lowercase hex digits"
 
-private def report (msg : String) : Decoder Unit := modify (·.push msg)
-
-private def getStr? (t : Lake.Toml.Table) (k : String) (required : Bool) : Decoder (Option String) := do
-  match t.find? (Lean.Name.mkSimple k) with
-  | some (.string _ s) => return some s
-  | some _ => report s!"`{k}` must be a string"; return none
-  | none => (if required then report s!"missing `{k}`" else pure ()); return none
-
-private def getHash? (t : Lake.Toml.Table) (k : String) (required : Bool) : Decoder (Option String) := do
-  let some s ← getStr? t k required | return none
-  unless isHash s do report s!"`{k}` must be sha256: plus 64 lowercase hex digits"
-  return some s
-
-/-- Decode a parsed TOML table as a record, collecting every problem. -/
-def ofTable (t : Lake.Toml.Table) : Except (Array String) Record :=
-  let act : Decoder (Option Record) := do
-    let schema ← getStr? t "schema" true
-    if let some s := schema then
-      unless s == schemaId do report s!"`schema` is `{s}`, expected `{schemaId}`"
-    let signer ← getStr? t "signer" true
-    if let some s := signer then
-      unless isSignerId s do report s!"`signer` must be provider:id, got `{s}`"
-    let date ← match t.find? `date with
-      | some (.dateTime _ dt) =>
-        match UtcTime.ofToml? dt with
-        | .ok d => pure (some d)
-        | .error e => report s!"`date`: {e}"; pure none
-      | some _ => report "`date` must be a TOML datetime"; pure none
-      | none => report "missing `date`"; pure none
-    let note ← getStr? t "note" false
-    let action ← getStr? t "action" true
-    match action with
-    | some "approve" =>
-      let allowed := #["schema", "action", "signer", "date", "constants", "module", "commit",
-        "toolchain", "deps", "export", "boundary", "evidence", "note"]
-      for (k, _) in t.items do
-        unless allowed.contains (keyString k) do report s!"unknown key `{keyString k}` in an approve record"
-      let module ← getStr? t "module" true
-      let commit ← getStr? t "commit" true
-      let toolchain ← getStr? t "toolchain" true
-      let exportHash ← getHash? t "export" true
-      let boundary ← getHash? t "boundary" true
-      let evidence ← getHash? t "evidence" false
-      let deps ← match t.find? `deps with
-        | some (.table _ dt) => dt.items.filterMapM fun (k, v) => do
-            match v with
-            | .string _ s => return some (keyString k, s)
-            | _ => report s!"`deps.{keyString k}` must be a string"; return none
-        | some _ => report "`deps` must be a table"; pure #[]
-        | none => report "missing `deps`"; pure #[]
-      let constants ← match t.find? `constants with
-        | some (.table _ ct) => ct.items.filterMapM fun (k, v) => do
-            match v with
-            | .string _ s =>
-              unless isHash s do report s!"`constants.\"{keyString k}\"` must be a sha256 hash"
-              return some (keyString k, s)
-            | _ => report s!"`constants.\"{keyString k}\"` must be a string"; return none
-        | some _ => report "`constants` must be a table of name = claim hash"; pure #[]
-        | none => report "missing `constants`"; pure #[]
-      if constants.isEmpty then report "`constants` must list at least one constant"
-      match signer, date, module, commit, toolchain, exportHash, boundary with
-      | some signer, some date, some module, some commit, some toolchain, some exportHash,
-          some boundary =>
-        return some (.approve {
-          signer := signer, date := date, module := module, commit := commit
-          toolchain := toolchain, deps := deps, exportHash := exportHash, boundary := boundary
-          constants := constants, evidence := evidence, note := note })
-      | _, _, _, _, _, _, _ => return none
-    | some "withdraw" =>
-      let allowed := #["schema", "action", "signer", "date", "constants", "refers_to", "note"]
-      for (k, _) in t.items do
-        unless allowed.contains (keyString k) do report s!"unknown key `{keyString k}` in a withdraw record"
-      let refersTo ← getHash? t "refers_to" true
-      let constants ← match t.find? `constants with
-        | some (.array _ vs) => some <$> vs.filterMapM fun v => do
-            match v with
-            | .string _ s => return some s
-            | _ => report "`constants` must be a list of names"; return none
-        | some _ => report "`constants` must be a list of names"; pure none
-        | none => pure none
-      match signer, date, refersTo with
-      | some signer, some date, some refersTo =>
-        return some (.withdraw {
-          signer := signer, date := date, refersTo := refersTo, constants := constants
-          note := note })
-      | _, _, _ => return none
-    | some a => report s!"`action` must be approve or withdraw, got `{a}`"; return none
-    | none => return none
-  match act.run #[] with
-  | (some r, errs) => if errs.isEmpty then .ok r else .error errs
-  | (none, errs) => .error (if errs.isEmpty then #["not a record"] else errs)
+/-- Decode a parsed TOML table as a record. Missing or bad fields log an error and decode to a
+default, so every problem is reported. -/
+def decode (t : Table) : DecodeM Record := do
+  discard <| decodeStr t `schema (· == schemaId) (s!"is `{·}`, expected `{schemaId}`")
+  let signer ← decodeStr t `signer isSignerId (s!"`{·}` is not provider:id")
+  let dt : Lake.Toml.DateTime ← t.tryDecode `date
+  let date ← match UtcTime.ofToml? dt with
+    | .ok d => pure d
+    | .error e => logDecodeErrorAt (refOf t `date) s!"`date`: {e}"; pure default
+  let note ← t.tryDecode? `note
+  match ← decodeStr t `action (· matches "approve" | "withdraw") (s!"is `{·}`, not approve or withdraw") with
+  | "approve" =>
+    checkKeys t #["schema", "action", "signer", "date", "constants", "module", "commit", "toolchain",
+      "deps", "export", "boundary", "evidence", "note"] "an approve record"
+    let deps ← decodeTable t `deps
+    let ct ← decodeTable t `constants
+    if ct.items.isEmpty then logDecodeErrorAt .missing "`constants` must list at least one constant"
+    return .approve {
+      signer, date, note, module := ← decodeStr t `module, commit := ← decodeStr t `commit
+      toolchain := ← decodeStr t `toolchain
+      deps := ← deps.items.mapM fun (k, _) => return (keyString k, ← decodeStr deps k)
+      exportHash := ← decodeStr t `export isHash hashMsg
+      boundary := ← decodeStr t `boundary isHash hashMsg
+      constants := ← ct.items.mapM fun (k, _) => return (keyString k, ← decodeStr ct k isHash hashMsg)
+      evidence := ← if t.contains `evidence then some <$> decodeStr t `evidence isHash hashMsg
+        else pure none }
+  | "withdraw" =>
+    checkKeys t #["schema", "action", "signer", "date", "constants", "refers_to", "note"]
+      "a withdraw record"
+    return .withdraw {
+      signer, date, note, refersTo := ← decodeStr t `refers_to isHash hashMsg
+      constants := ← t.tryDecode? `constants }
+  | _ => return default
 
 /-- Parse record text. -/
 def parse (contents : String) (fileName : String) : IO (Except (Array String) Record) :=
-  return (← parseToml contents fileName) >>= ofTable
+  parseToml contents fileName decode
 
 end Record
 
