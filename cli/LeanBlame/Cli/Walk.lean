@@ -40,9 +40,7 @@ def kindOf : ConstantInfo → String
 
 /-- One hashed constant. -/
 structure Node where
-  name : Name
   fields : Canon.Fields
-  tagged : Bool
   informal : Option String
   /-- Direct hash dependencies, sorted by printed name. -/
   deps : Array Name
@@ -51,8 +49,6 @@ structure Node where
   /-- Tagged declarations only. -/
   spec : Option String
   claim : String := ""
-  /-- The group hash, when the constant lies on a cycle. -/
-  group : Option String := none
   deriving Inhabited
 
 /-- Every constant reached from the boundary list, hashed. -/
@@ -132,7 +128,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
   let fields : Canon.Fields := {
     kind := kindOf info, name := info.name, uparams := ups.length, typeHash, bodyHash, safety }
   return {
-    name := info.name, fields, tagged := informal.isSome, informal, deps := directDeps
+    fields, informal, deps := directDeps
     core := Canon.core fields, own := Canon.own fields informal
     spec := informal.map (Canon.spec fields ·) }
 
@@ -249,7 +245,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
       let g := Canon.group owns entries
       for m in members do
         let node := nodes[m]!
-        nodes := nodes.insert m { node with claim := Canon.member g m, group := some g }
+        nodes := nodes.insert m { node with claim := Canon.member g m }
   let taggedSet : Std.HashSet Name := order.foldl (·.insert ·) {}
   return { nodes, tagged := taggedSet, boundary := order }
 

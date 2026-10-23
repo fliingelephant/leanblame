@@ -72,12 +72,6 @@ def ofToml? (dt : Lake.Toml.DateTime) : Except String UtcTime :=
     else .error "date must be in UTC (offset Z)"
   | _ => .error "date must be an offset datetime in UTC, e.g. 2026-10-23T14:02:11Z"
 
-/-- From an ISO 8601 string as written by `toIso` (fractional seconds and `+00:00` accepted). -/
-def ofIso? (s : String) : Except String UtcTime :=
-  match Lake.Toml.DateTime.ofString? s with
-  | some dt => ofToml? dt
-  | none => .error s!"not an ISO 8601 UTC datetime: {s}"
-
 end UtcTime
 
 end LeanBlame

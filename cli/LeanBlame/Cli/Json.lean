@@ -12,7 +12,6 @@ open Lean (Json)
 /-- JSON with ordered object fields, for output. -/
 inductive OJson where
   | null
-  | bool (b : Bool)
   | num (n : Int)
   | str (s : String)
   | arr (xs : Array OJson)
@@ -36,7 +35,6 @@ private def indentStr (n : Nat) : String := "".pushn ' ' n
 partial def render (j : OJson) (indent : Nat := 0) : String :=
   match j with
   | .null => "null"
-  | .bool b => toString b
   | .num n => toString n
   | .str s => Json.renderString s
   | .arr xs =>
@@ -63,9 +61,6 @@ def obj (j : Json) (what : String) : Except String (Std.TreeMap.Raw String Json)
   | .obj kvs => .ok kvs
   | _ => .error s!"{what}: expected an object"
 
-def field? (o : Std.TreeMap.Raw String Json) (k : String) : Option Json :=
-  o.get? k
-
 def field (o : Std.TreeMap.Raw String Json) (k : String) (what : String) : Except String Json :=
   match o.get? k with
   | some v => .ok v
@@ -76,31 +71,13 @@ def str (j : Json) (what : String) : Except String String :=
   | .str s => .ok s
   | _ => .error s!"{what}: expected a string"
 
-def nat (j : Json) (what : String) : Except String Nat :=
-  match j with
-  | .num n => if n.exponent == 0 && n.mantissa ≥ 0 then .ok n.mantissa.toNat else .error s!"{what}: expected a natural number"
-  | _ => .error s!"{what}: expected a natural number"
-
-def bool (j : Json) (what : String) : Except String Bool :=
-  match j with
-  | .bool b => .ok b
-  | _ => .error s!"{what}: expected a boolean"
-
 def arr (j : Json) (what : String) : Except String (Array Json) :=
   match j with
   | .arr xs => .ok xs
   | _ => .error s!"{what}: expected an array"
 
-def strArr (j : Json) (what : String) : Except String (Array String) := do
-  (← arr j what).mapM (str · what)
-
 def strField (o : Std.TreeMap.Raw String Json) (k : String) (what : String) : Except String String := do
   str (← field o k what) s!"{what}.{k}"
-
-def optStrField (o : Std.TreeMap.Raw String Json) (k : String) (what : String) : Except String (Option String) :=
-  match o.get? k with
-  | none | some .null => .ok none
-  | some v => some <$> str v s!"{what}.{k}"
 
 /-- An object whose values are all strings, in key order. -/
 def strMap (j : Json) (what : String) : Except String (Array (String × String)) := do

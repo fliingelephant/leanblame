@@ -1,7 +1,8 @@
 /-
-The four interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML),
-release manifest (JSON), status (JSON). Each has a Lean structure, an emitter
-that writes the fields in the order docs/14 lists them, and a strict reader.
+The interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML) and
+status (JSON), each a Lean structure with an emitter that writes the fields in
+the order docs/14 lists them; the boundary list and the record have a strict
+reader. The release manifest comes with `release`.
 
 Declaration names are kept as strings, exactly as `Lean.Name.toString` prints
 them; the commands map them back to constants through the export.
@@ -300,70 +301,6 @@ def parse (contents : String) (fileName : String) : IO (Except (Array String) Re
 
 end Record
 
-/-! ## 3. Release manifest -/
-
-structure KernelReport where
-  checker : String
-  version : String
-  passed : Bool
-  deriving Inhabited, Repr
-
-structure TheoremReport where
-  status : String
-  axioms : Array String
-  deriving Inhabited, Repr
-
-structure ReleaseManifest where
-  library : String
-  tag : String
-  commit : String
-  toolchain : String
-  deps : Array (String × String)
-  exportHash : String
-  boundary : String
-  records : Array String
-  kernel : KernelReport
-  theorems : Array (String × TheoremReport)
-  proven : Nat
-  «open» : Nat
-  deriving Inhabited, Repr
-
-def ReleaseManifest.schemaId : String := "leanblame.release.1"
-
-def ReleaseManifest.toOJson (m : ReleaseManifest) : OJson :=
-  .obj #[("schema", .str ReleaseManifest.schemaId), ("library", .str m.library),
-    ("tag", .str m.tag), ("commit", .str m.commit), ("toolchain", .str m.toolchain),
-    ("deps", .strMap m.deps), ("export", .str m.exportHash), ("boundary", .str m.boundary),
-    ("records", .strs m.records),
-    ("kernel", .obj #[("checker", .str m.kernel.checker), ("version", .str m.kernel.version),
-      ("passed", .bool m.kernel.passed)]),
-    ("theorems", .obj (m.theorems.map fun (n, t) =>
-      (n, .obj #[("status", .str t.status), ("axioms", .strs t.axioms)]))),
-    ("counts", .obj #[("proven", .num m.proven), ("open", .num m.open)])]
-
-def ReleaseManifest.fromJson? (j : Json) : Except String ReleaseManifest := do
-  let w := "release manifest"
-  let o ← obj j w
-  let schema ← strField o "schema" w
-  unless schema == ReleaseManifest.schemaId do throw s!"{w}: schema is `{schema}`"
-  let k ← obj (← field o "kernel" w) s!"{w}.kernel"
-  let ths ← obj (← field o "theorems" w) s!"{w}.theorems"
-  let theorems ← ths.toList.toArray.mapM fun (n, tj) => do
-    let to ← obj tj s!"{w}.theorems.{n}"
-    return (n, { status := ← strField to "status" n, axioms := ← strArr (← field to "axioms" n) n })
-  let counts ← obj (← field o "counts" w) s!"{w}.counts"
-  return {
-    library := ← strField o "library" w, tag := ← strField o "tag" w
-    commit := ← strField o "commit" w, toolchain := ← strField o "toolchain" w
-    deps := ← strMap (← field o "deps" w) s!"{w}.deps"
-    exportHash := ← strField o "export" w, boundary := ← strField o "boundary" w
-    records := ← strArr (← field o "records" w) s!"{w}.records"
-    kernel := { checker := ← strField k "checker" w, version := ← strField k "version" w
-                passed := ← bool (← field k "passed" w) s!"{w}.kernel.passed" }
-    theorems
-    proven := ← nat (← field counts "proven" w) s!"{w}.counts.proven"
-    «open» := ← nat (← field counts "open" w) s!"{w}.counts.open" }
-
 /-! ## 4. Status -/
 
 structure Change where
@@ -437,45 +374,5 @@ def StatusReport.toOJson (s : StatusReport) : OJson :=
   .obj #[("schema", .str StatusReport.schemaId), ("library", .str s.library),
     ("commit", .str s.commit), ("export", .str s.exportHash), ("generated", .str s.generated.toIso),
     ("declarations", .obj (s.declarations.map fun (n, d) => (n, d.toOJson)))]
-
-def HistoryEntry.fromJson? (j : Json) : Except String HistoryEntry := do
-  let o ← obj j "history entry"
-  return {
-    record := ← strField o "record" "history", action := ← strField o "action" "history"
-    signer := ← strField o "signer" "history"
-    date := ← UtcTime.ofIso? (← strField o "date" "history")
-    claim := ← optStrField o "claim" "history", note := ← optStrField o "note" "history" }
-
-def StatusDecl.fromJson? (name : String) (j : Json) : Except String StatusDecl := do
-  let o ← obj j name
-  let p ← obj (← field o "proof" name) s!"{name}.proof"
-  let change ← (← arr (← field o "change" name) s!"{name}.change").mapM fun c => do
-    let co ← obj c s!"{name}.change"
-    return { cause := ← strField co "cause" name, names := ← strArr (← field co "names" name) name }
-  return {
-    module := ← strField o "module" name, kind := ← strField o "kind" name
-    informal := ← strField o "informal" name, informalSource := ← strField o "informal_source" name
-    claim := ← strField o "claim" name, state := ← strField o "state" name
-    flags := ← strArr (← field o "flags" name) name
-    change
-    signers := ← strArr (← field o "signers" name) name
-    history := ← (← arr (← field o "history" name) name).mapM HistoryEntry.fromJson?
-    blockedBy := ← strArr (← field o "blocked_by" name) name
-    proof := { status := ← strField p "status" name, axioms := ← strArr (← field p "axioms" name) name
-               exportHash := ← optStrField p "export" name }
-    evidence := ← optStrField o "evidence" name
-    taggedDeps := ← strArr (← field o "tagged_deps" name) name
-    closureSize := ← nat (← field o "closure_size" name) name }
-
-def StatusReport.fromJson? (j : Json) : Except String StatusReport := do
-  let o ← obj j "status"
-  let schema ← strField o "schema" "status"
-  unless schema == StatusReport.schemaId do throw s!"status: schema is `{schema}`"
-  let ds ← obj (← field o "declarations" "status") "status.declarations"
-  return {
-    library := ← strField o "library" "status", commit := ← strField o "commit" "status"
-    exportHash := ← strField o "export" "status"
-    generated := ← UtcTime.ofIso? (← strField o "generated" "status")
-    declarations := ← ds.toList.toArray.mapM fun (n, d) => do return (n, ← StatusDecl.fromJson? n d) }
 
 end LeanBlame
