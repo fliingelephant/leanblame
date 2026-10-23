@@ -27,13 +27,13 @@ open Lean
 @[inline] def netstr (acc : String) (s : String) : String :=
   acc ++ toString s.utf8ByteSize ++ ":" ++ s
 
-partial def nameComps (acc : String) : Name → String
-  | .anonymous => acc
-  | .str p s => netstr (nameComps acc p ++ "s") s
-  | .num p k => nameComps acc p ++ "i" ++ toString k ++ ";"
-
+/-- `n`, the components root first, `.`. -/
 def name (acc : String) (n : Name) : String :=
-  nameComps (acc ++ "n") n ++ "."
+  n.components.foldl (init := acc ++ "n") component ++ "."
+where component (acc : String) : Name → String
+  | .str _ s => netstr (acc ++ "s") s
+  | .num _ k => acc ++ "i" ++ toString k ++ ";"
+  | .anonymous => acc
 
 partial def level (ups : List Name) (acc : String) : Level → String
   | .zero => acc ++ "0"
