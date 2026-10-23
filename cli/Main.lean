@@ -1,7 +1,7 @@
 /-
 `leanblame`: command-line entry point.
 -/
-import LeanBlame.Cli.Sha256
+import LeanBlame.Cli.Config
 
 def usage : String :=
   "usage: leanblame <command> [args]\n\
