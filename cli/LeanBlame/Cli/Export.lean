@@ -12,6 +12,7 @@ import Lake.Toml
 import LeanBlame.Attr
 import LeanBlame.Cli.Schema
 import LeanBlame.Cli.Store
+import LeanBlame.Cli.Walk
 
 namespace LeanBlame.Export
 
@@ -166,6 +167,8 @@ structure Result where
   exportHash : String
   boundary : String
   boundaryList : BoundaryList
+  /-- Constants hashed into the claims. -/
+  hashed : Nat
 
 /-- Run the export in library root `root`. -/
 def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsGiven : Array String) :
@@ -216,9 +219,14 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
   runToFile exporter.toString (mods.map toString ++ #["--"] ++ roots.map toString) tmp root
     (env := #[("LEAN_PATH", some leanPath)])
+  -- Compute every claim hash now, so that problems surface at export time.
+  let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
+  let hashed ← match Walk.hashExport exported boundaryList with
+    | .ok h => pure h
+    | .error e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   let exportHash ← Store.putFile root tmp
   let boundary ← Store.putString root boundaryText
   Store.writeCurrent root { exportHash, boundary } commit
-  return { exportHash, boundary, boundaryList }
+  return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

@@ -2,7 +2,8 @@
 Adapted from lean-eval-generator, `LeanEvalGenerator/Core/Markers.lean`
 (https://github.com/leanprover/lean-eval-generator, commit 0b8cc2d1, the
 `@[eval_problem]` attribute that lean-eval uses).
-Copyright 2026 Lean FRO. Licensed under the Apache License, Version 2.0.
+Copyright 2026 Lean FRO. Licensed under the Apache License, Version 2.0
+(text in `cli/LICENSES/Apache-2.0.txt`).
 
 Changes: renamed `eval_problem` to `trusted`; dropped the manifest lookup, the
 binder validation and the hover info; kept the persistent extension and the

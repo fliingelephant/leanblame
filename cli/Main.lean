@@ -60,7 +60,7 @@ def cmdExport (args : List String) : IO UInt32 := do
   unless a.positional.isEmpty do throw (IO.userError "export takes no positional arguments")
   let root ← IO.currentDir
   let r ← Export.run root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
-  IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations"
+  IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"
   return 0
