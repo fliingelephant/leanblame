@@ -44,9 +44,6 @@ def tmpPath (root : System.FilePath) (tag : String) : IO System.FilePath := do
   let n ← IO.monoNanosNow
   return objectsDir root / s!".tmp-{tag}-{n}"
 
-def has (root : System.FilePath) (hash : String) : IO Bool :=
-  (objectPath root hash).pathExists
-
 def readString (root : System.FilePath) (hash : String) : IO String := do
   let p := objectPath root hash
   unless ← p.pathExists do

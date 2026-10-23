@@ -105,8 +105,11 @@ structure Ledger where
   /-- Withdraws that break the withdraw rule, excluded or not, with the problems. -/
   problems : Array (LoadedRecord × Array String)
 
-/-- A withdraw counts iff it is not excluded and keeps the withdraw rule. -/
+/-- A withdraw counts iff it is not excluded and keeps the withdraw rule. Records are kept in
+(date, id) order. -/
 def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
+  let all := all.qsort fun a b =>
+    ((compare a.record.date b.record.date).then (compare a.hash b.hash)) == .lt
   let byId : Std.HashMap String LoadedRecord := all.foldl (fun m r => m.insert r.hash r) {}
   let records := all.filter fun r => !cfg.exclude.contains r.hash
   let mut approves : Std.HashMap String (LoadedRecord × ApproveRecord) := {}

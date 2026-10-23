@@ -93,7 +93,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
   let cache : Status.Cache ← IO.mkRef {}
-  let hashed ← Status.hashed root cache cur.exportHash cur.boundary
+  let some hashed ← Status.hashed root cache cur.exportHash cur.boundary | unreachable!
   let boundary := hashed.boundary
   let claimOf : Std.HashMap String String :=
     hashed.declarations.foldl (init := {}) fun m (n, d) => m.insert d.name hashed.nodes[n]!.claim

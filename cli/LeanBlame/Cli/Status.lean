@@ -33,18 +33,21 @@ def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.Export
   unless ← p.pathExists do fail s!"export {hash} is not in the store"
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk p .read))
 
-/-- Hashed exports, by (export, boundary list). -/
-abbrev Cache := IO.Ref (Std.HashMap (String × String) Walk.Hashed)
+/-- Hashed exports, by (export, boundary list). `none` remembers a failure, reported by whoever
+saw it happen. -/
+abbrev Cache := IO.Ref (Std.HashMap (String × String) (Option Walk.Hashed))
 
+/-- Export `exportHash` hashed against boundary list `boundary`, both from the object store; throws
+if that fails, and is `none` if it failed before. -/
 def hashed (root : System.FilePath) (cache : Cache) (exportHash boundary : String) :
-    IO Walk.Hashed := do
-  if let some h := (← cache.get)[(exportHash, boundary)]? then return h
+    IO (Option Walk.Hashed) := do
+  if let some h? := (← cache.get)[(exportHash, boundary)]? then return h?
+  cache.modify (·.insert (exportHash, boundary) none)
   let b ← loadBoundary root boundary
-  let exported ← loadExported root exportHash
-  let h ← try Walk.hashExport exported b
+  let h ← try Walk.hashExport (← loadExported root exportHash) b
     catch e => fail s!"cannot hash export {exportHash}: {e}"
-  cache.modify (·.insert (exportHash, boundary) h)
-  return h
+  cache.modify (·.insert (exportHash, boundary) (some h))
+  return some h
 
 /--
 The boundary list to compare with for `--base A`: the one of the latest local `export` of `A`,
@@ -54,10 +57,10 @@ several lists can pair with one export; `status` then says which one it took.
 def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : String) :
     IO String := do
   let fromLog ← Store.boundariesForExport root exportHash
-  let named := ledger.records.filterMap fun r => match r.record with
-    | .approve a => if a.exportHash == exportHash then some (a.date, r.hash, a.boundary) else none
-    | .withdraw _ => none
-  let fromRecords := (named.qsort fun x y => x.1 > y.1 || (x.1 == y.1 && x.2.1 > y.2.1)).map (·.2.2)
+  -- The ledger's records are in (date, id) order: latest last.
+  let fromRecords := (ledger.records.filterMap fun r => match r.record with
+    | .approve a => if a.exportHash == exportHash then some a.boundary else none
+    | .withdraw _ => none).reverse
   let candidates := dedup (fromLog ++ fromRecords)
   let some b := candidates[0]? | fail s!"no boundary list known for export {exportHash}"
   if candidates.size > 1 then
@@ -65,17 +68,20 @@ def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : S
     IO.eprintln s!"warning: export {exportHash} pairs with {candidates.size} boundary lists (docstring edits); comparing with {b}, from {source}"
   return b
 
+/-- The approve records listing `name` and the counting withdraws covering it, in (date, id)
+order. -/
 def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
-  let approvals := (ledger.approvalsOf name).map fun (r, a, claim) =>
-    { record := r.hash, action := "approve", signer := a.signer, date := a.date
-      claim := some claim, note := a.note : HistoryEntry }
-  let withdrawals := (ledger.withdrawalsOf name).map fun w =>
-    let claim := (ledger.approves[w.withdraw.refersTo]?).bind fun (_, a) =>
-      (a.constants.find? (·.1 == name)).map (·.2)
-    { record := w.loaded.hash, action := "withdraw", signer := w.withdraw.signer
-      date := w.withdraw.date, claim, note := w.withdraw.note : HistoryEntry }
-  (approvals ++ withdrawals).qsort fun x y =>
-    x.date < y.date || (x.date == y.date && x.record < y.record)
+  let withdrawals := ledger.withdrawalsOf name
+  let claimIn (id : String) := (ledger.approves[id]?).bind fun (_, a) =>
+    (a.constants.find? (·.1 == name)).map (·.2)
+  ledger.records.filterMap fun r => match r.record with
+    | .approve a => (a.constants.find? (·.1 == name)).map fun (_, claim) =>
+      { record := r.hash, action := "approve", signer := a.signer, date := a.date, claim
+        note := a.note }
+    | .withdraw w => if withdrawals.any (·.loaded.hash == r.hash) then
+        some { record := r.hash, action := "withdraw", signer := w.signer, date := w.date
+               claim := claimIn w.refersTo, note := w.note }
+      else none
 
 /-- Everything `status` computes. -/
 structure Result where
@@ -104,18 +110,15 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     IO Result := do
   let cur ← Store.readCurrent root
   let cache : Cache ← IO.mkRef {}
-  let new ← hashed root cache cur.exportHash cur.boundary
+  let some new ← hashed root cache cur.exportHash cur.boundary | unreachable!
   let base ← match base? with
     | some a =>
       let a := if isHash a then a else mkHash a
-      let b ← boundaryForExport root ledger a
-      some <$> hashed root cache a b
+      hashed root cache a (← boundaryForExport root ledger a)
     | none => pure none
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
-  -- (export, boundary list) pairs of records whose causes cannot be computed.
-  let mut unknown : Std.HashSet (String × String) := {}
   -- Each tagged declaration's closure, walked once: (cut, untagged constants).
   let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
   for (n, d) in new.declarations do
@@ -135,26 +138,15 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     | some old =>
       if (old.nodes[n]?.map (·.claim)) != some claim then change := Walk.changes old new n
     | none =>
-      if state != "valid" && !live.isEmpty then
-        let (lastRec, last, lastClaim) := live.foldl (init := live[0]!) fun best x =>
-          let (br, b, _) := best
-          let (xr, xa, _) := x
-          if b.date < xa.date || (b.date == xa.date && br.hash < xr.hash) then x else best
-        let key := (last.exportHash, last.boundary)
-        if lastClaim != claim && !unknown.contains key then
+      -- The last live approval: the ledger's records are in (date, id) order.
+      if let some (lastRec, last, lastClaim) := live.back? then
+        if state != "valid" && lastClaim != claim then
           -- A record from elsewhere may name objects this store lacks, or that do not hash.
-          let old? ← try
-              if (← Store.has root last.exportHash) && (← Store.has root last.boundary) then
-                some <$> hashed root cache last.exportHash last.boundary
-              else
-                IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash} is not in the store; causes unknown"
-                pure none
-            catch e =>
-              IO.eprintln s!"warning: export {last.exportHash} of record {lastRec.hash}: {e}; causes unknown"
-              pure none
-          match old? with
-          | some old => change := Walk.changes old new n
-          | none => unknown := unknown.insert key
+          try
+            if let some old ← hashed root cache last.exportHash last.boundary then
+              change := Walk.changes old new n
+          catch e =>
+            IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
     let isThm := d.kind == "theorem"
     let (cut, untagged) := Walk.closureOf new n
     closures := closures.insert n (cut, untagged)
