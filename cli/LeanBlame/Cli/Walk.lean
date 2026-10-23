@@ -63,15 +63,6 @@ def Hashed.isTagged (h : Hashed) (n : Name) : Bool := h.tagged.contains n
 def sortNames (xs : Array Name) : Array Name :=
   (xs.map fun n => (n.toString, n)).qsort (fun a b => a.1 < b.1) |>.map (·.2)
 
-def dedupNames (xs : Array Name) : Array Name := Id.run do
-  let mut seen : Std.HashSet Name := {}
-  let mut out := #[]
-  for x in xs do
-    unless seen.contains x do
-      seen := seen.insert x
-      out := out.push x
-  return out
-
 namespace Hash
 
 structure Context where
@@ -124,7 +115,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
     deps := deps ++ iv.ctors.toArray ++ iv.all.toArray
   | .ctorInfo cv => deps := deps.push cv.induct
   | _ => pure ()
-  let directDeps := sortNames (dedupNames (deps.filter (· != info.name)))
+  let directDeps := sortNames (dedup (deps.filter (· != info.name)))
   let fields : Canon.Fields := {
     kind := kindOf info, name := info.name, uparams := ups.length, typeHash, bodyHash, safety }
   return {
@@ -239,7 +230,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
       let members := sortNames comp
       let memberSet : Std.HashSet Name := members.foldl (·.insert ·) {}
       let owns := members.toList.map fun m => nodes[m]!.own
-      let external := sortNames <| dedupNames <|
+      let external := sortNames <| dedup <|
         members.foldl (init := #[]) fun acc m => acc ++ (nodes[m]!.deps.filter (!memberSet.contains ·))
       let entries ← external.toList.mapM (entry nodes)
       let g := Canon.group owns entries

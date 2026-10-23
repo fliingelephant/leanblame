@@ -84,11 +84,8 @@ def readCurrent (root : System.FilePath) : IO Current := do
 first. Docstrings are not in exports, so a docstring edit pairs a new list with the same export. -/
 def boundariesForExport (root : System.FilePath) (exportHash : String) : IO (Array String) := do
   let some text ← readFileIfExists (dir root / "exports") | return #[]
-  let mut out := #[]
-  for l in (strLines text).reverse do
-    match l.splitOn " " with
-    | e :: b :: _ => if e == exportHash && !out.contains b then out := out.push b
-    | _ => pure ()
-  return out
+  return dedup <| (strLines text).reverse.toArray.filterMap fun l => match l.splitOn " " with
+    | e :: b :: _ => if e == exportHash then some b else none
+    | _ => none
 
 end LeanBlame.Store

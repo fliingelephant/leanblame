@@ -58,8 +58,7 @@ def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : S
     | .approve a => if a.exportHash == exportHash then some (a.date, r.hash, a.boundary) else none
     | .withdraw _ => none
   let fromRecords := (named.qsort fun x y => x.1 > y.1 || (x.1 == y.1 && x.2.1 > y.2.1)).map (·.2.2)
-  let candidates := (fromLog ++ fromRecords).foldl
-    (fun acc b => if acc.contains b then acc else acc.push b) #[]
+  let candidates := dedup (fromLog ++ fromRecords)
   let some b := candidates[0]? | fail s!"no boundary list known for export {exportHash}"
   if candidates.size > 1 then
     let source := if fromLog.contains b then "the latest local export" else "the latest record"
@@ -150,8 +149,7 @@ def compute (root : System.FilePath) (base? : Option String) : IO Result := do
     let approvals := ledger.approvalsOf d.name
     let live := approvals.filter fun (r, a, _) => ledger.isLive r.hash a.signer d.name
     let matching := live.filter fun (_, _, c) => c == claim
-    let signers := (matching.map fun (_, a, _) => a.signer).foldl
-      (fun acc s => if acc.contains s then acc else acc.push s) #[] |>.qsort (· < ·)
+    let signers := (dedup (matching.map fun (_, a, _) => a.signer)).qsort (· < ·)
     let state :=
       if signers.size ≥ cfg.requiredSigners then "valid"
       else if live.isEmpty then "unsigned" else "outdated"

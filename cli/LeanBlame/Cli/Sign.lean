@@ -111,7 +111,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
       -- Default: every tagged declaration of the library's own modules.
       pure <| boundary.declarations.filter (cur.modules.contains ·.module)
   if selected.isEmpty then fail "nothing to sign"
-  let modules := selected.foldl (fun acc d => if acc.contains d.module then acc else acc.push d.module) #[]
+  let modules := dedup (selected.map (·.module))
   let dir ← recordsDir root cfg
   let date ← UtcTime.now
   for m in modules.qsort (· < ·) do

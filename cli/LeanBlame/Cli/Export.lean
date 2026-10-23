@@ -57,11 +57,10 @@ def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Na
     | .ok (.arr xs) =>
       for x in xs do
         if let .str s := x then
-          let n := s.toName
-          unless mods.contains n do mods := mods.push n
+          mods := mods.push s.toName
     | _ => fail s!"unexpected output from `lake query`: {line}"
   if mods.isEmpty then fail "`lake query` reported no modules"
-  return mods
+  return dedup mods
 
 /-- The library's commit, with a warning when the work tree is dirty. -/
 def gitCommit (root : System.FilePath) : IO String := do

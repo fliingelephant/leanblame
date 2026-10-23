@@ -15,6 +15,18 @@ def strTrim (s : String) : String := s.trimAscii.copy
 def strLines (s : String) : List String :=
   (s.splitOn "\n").map fun l => if l.endsWith "\r" then (l.dropEnd 1).copy else l
 
+/-! Arrays. -/
+
+/-- `xs` without repetitions, keeping first occurrences in order. -/
+def dedup [BEq α] [Hashable α] (xs : Array α) : Array α := Id.run do
+  let mut seen : Std.HashSet α := {}
+  let mut out := #[]
+  for x in xs do
+    unless seen.contains x do
+      seen := seen.insert x
+      out := out.push x
+  return out
+
 /-! Hashes: `sha256:` plus 64 lowercase hex digits. -/
 
 def hashPrefix : String := "sha256:"
