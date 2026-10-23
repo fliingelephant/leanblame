@@ -189,10 +189,17 @@ ok "export refuses a tagged declaration without docstring and an unsafe one"
 
 echo "== stubs"
 for c in equiv release; do
-  set +e; "$lb" "$c" >/dev/null 2>&1; code=$?; set -e
+  set +e; "$lb" "$c" >/dev/null 2>"$work/stub.log"; code=$?; set -e
   [[ "$code" == 2 ]] || fail "$c should exit 2, got $code"
+  grep -q "not implemented" "$work/stub.log" || fail "$c: $(cat "$work/stub.log")"
 done
-ok "equiv and release exit 2"
+ok "equiv and release say not implemented and exit 2"
+for f in blueprint-manifest.json manual.toml; do
+  set +e; "$lb" export --boundary "$f" >/dev/null 2>"$work/stub.log"; code=$?; set -e
+  [[ "$code" == 2 ]] || fail "export --boundary $f should exit 2, got $code"
+  grep -q "not implemented" "$work/stub.log" || fail "export --boundary $f: $(cat "$work/stub.log")"
+done
+ok "the blueprint and manual list adapters say not implemented and exit 2"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"
