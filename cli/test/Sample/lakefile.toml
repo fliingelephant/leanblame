@@ -1,0 +1,11 @@
+name = "sample"
+defaultTargets = ["Sample"]
+
+# The `@[trusted]` attribute. `test/run.sh` rewrites this path when it copies
+# the library to a scratch directory.
+[[require]]
+name = "leanblame"
+path = "../.."
+
+[[lean_lib]]
+name = "Sample"
