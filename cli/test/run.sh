@@ -42,6 +42,18 @@ expect_line() {
   ok "$want"
 }
 export_lib() { "$lb" export >/dev/null 2>"$work/export.log" || { cat "$work/export.log" >&2; fail "export"; }; }
+# Edit a file in place with a sed expression.
+edit() { sed -i.bak "$2" "$1" && rm "$1.bak"; }
+# Run a command that must fail, and whose output (stdout and stderr) must match every pattern.
+must_fail() {
+  local patterns=()
+  while [[ "$1" != "--" ]]; do patterns+=("$1"); shift; done
+  shift
+  if "$@" >"$work/fail.log" 2>&1; then fail "should have failed: $*"; fi
+  for p in "${patterns[@]}"; do
+    grep -q -- "$p" "$work/fail.log" || fail "$*: no '$p' in: $(cat "$work/fail.log")"
+  done
+}
 current_export() { python3 -c 'import json; print(json.load(open(".leanblame/current"))["exportHash"])'; }
 
 echo "== init"
@@ -97,7 +109,7 @@ PY
 ok "status --json has the docs/14 fields"
 
 echo "== edit a body: pointEnergy"
-sed -i.bak 's/:= energy p.norm$/:= energy p.norm * 1/' Sample/Energy.lean && rm Sample/Energy.lean.bak
+edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
 export_lib
 run status
@@ -110,8 +122,7 @@ run status --base "$(current_export)"
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated"
 
 echo "== edit a dependency body: energy"
-sed -i.bak 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/' Sample/Basic.lean
-rm Sample/Basic.lean.bak
+edit Sample/Basic.lean 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/'
 commit "energy: new body"
 export_lib
 run status
@@ -121,15 +132,14 @@ expect_line Sample.pointEnergy \
   "Sample.pointEnergy outdated blocked-by=Sample.energy change=own-body:Sample.pointEnergy"
 
 echo "== edit an untagged helper: double"
-sed -i.bak 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/' Sample/Basic.lean
-rm Sample/Basic.lean.bak
+edit Sample/Basic.lean 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
 commit "double: new body"
 export_lib
 run status
 expect_line Sample.energy "Sample.energy outdated change=own-body:Sample.energy;untagged:Sample.double"
 
 echo "== edit informal text: energy's docstring"
-sed -i.bak 's/two units per site\./two units of energy per site./' Sample/Basic.lean && rm Sample/Basic.lean.bak
+edit Sample/Basic.lean 's/two units per site\./two units of energy per site./'
 commit "energy: new docstring"
 before="$(current_export)"
 export_lib
@@ -147,10 +157,7 @@ echo "== withdraw"
 run sign --withdraw "$basic_record" --signer local:alice --note "energy was wrong"
 grep -q "^withdraw sha256:" <<<"$out" || fail "no withdraw record: $out"
 withdraw_record="$(awk '/^withdraw /{print $2}' <<<"$out")"
-if "$lb" sign --withdraw "$basic_record" --signer local:bob >/dev/null 2>"$work/sign.err"; then
-  fail "bob withdrew alice's record"
-fi
-grep -q "only its signer can withdraw it" "$work/sign.err" || fail "bob's withdraw: $(cat "$work/sign.err")"
+must_fail "only its signer can withdraw it" -- "$lb" sign --withdraw "$basic_record" --signer local:bob
 ok "only the signer can withdraw"
 run validate
 ok "validate: $out"
@@ -174,21 +181,15 @@ run validate --base-ref "$first"
 ok "records added since $first: $out"
 record_file="records/${basic_record#sha256:}.toml"
 printf 'note = "edited"\n' >> "$record_file"
-if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "an edited record passed validate"; fi
-grep -q "record $basic_record of the merge base is missing" "$work/validate.log" \
-  || fail "edit not reported: $(cat "$work/validate.log")"
-grep -q "file name must be the sha256" "$work/validate.log" || fail "hash mismatch not reported"
+must_fail "record $basic_record of the merge base is missing" "file name must be the sha256" \
+  -- "$lb" validate --base-ref HEAD
 git checkout -q -- "$record_file"
 git rm -q "$record_file"
-if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a deleted record passed validate"; fi
-grep -q "record $basic_record of the merge base is missing" "$work/validate.log" \
-  || fail "deletion not reported: $(cat "$work/validate.log")"
+must_fail "record $basic_record of the merge base is missing" -- "$lb" validate --base-ref HEAD
 git checkout -q HEAD -- "$record_file"
 ok "validate refuses modified and deleted records"
 printf 'not a record\n' > records/notes.toml
-if "$lb" validate >"$work/validate.log" 2>&1; then fail "a misnamed file passed validate"; fi
-grep -q "records/notes.toml: not a record: the file name must be the sha256" "$work/validate.log" \
-  || fail "misnamed file not reported: $(cat "$work/validate.log")"
+must_fail "records/notes.toml: not a record: the file name must be the sha256" -- "$lb" validate
 "$lb" status >/dev/null 2>"$work/status.err" || fail "status with a misnamed file in records/"
 grep -q "records/notes.toml is not a valid record and was ignored" "$work/status.err" \
   || fail "status did not warn about the misnamed file: $(cat "$work/status.err")"
@@ -196,24 +197,21 @@ rm records/notes.toml
 ok "a misnamed file is a problem for validate and a warning for status"
 # Renaming the records directory in leanblame.toml must not hide a deletion.
 git mv records r
-sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
+edit leanblame.toml 's|^records = \["records/"\]|records = ["r/"]|'
 grep -q '^records = \["r/"\]' leanblame.toml || fail "test setup: records directory not renamed"
 git rm -q -f "r/${basic_record#sha256:}.toml"
-if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a renamed records directory hid a deletion"; fi
-grep -q "records/${basic_record#sha256:}.toml: record $basic_record of the merge base is missing" \
-  "$work/validate.log" || fail "deletion under the old records directory not reported: $(cat "$work/validate.log")"
+must_fail "records/${basic_record#sha256:}.toml: record $basic_record of the merge base is missing" \
+  -- "$lb" validate --base-ref HEAD
 git reset -q --hard HEAD
 ok "validate checks the merge base's records directories too"
 git mv records r
-sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
+edit leanblame.toml 's|^records = \["records/"\]|records = ["r/"]|'
 run validate --base-ref HEAD
 git reset -q --hard HEAD
 ok "moving every record to a new records directory passes"
 mkdir r && cp records/*.toml r/ && rm "r/${withdraw_record#sha256:}.toml"
-sed -i.bak 's|^records = \["records/"\]|records = ["r/"]|' leanblame.toml && rm leanblame.toml.bak
-if "$lb" validate --base-ref HEAD >"$work/validate.log" 2>&1; then fail "a repointed directory dropped a withdraw"; fi
-grep -q "record $withdraw_record of the merge base is missing" "$work/validate.log" \
-  || fail "dropped withdraw not reported: $(cat "$work/validate.log")"
+edit leanblame.toml 's|^records = \["records/"\]|records = ["r/"]|'
+must_fail "record $withdraw_record of the merge base is missing" -- "$lb" validate --base-ref HEAD
 rm -rf r && git checkout -q -- leanblame.toml
 ok "repointing the records directory to one without the withdraw fails"
 
@@ -226,27 +224,18 @@ namespace Sample
 @[trusted] unsafe def unsafeEnergy (n : Nat) : Nat := n
 end Sample
 EOF
-if "$lb" export >/dev/null 2>"$work/export.log"; then fail "export accepted bad tags"; fi
-grep -q "Sample.undocumented: tagged declarations need a docstring" "$work/export.log" \
-  || fail "missing docstring not reported: $(cat "$work/export.log")"
-grep -q "Sample.unsafeEnergy: \`unsafe\` declarations cannot be tagged" "$work/export.log" \
-  || fail "unsafe tag not reported: $(cat "$work/export.log")"
+must_fail "Sample.undocumented: tagged declarations need a docstring" \
+  'Sample.unsafeEnergy: `unsafe` declarations cannot be tagged' -- "$lb" export
 git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
 
 echo "== stubs"
-for c in equiv release; do
-  set +e; "$lb" "$c" >/dev/null 2>"$work/stub.log"; code=$?; set -e
-  [[ "$code" == 2 ]] || fail "$c should exit 2, got $code"
-  grep -q "not implemented" "$work/stub.log" || fail "$c: $(cat "$work/stub.log")"
+for args in equiv release "export --boundary blueprint-manifest.json" "export --boundary manual.toml"; do
+  set +e; "$lb" $args >/dev/null 2>"$work/stub.log"; code=$?; set -e
+  [[ "$code" == 2 ]] || fail "$args should exit 2, got $code"
+  grep -q "not implemented" "$work/stub.log" || fail "$args: $(cat "$work/stub.log")"
+  ok "$args says not implemented and exits 2"
 done
-ok "equiv and release say not implemented and exit 2"
-for f in blueprint-manifest.json manual.toml; do
-  set +e; "$lb" export --boundary "$f" >/dev/null 2>"$work/stub.log"; code=$?; set -e
-  [[ "$code" == 2 ]] || fail "export --boundary $f should exit 2, got $code"
-  grep -q "not implemented" "$work/stub.log" || fail "export --boundary $f: $(cat "$work/stub.log")"
-done
-ok "the blueprint and manual list adapters say not implemented and exit 2"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"
