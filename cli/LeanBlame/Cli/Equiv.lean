@@ -216,12 +216,12 @@ def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
   let mut left := 0
   for (n, d) in decls do
     unless names.isEmpty || names.contains n do continue
-    if d.state == "outdated" && d.change.size == 1 && d.change[0]!.cause == "untagged" then
+    if d.state == .outdated && d.change.size == 1 && d.change[0]!.cause == .untagged then
       let some (r, a, _) := (Status.liveApprovals ledger n).back? | continue
       targets := targets.push ({ name := nameOf[n]!, record := r.hash, claim := d.claim }, a)
-    else if !names.isEmpty && d.state != "valid" then
+    else if !names.isEmpty && d.state != .valid then
       left := left + 1
-      IO.eprintln (if d.state == "unsigned" then s!"{n}: unsigned: no approved meaning to compare with"
+      IO.eprintln (if d.state == .unsigned then s!"{n}: unsigned: no approved meaning to compare with"
         else s!"{Status.textLine n d}\n{n}: no goal: a cause other than `untagged`; a human reads")
   if targets.isEmpty then
     if left == 0 then IO.println "equiv: no outdated declaration whose only cause is untagged"

@@ -16,7 +16,7 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
   let r ← Status.compute root (← Ledger.load root) (causes := false) (warn := false)
   let decls := r.report.declarations
   -- 1. Signoff gate.
-  let invalid := decls.filter (·.2.state != "valid")
+  let invalid := decls.filter (·.2.state != .valid)
   unless invalid.isEmpty do
     for (n, d) in invalid do IO.eprintln (Status.textLine n d)
     IO.eprintln s!"release: {invalid.size} of {decls.size} tagged declarations are not valid"
@@ -35,7 +35,7 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
   let manifest : ReleaseManifest := {
     library := b.library, tag, commit := b.commit, toolchain := b.toolchain, deps := b.deps
     exportHash := r.cur.exportHash, boundary := r.cur.boundary, records := r.validRecords
-    theorems := (decls.filter (·.2.kind == "theorem")).map fun (n, d) => (n, d.proof) }
+    theorems := (decls.filter (·.2.kind == .«theorem»)).map fun (n, d) => (n, d.proof) }
   let text := jsonText manifest
   let hash ← Store.putString root text
   if let some out := out? then writeFileMkdirs out text

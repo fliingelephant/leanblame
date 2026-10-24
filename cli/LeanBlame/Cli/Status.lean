@@ -57,13 +57,13 @@ order. -/
 def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
   (ledger.entriesOf name).map fun
     | .approve r a claim =>
-      { record := r.hash, action := "approve", signer := a.signer, date := a.date, claim
+      { record := r.hash, action := .approve, signer := a.signer, date := a.date, claim
         note := a.note }
     | .withdraw r w =>
       let claim := match ((ledger.byId[w.refersTo]?).map (·.record) : Option Record) with
         | some (.approve a) => (a.constants.find? (·.1 == name)).map (·.2)
         | _ => none
-      { record := r.hash, action := "withdraw", signer := w.signer, date := w.date, claim
+      { record := r.hash, action := .withdraw, signer := w.signer, date := w.date, claim
         note := w.note }
 
 /-- The live approve records listing `name`, in (date, id) order, with the claim each carries. -/
@@ -91,9 +91,9 @@ structure Result where
 
 /-- A theorem's axioms against the permitted ones (docs/design/07): `proven` when each is standard or
 `signed`, `open` otherwise; and the axioms that are neither `sorryAx` nor permitted. -/
-def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : String × Array Name :=
+def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : ProofStatus × Array Name :=
   let permitted (a : Name) := Walk.standardAxioms.contains a || signed a
-  (if axioms.all permitted then "proven" else "open",
+  (if axioms.all permitted then .proven else .«open»,
    axioms.filter fun a => a != ``sorryAx && !permitted a)
 
 /-- `status` warns when a tagged declaration of this library uses an untagged one of it that could
@@ -122,7 +122,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
   -- Exports of last live approvals, hashed; `none` remembers a failure, warned about once.
   let mut olds : Std.HashMap (String × String) (Option Walk.Hashed) := {}
   -- Pass 1: state, change, signers, history.
-  let mut states : Std.HashMap Name String := {}
+  let mut states : Std.HashMap Name State := {}
   let mut validRecords : Array String := #[]
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
   -- Each tagged declaration's closure, walked once: (cut, untagged constants).
@@ -135,14 +135,14 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     let signers := ((matching.map fun (_, a, _) => a.signer).qsort (· < ·)).eraseReps
     validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
-      if signers.size ≥ ledger.cfg.requiredSigners then "valid"
-      else if live.isEmpty then "unsigned" else "outdated"
+      if signers.size ≥ ledger.cfg.requiredSigners then State.valid
+      else if live.isEmpty then .unsigned else .outdated
     let evidence ← evidenceFor root ledger d.name claim
     let closure := Walk.closureOf new n
     -- Causes: against the export of the last live approval (the ledger is in (date, id) order).
     let mut change : Array Change := #[]
     if let some (lastRec, last, lastClaim) := live.back? then
-      if causes && state != "valid" && lastClaim != claim then
+      if causes && state != .valid && lastClaim != claim then
         -- A record from elsewhere may name objects this store lacks, or that do not hash.
         let key := (last.exportHash, last.boundary)
         unless olds.contains key do
@@ -158,20 +158,20 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
       module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
       claim, state, change, signers, history := historyOf ledger d.name
       blockedBy := #[]
-      proof := { status := "n/a" }
+      proof := { status := .na }
       evidence
       taggedDeps := cut.map (·.toString)
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size })
   -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
   let cutOf (n : Name) : Array Name := (closures[n]?.map (·.1)).getD #[]
-  let signed (a : Name) : Bool := states[a]? == some "valid" &&
-    match new.nodes[a]? with | some nd => nd.fields.kind == "axiom" | none => false
+  let signed (a : Name) : Bool := states[a]? == some .valid &&
+    match new.nodes[a]? with | some nd => nd.fields.kind == .«axiom» | none => false
   let mut decls := #[]
   let mut warnings := #[]
   let mut unpermitted := #[]
   for (n, d, sd) in entries do
-    let proof : ProofReport ← if d.kind != "theorem" then pure sd.proof else do
+    let proof : ProofReport ← if d.kind != .«theorem» then pure sd.proof else do
       let some axioms := new.axioms[n]? | fail s!"internal: no axiom data for {n}"
       let (status, bad) := classifyAxioms axioms signed
       for a in bad do
@@ -186,7 +186,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
       stack := stack.pop
       if seen.contains y || y == n then continue
       seen := seen.insert y
-      if states[y]?.getD "unsigned" != "valid" then blocked := blocked.push y
+      if states[y]?.getD .unsigned != .valid then blocked := blocked.push y
       stack := stack ++ cutOf y
     decls := decls.push (n.toString,
       { sd with blockedBy := (Walk.sortNames blocked).map (·.toString), proof })
@@ -202,12 +202,12 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
 /-- One line per declaration: `NAME STATE [evidence=..] [blocked-by=..] [change=cause:names;..]`;
 the evidence is shown while there is something to sign. -/
 def textLine (name : String) (d : StatusDecl) : String :=
-  let parts := #[name, d.state] ++
-    (if d.state == "valid" then #[] else (d.evidence.toList.map fun e => s!"evidence={e}").toArray) ++
+  let parts := #[name, toString d.state] ++
+    (if d.state == .valid then #[] else (d.evidence.toList.map fun e => s!"evidence={e}").toArray) ++
     (if d.blockedBy.isEmpty then #[] else #[s!"blocked-by={",".intercalate d.blockedBy.toList}"]) ++
     (if d.change.isEmpty then #[] else
       #["change=" ++ ";".intercalate (d.change.toList.map fun c =>
-        c.cause ++ ":" ++ ",".intercalate c.names.toList)])
+        toString c.cause ++ ":" ++ ",".intercalate c.names.toList)])
   " ".intercalate parts.toList
 
 def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
@@ -222,9 +222,9 @@ def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
   else
     let decls := r.report.declarations
     for (n, d) in decls do IO.println (textLine n d)
-    let count (s : String) := (decls.filter (·.2.state == s)).size
+    let count (s : State) := (decls.filter (·.2.state == s)).size
     let blocked := (decls.filter (!·.2.blockedBy.isEmpty)).size
-    IO.println s!"{decls.size} tagged: {count "valid"} valid, {count "outdated"} outdated, {count "unsigned"} unsigned; {blocked} blocked"
+    IO.println s!"{decls.size} tagged: {count .valid} valid, {count .outdated} outdated, {count .unsigned} unsigned; {blocked} blocked"
   return 0
 
 /-- `blame NAME`: who signed it, when, at which claim hash. -/
@@ -248,10 +248,10 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
       | some d, some c => if c == d.claim then " (current)" else ""
       | _, _ => ""
     let live := match h.action with
-      | "approve" =>
+      | .approve =>
         let withdrawn := ledger.withdrawn.contains (h.record, name)
         if withdrawn then " withdrawn" else if ledger.cfg.allows h.signer then " live" else " signer-not-allowed"
-      | _ => ""
+      | .withdraw => ""
     IO.println s!"  {h.date.toIso}  {h.action}  {h.signer}  claim {h.claim.getD "-"}{current}  record {h.record}{live}"
     if let some note := h.note then IO.println s!"      note: {note}"
   return 0

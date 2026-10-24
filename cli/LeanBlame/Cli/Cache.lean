@@ -31,18 +31,20 @@ def nameFromJson? (j : Json) : Except String Name := do
 
 def nodeToJson (n : Walk.Node) : Json :=
   let f := n.fields
-  Json.mkObj [("name", nameToJson f.name), ("kind", f.kind), ("uparams", f.uparams),
-    ("type", f.typeHash), ("body", toJson f.bodyHash), ("safety", f.safety),
+  Json.mkObj [("name", nameToJson f.name), ("kind", toJson f.kind), ("uparams", f.uparams),
+    ("type", f.typeHash), ("body", toJson f.bodyHash), ("safety", toJson f.safety),
     ("informal", toJson n.informal), ("deps", .arr (n.deps.map nameToJson)), ("own", n.own),
     ("spec", toJson n.spec), ("claim", n.claim)]
 
 def nodeFromJson? (j : Json) : Except String Walk.Node := do
   let get (α) [FromJson α] (k : String) := j.getObjValAs? α k
+  let some kind := ofString? Kind.all (← get String "kind") | throw "unknown kind"
+  let some safety := ofString? Safety.all (← get String "safety") | throw "unknown safety"
   return {
     fields := {
-      kind := ← get String "kind", name := ← nameFromJson? (← j.getObjVal? "name")
+      kind, name := ← nameFromJson? (← j.getObjVal? "name")
       uparams := ← get Nat "uparams", typeHash := ← get String "type"
-      bodyHash := ← get (Option String) "body", safety := ← get String "safety" }
+      bodyHash := ← get (Option String) "body", safety }
     informal := ← get (Option String) "informal"
     deps := ← (← get (Array Json) "deps").mapM nameFromJson?
     own := ← get String "own", spec := ← get (Option String) "spec", claim := ← get String "claim" }

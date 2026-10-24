@@ -28,15 +28,15 @@ namespace LeanBlame.Walk
 open Lean
 
 /-- The export kind of a constant, as the boundary list and the hash name it. -/
-def kindOf : ConstantInfo → String
-  | .defnInfo _ => "def"
-  | .thmInfo _ => "theorem"
-  | .axiomInfo _ => "axiom"
-  | .inductInfo _ => "inductive"
-  | .ctorInfo _ => "ctor"
-  | .opaqueInfo _ => "opaque"
-  | .quotInfo _ => "quot"
-  | .recInfo _ => "rec"
+def kindOf : ConstantInfo → Kind
+  | .defnInfo _ => .«def»
+  | .thmInfo _ => .«theorem»
+  | .axiomInfo _ => .«axiom»
+  | .inductInfo _ => .«inductive»
+  | .ctorInfo _ => .ctor
+  | .opaqueInfo _ => .«opaque»
+  | .quotInfo _ => .quot
+  | .recInfo _ => .recursor
 
 /-- One hashed constant. -/
 structure Node where
@@ -101,7 +101,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
   let typeHash := Canon.exprHash ups type
   let mut deps := type.getUsedConstants
   let mut bodyHash : Option String := none
-  let mut safety := "safe"
+  let mut safety : Safety := .safe
   match info with
   | .defnInfo d =>
     match d.safety with
@@ -109,8 +109,8 @@ def mkNode (info : ConstantInfo) : HashM Node := do
       let body ← Erase.eraseProofs d.value
       bodyHash := some (Canon.exprHash ups body)
       deps := deps ++ body.getUsedConstants
-    | _ => safety := "partial"
-  | .opaqueInfo _ => safety := "opaque"
+    | _ => safety := .«partial»
+  | .opaqueInfo _ => safety := .«opaque»
   | .inductInfo iv =>
     bodyHash := some <| Canon.hashFields "leanblame.inductive.1"
       ([toString iv.numParams, toString iv.numIndices] ++
@@ -313,10 +313,10 @@ Dependencies that appear or disappear are explained by the change of whatever re
 def changes (old new : Hashed) (x : Name) (closure : Array Name × Array Name := closureOf new x) :
     Array Change := Id.run do
   let some n := new.nodes[x]? | return #[]
-  let some o := old.nodes[x]? | return #[{ cause := "own-body", names := #[x.toString] }]
+  let some o := old.nodes[x]? | return #[{ cause := .ownBody, names := #[x.toString] }]
   let mut out : Array Change := #[]
-  if o.informal != n.informal then out := out.push { cause := "own-text", names := #[x.toString] }
-  if o.fields != n.fields then out := out.push { cause := "own-body", names := #[x.toString] }
+  if o.informal != n.informal then out := out.push { cause := .ownText, names := #[x.toString] }
+  if o.fields != n.fields then out := out.push { cause := .ownBody, names := #[x.toString] }
   let (cut0, unt0) := closureOf old x
   let (cut1, unt1) := closure
   let cut0s : Std.HashSet Name := cut0.foldl (·.insert ·) {}
@@ -327,9 +327,9 @@ def changes (old new : Hashed) (x : Name) (closure : Array Name × Array Name :=
   let untagged := sortNames <| unt1.filter fun u => unt0s.contains u &&
     (old.nodes[u]?.map (·.own)) != (new.nodes[u]?.map (·.own))
   let names (xs : Array Name) := xs.map (·.toString)
-  unless depSpec.isEmpty do out := out.push { cause := "dep-spec", names := names depSpec }
-  unless cutMoved.isEmpty do out := out.push { cause := "cut-moved", names := names cutMoved }
-  unless untagged.isEmpty do out := out.push { cause := "untagged", names := names untagged }
+  unless depSpec.isEmpty do out := out.push { cause := .depSpec, names := names depSpec }
+  unless cutMoved.isEmpty do out := out.push { cause := .cutMoved, names := names cutMoved }
+  unless untagged.isEmpty do out := out.push { cause := .untagged, names := names untagged }
   return out
 
 end LeanBlame.Walk

@@ -21,7 +21,7 @@ Hashes are SHA-256 over fields encoded as `<len>:<bytes>`, each list prefixed
 with a domain tag.
 -/
 import LeanBlame.Cli.Erase
-import LeanBlame.Cli.Util
+import LeanBlame.Cli.Schema
 
 namespace LeanBlame.Canon
 
@@ -91,7 +91,7 @@ def optField : Option String → String
 
 /-- What enters `own` and `spec` for one constant. `status` compares them to charge `own-body`. -/
 structure Fields where
-  kind : String
+  kind : Kind
   name : Name
   uparams : Nat
   /-- Hex hash of the canonical type, proofs erased. -/
@@ -99,20 +99,20 @@ structure Fields where
   /-- Hex hash of the canonical body, proofs erased; `none` when no body is hashed
   (theorems, axioms, `opaque` and `partial` definitions, constructors, recursors). -/
   bodyHash : Option String
-  safety : String
+  safety : Safety
   deriving Inhabited, BEq
 
 /-- `own(c) = H(kind, name, uparams, type, body, safety, informal-if-tagged)`, type and body with
 proofs erased. -/
 def own (f : Fields) (informal? : Option String) : String :=
   hashFields "leanblame.own.1"
-    [f.kind, name "" f.name, toString f.uparams, f.typeHash, optField f.bodyHash, f.safety,
-     optField informal?]
+    [toString f.kind, name "" f.name, toString f.uparams, f.typeHash, optField f.bodyHash,
+     toString f.safety, optField informal?]
 
 /-- `spec(c) = H(kind, name, uparams, type, informal-text)`. -/
 def spec (f : Fields) (informal : String) : String :=
   hashFields "leanblame.spec.1"
-    [f.kind, name "" f.name, toString f.uparams, f.typeHash, informal]
+    [toString f.kind, name "" f.name, toString f.uparams, f.typeHash, informal]
 
 /-- A dependency's contribution to a claim: `("spec", spec(d))` or `("full", claim(d))`. -/
 inductive DepEntry where
