@@ -13,4 +13,10 @@ namespace Sample
 @[trusted] theorem energy_even (n : Nat) : energy n % 2 = 0 := by
   sorry
 
+/-- Postulate: a chain with at least one site has positive energy. -/
+@[trusted] axiom energy_pos (n : Nat) : 0 < energy (n + 1)
+
+/-- A one-site chain has positive energy. Proven from the postulate `energy_pos`. -/
+@[trusted] theorem one_site_pos : 0 < energy 1 := energy_pos 0
+
 end Sample

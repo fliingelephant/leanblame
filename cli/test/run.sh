@@ -4,9 +4,9 @@
 #   cli/test/run.sh            # from anywhere; needs elan (Lean 4.35.0), git, python3
 #
 # Copies the sample library to a scratch directory, makes it a git repository,
-# and walks through: init -> export -> sign -> status (valid) -> edit a body
-# -> status (outdated, own-body) -> edit a dependency body -> status (blocked)
-# -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
+# and walks through: init -> export -> sign -> status (valid) -> release -> edit
+# a body -> status (outdated, own-body) -> edit a dependency body -> status
+# (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
 # (withdrawn) -> blame -> validate (and its append-only check).
 set -euo pipefail
 
@@ -73,6 +73,9 @@ export_lib
 [[ "$(current_export)" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "no current export"
 first_export="$(current_export)"
 ok "export stored $first_export"
+must_fail "Sample.energy unsigned" "Sample.one_site_pos unsigned" "11 of 11 tagged declarations are not valid" \
+  -- "$lb" release --tag 2026.10
+ok "release refuses unsigned declarations and names them"
 
 echo "== sign"
 run sign --signer local:alice --note "first review"
@@ -87,7 +90,8 @@ commit "first signoff"
 echo "== status: everything valid"
 out="$("$lb" status 2>"$work/status.err")"
 for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
-         Sample.energy Sample.energy_even Sample.pointEnergy Sample.second_site; do
+         Sample.energy Sample.energy_even Sample.energy_pos Sample.one_site_pos Sample.pointEnergy \
+         Sample.second_site; do
   expect_line "$n" "$n valid"
 done
 want="warning: untagged Sample.double of this library is used by tagged Sample.energy; tag it so it gets its own signer"
@@ -105,14 +109,57 @@ keys = {"module", "kind", "informal", "informal_source", "claim", "state", "flag
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
-    want = {"Sample.energy_even": "open", "Sample.second_site": "proven"}.get(name, "n/a")
+    want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
+            "Sample.one_site_pos": "proven"}.get(name, "n/a")
     assert d["proof"]["status"] == want, (name, d["proof"])
     assert d["proof"]["export"] == (s["export"] if d["kind"] == "theorem" else None), name
     assert d["history"][0]["action"] == "approve" and d["history"][0]["claim"] == d["claim"], name
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
+assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 PY
 ok "status --json has the docs/14 fields; the proof field shows proven and open theorems"
+
+echo "== release"
+run release --tag 2026.10 --out "$work/release.json"
+release_hash="$(awk '/^release /{print $2}' <<<"$out")"
+cmp -s "$work/release.json" ".leanblame/store/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
+python3 - "$work/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
+  || fail "release manifest does not match docs/14"
+import hashlib, json, sys
+path, h, export, basic, energy = sys.argv[1:]
+text = open(path).read()
+assert "sha256:" + hashlib.sha256(text.encode()).hexdigest() == h
+m = json.loads(text)
+assert m["schema"] == "leanblame.release.1" and m["tag"] == "2026.10" and m["export"] == export
+assert m["kernel"] == {"checker": "leanchecker", "version": m["toolchain"], "passed": True}, m["kernel"]
+assert m["records"] == sorted([basic, energy]), m["records"]
+t = m["theorems"]
+assert set(t) == {"Sample.energy_even", "Sample.second_site", "Sample.one_site_pos"}, t
+assert t["Sample.energy_even"] == {"status": "open", "axioms": ["sorryAx"]}, t
+assert t["Sample.second_site"]["status"] == "proven", t
+assert t["Sample.one_site_pos"] == {"status": "proven", "axioms": ["Sample.energy_pos"]}, t
+assert m["counts"] == {"proven": 2, "open": 1}, m["counts"]
+PY
+ok "release: leanchecker passed; energy_even open (sorryAx), one_site_pos proven from the tagged axiom"
+
+echo "== release refuses an axiom that is neither standard nor tagged"
+cat >> Sample/Basic.lean <<'EOF'
+
+/-- Not tagged: nobody signs it. -/
+axiom Sample.unsigned_pos (n : Nat) : 0 < Sample.energy (n + 1)
+EOF
+edit Sample/Energy.lean 's/:= energy_pos 0$/:= unsigned_pos 0/'
+grep -q ":= unsigned_pos 0" Sample/Energy.lean || fail "test setup: proof not swapped"
+export_lib
+want="theorem Sample.one_site_pos rests on axiom Sample.unsigned_pos, which is neither standard nor tagged and signed"
+must_fail "release: $want" -- "$lb" release --tag 2026.10.1
+out="$("$lb" status 2>"$work/status.err")"
+expect_line Sample.one_site_pos "Sample.one_site_pos valid"
+grep -qxF "warning: $want" "$work/status.err" || fail "status did not warn: $(cat "$work/status.err")"
+git checkout -q -- Sample
+export_lib
+ok "a theorem resting on an untagged axiom fails release and gets a status warning"
 
 echo "== edit a proof inside a statement: second_site"
 edit Sample/Energy.lean 's/2, by decide/2, by omega/'
@@ -259,7 +306,7 @@ git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
 
 echo "== stubs"
-for args in equiv release "export --boundary blueprint-manifest.json" "export --boundary manual.toml"; do
+for args in equiv "export --boundary blueprint-manifest.json" "export --boundary manual.toml"; do
   set +e; "$lb" $args >/dev/null 2>"$work/stub.log"; code=$?; set -e
   [[ "$code" == 2 ]] || fail "$args should exit 2, got $code"
   grep -q "not implemented" "$work/stub.log" || fail "$args: $(cat "$work/stub.log")"

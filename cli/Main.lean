@@ -2,6 +2,7 @@
 `leanblame`: command-line entry point (docs/04-architecture.md, eight commands).
 -/
 import LeanBlame.Cli.Export
+import LeanBlame.Cli.Release
 import LeanBlame.Cli.Status
 import LeanBlame.Cli.Validate
 import LeanBlame.Cli.Sign
@@ -21,7 +22,7 @@ commands:
   sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]
   sign --withdraw RECORD [--signer local:NAME] [--constants A,B] [--note TEXT]
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
-  release                                (not implemented)"
+  release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
 /-- Parsed command line: flags with values, boolean switches, positional arguments. -/
 structure Args where
@@ -114,6 +115,12 @@ def cmdSign (args : List String) : IO UInt32 := do
       throw (IO.userError "--constants goes with --withdraw; to approve, list the names")
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
+def cmdRelease (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #["--tag", "--out"] #[] args)
+  unless a.positional.isEmpty do throw (IO.userError "release takes no positional arguments")
+  let some tag := a.get? "--tag" | throw (IO.userError "usage: leanblame release --tag TAG [--out FILE]")
+  Release.run (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
+
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0
   | "init" :: args => cmdInit args
@@ -122,8 +129,9 @@ def dispatch : List String → IO UInt32
   | "blame" :: args => cmdBlame args
   | "sign" :: args => cmdSign args
   | "validate" :: args => cmdValidate args
+  | "release" :: args => cmdRelease args
   | cmd :: _ =>
-    if #["equiv", "release"].contains cmd then
+    if cmd == "equiv" then
       notImplemented cmd
     else do
       IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"

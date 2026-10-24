@@ -33,7 +33,7 @@ Eight commands:
 | `equiv` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.`, ask an agent to prove it equal to the new one, check with `lake comparator`, store the proof. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path; `local:` ids unless a provider token is given. |
 | `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Runs in CI on every pull request. |
-| `release` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest. Fails only on an invalid signoff or a non-permitted axiom. Open theorems are counted, not failed. |
+| `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
 
@@ -76,8 +76,8 @@ signed `axiom` in the library or its tagged dependencies.
 ## Storage
 
 - Code, records, config: git.
-- Exports, boundary lists, `equiv` proofs, `status` logs: an object store
-  keyed by hash. Every export named by a live record is kept.
+- Exports, boundary lists, `equiv` proofs, `status` logs, release manifests:
+  an object store keyed by hash. Every export named by a live record is kept.
 
 ## Platform
 

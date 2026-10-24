@@ -1,8 +1,8 @@
 /-
-The interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML) and
-status (JSON), each a Lean structure with an emitter; the boundary list and the
-record have a strict reader. Records keep the field order of docs/05; JSON key
-order is not part of the schema. The release manifest comes with `release`.
+The interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML),
+release manifest (JSON) and status (JSON), each a Lean structure with an
+emitter; the boundary list and the record have a strict reader. Records keep the
+field order of docs/05; JSON key order is not part of the schema.
 
 Declaration names are kept as strings, exactly as `Lean.Name.toString` prints
 them; the commands map them back to constants through the export.
@@ -284,6 +284,44 @@ def parse (contents : String) (fileName : String) : IO (Except (Array String) Re
 
 end Record
 
+/-- The axiom report of one theorem: `proven`, `open`, `unchecked` or `n/a`, with the axioms it
+rests on and the export they were computed on. -/
+structure ProofReport where
+  status : String
+  axioms : Array String := #[]
+  exportHash : Option String := none
+  deriving Inhabited, Repr
+
+/-! ## 3. Release manifest -/
+
+structure ReleaseManifest where
+  library : String
+  tag : String
+  commit : String
+  toolchain : String
+  deps : Array (String × String)
+  exportHash : String
+  boundary : String
+  records : Array String
+  /-- Tagged theorems, `proven` or `open`. -/
+  theorems : Array (String × ProofReport)
+  deriving Inhabited, Repr
+
+def ReleaseManifest.schemaId : String := "leanblame.release.1"
+
+/-- A manifest is written only after `leanchecker` replayed the export, so `passed` is true. -/
+instance : ToJson ReleaseManifest where
+  toJson m :=
+    let count (s : String) := (m.theorems.filter (·.2.status == s)).size
+    Json.mkObj [("schema", ReleaseManifest.schemaId), ("library", m.library), ("tag", m.tag),
+      ("commit", m.commit), ("toolchain", m.toolchain),
+      ("deps", Json.mkObj (m.deps.toList.map fun (k, v) => (k, v))), ("export", m.exportHash),
+      ("boundary", m.boundary), ("records", toJson m.records),
+      ("kernel", Json.mkObj [("checker", "leanchecker"), ("version", m.toolchain), ("passed", true)]),
+      ("theorems", Json.mkObj (m.theorems.toList.map fun (n, p) =>
+        (n, Json.mkObj [("status", p.status), ("axioms", toJson p.axioms)]))),
+      ("counts", Json.mkObj [("proven", count "proven"), ("open", count "open")])]
+
 /-! ## 4. Status -/
 
 structure Change where
@@ -298,12 +336,6 @@ structure HistoryEntry where
   date : Std.Time.Timestamp
   claim : Option String
   note : Option String
-  deriving Inhabited, Repr
-
-structure ProofReport where
-  status : String
-  axioms : Array String := #[]
-  exportHash : Option String := none
   deriving Inhabited, Repr
 
 structure StatusDecl where
