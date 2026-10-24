@@ -143,6 +143,35 @@ def isInformalSource (s : String) : Bool :=
   s == "docstring" || s == "manual" ||
     (s.startsWith "blueprint:" && s.length > "blueprint:".length)
 
+/-- One piece of a printed statement: text, and the constant it refers to when it is a reference. -/
+structure Segment where
+  text : String
+  /-- The printed name of the constant this text refers to. -/
+  const : Option String := none
+  deriving Inhabited, Repr, BEq
+
+/-- A tagged declaration's signature (name, binders, type), printed two ways: `pretty`, the
+assistant's default printer; `plain`, with notation and field notation off. Every constant
+reference is a segment of its own, so a page can link it. -/
+structure Statement where
+  pretty : Array Segment
+  plain : Array Segment
+  deriving Inhabited, Repr
+
+instance : ToJson Segment where
+  toJson s := Json.mkObj <| (s.const.toList.map fun c => ("const", Json.str c)) ++ [("text", Json.str s.text)]
+
+def Segment.fromJson? (j : Json) : Except String Segment := do
+  return { text := ← j.getObjValAs? String "text", const := ← j.getObjValAs? (Option String) "const" }
+
+instance : ToJson Statement where
+  toJson s := Json.mkObj [("pretty", toJson s.pretty), ("plain", toJson s.plain)]
+
+def Statement.fromJson? (j : Json) : Except String Statement := do
+  let segments (k : String) : Except String (Array Segment) := do
+    (← (j.getObjVal? k >>= (·.getArr?)).mapError (s!"statement.{k}: " ++ ·)).mapM Segment.fromJson?
+  return { pretty := ← segments "pretty", plain := ← segments "plain" }
+
 structure BoundaryDecl where
   name : String
   module : String
@@ -151,6 +180,7 @@ structure BoundaryDecl where
   role : Role
   informal : String
   informalSource : String
+  statement : Statement
   deriving Inhabited, Repr
 
 structure BoundaryList where
@@ -165,7 +195,8 @@ def BoundaryList.schemaId : String := "leanblame.boundary.2"
 
 instance : ToJson BoundaryDecl where
   toJson d := Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind),
-    ("role", toJson d.role), ("informal", d.informal), ("informal_source", d.informalSource)]
+    ("role", toJson d.role), ("informal", d.informal), ("informal_source", d.informalSource),
+    ("statement", toJson d.statement)]
 
 instance : ToJson BoundaryList where
   toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
@@ -189,7 +220,8 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
     name, kind, role
     module := ← getStrField j what "module"
     informal := ← getStrField j what "informal"
-    informalSource := ← getStrField j what "informal_source" }
+    informalSource := ← getStrField j what "informal_source"
+    statement := ← (Statement.fromJson? (j.getObjValD "statement")).mapError (s!"{what}: " ++ ·) }
   if strTrim d.informal == "" then
     throw s!"{what}: informal text is required"
   unless isInformalSource d.informalSource do
@@ -389,6 +421,7 @@ structure StatusDecl where
   role : Role
   informal : String
   informalSource : String
+  statement : Statement
   claim : String
   state : State
   change : Array Change
@@ -419,7 +452,8 @@ instance : ToJson HistoryEntry where
 
 instance : ToJson StatusDecl where
   toJson d := Json.mkObj [("module", d.module), ("kind", d.kind), ("role", toJson d.role),
-    ("informal", d.informal), ("informal_source", d.informalSource), ("claim", d.claim),
+    ("informal", d.informal), ("informal_source", d.informalSource),
+    ("statement", toJson d.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
     ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
     ("proof", Json.mkObj [("status", toJson d.proof.status), ("axioms", toJson d.proof.axioms)]),

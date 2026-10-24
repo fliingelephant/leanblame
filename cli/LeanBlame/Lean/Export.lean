@@ -4,8 +4,8 @@
 Builds the library with `lake build`, imports its modules, and makes the
 boundary list: the declarations tagged `@[trusted]` (own and imported) or
 listed in `--boundary FILE`, plus the members of tagged structures and
-inductives, with `module`, `kind`, `role` and the provenance fields from the
-library itself. Exports the library's constants and the boundary list with the
+inductives, with `module`, `kind`, `role`, the printed statement and the
+provenance fields from the library itself. Exports the library's constants and the boundary list with the
 toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
 (docs/design/15-generic-core.md). Prints the two hashes.
@@ -116,12 +116,12 @@ def boundaryFileTags (f : System.FilePath) : IO (Array Tag × Array String) := d
 
 /-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
 constructors and projections of tagged inductives and structures that are not tagged themselves, with
-their own docstring or else the parent's text. `module`, `kind` and `role` come from `env`. Also
-the problems. -/
+their own docstring or else the parent's text. `module`, `kind` and `role` come from `env`; the
+statement is filled in by `withStatements`. Also the problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
   let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : Name × BoundaryDecl :=
     (n, { name := n.toString, module := (moduleOf env n).toString, kind := Source.kindOf ci,
-          role := Source.roleOf ci, informal, informalSource })
+          role := Source.roleOf ci, informal, informalSource, statement := default })
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
   let mut out := #[]
   let mut errors := #[]
@@ -142,6 +142,96 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
         | some doc => decl m mi doc "docstring"
         | none => decl m mi t.informal t.informalSource
   return (out.qsort (·.2.name < ·.2.name), errors)
+
+/-- The Lean script that prints the statements (docs/design/14-schemas.md §1) of the constants named
+in `names`, one per line, as JSON into `out`. It runs in the library with `lake env lean`, so the
+library's notations and other environment extensions are loaded as in an editor; this process
+cannot load them, since the library imports `LeanBlame.Attr`, which is linked into it. The
+signature is pretty-printed with every constant reference tagged (`Widget.tagCodeInfos`, the way
+doc-gen4 renders signatures) and flattened to segments; a reference prints with its surrounding
+spaces (` + ` for `HAdd.hAdd`), which stay outside its segment. Should the printer fail on a
+constant, its raw type stands in. -/
+def statementScript (mods : Array Name) (names out : System.FilePath) : String :=
+  "import Lean\n" ++ String.join (mods.toList.map fun m => s!"import {m}\n") ++ r#"
+open Lean Meta Widget
+
+def constOf (i : SubexprInfo) : Option Name :=
+  match i.info.val.info with
+  | .ofTermInfo t => match t.expr.consumeMData with
+    | .const n _ => some n
+    | _ => none
+  | _ => none
+
+def segment (text : String) (const : Option Name := none) : Json :=
+  Json.mkObj <| (const.toList.map fun c => ("const", Json.str c.toString)) ++ [("text", Json.str text)]
+
+/-- The text directly under a tag belongs to the constant that tag refers to, if any: the name of a
+constant, or the symbol of a notation whose head it is (` = ` for `Eq`). Nested tags decide for
+their own text. -/
+partial def flatten (cur : Option Name) : CodeWithInfos → Array Json → Array Json
+  | .text s, acc =>
+    match cur with
+    | none => if s.isEmpty then acc else acc.push (segment s)
+    | some n =>
+      let chars := s.toList
+      let lead := chars.takeWhile Char.isWhitespace
+      let trail := chars.reverse.takeWhile Char.isWhitespace
+      let core := String.ofList ((chars.drop lead.length).take (chars.length - lead.length - trail.length))
+      let acc := if lead.isEmpty then acc else acc.push (segment (String.ofList lead))
+      let acc := if core.isEmpty then acc else acc.push (segment core (some n))
+      if trail.isEmpty then acc else acc.push (segment (String.ofList trail))
+  | .append xs, acc => xs.foldl (fun acc x => flatten cur x acc) acc
+  | .tag i t, acc => flatten (constOf i) t acc
+
+def segments (c : Name) : MetaM Json := do
+  let ⟨fmt, infos⟩ ← PrettyPrinter.ppSignature c
+  let ctx : Elab.ContextInfo := {
+    env := ← getEnv, fileMap := default, mctx := ← getMCtx, options := ← getOptions
+    currNamespace := ← getCurrNamespace, openDecls := ← getOpenDecls, ngen := ← getNGen }
+  let code ← tagCodeInfos ctx infos (TaggedText.prettyTagged fmt (w := 100))
+  return Json.arr (flatten none code #[])
+
+/-- `pp.tagAppFns`: the head of an application gets its own tag, so it becomes a segment. -/
+def statement (c : Name) : MetaM Json := do
+  let raw : MetaM Json := do return Json.arr #[segment s!"{c} : {(← getConstInfo c).type}"]
+  let pretty (o : Options) := o.setBool `pp.tagAppFns true
+  let plain (o : Options) := pretty o |>.setBool `pp.notation false |>.setBool `pp.fieldNotation false
+  let under (f : Options → Options) (x : MetaM Json) : MetaM Json :=
+    withTheReader Core.Context (fun ctx => { ctx with options := f ctx.options }) x
+  return Json.mkObj [("pretty", ← under pretty (try segments c catch _ => raw)),
+    ("plain", ← under plain (try segments c catch _ => raw))]
+
+def run (names out : System.FilePath) : MetaM Unit := do
+  let mut fields := #[]
+  for line in ← IO.FS.lines names do
+    let some c := Syntax.decodeNameLit ("`" ++ line) | throwError "not a constant name: {line}"
+    fields := fields.push (line, ← statement c)
+  IO.FS.writeFile out (Json.mkObj fields.toList).compress
+"# ++ s!"\n#eval run {repr names.toString} {repr out.toString}\n"
+
+/-- `declarations` with their statements, printed by `statementScript` in the library. -/
+def withStatements (root : System.FilePath) (mods : Array Name)
+    (declarations : Array (Name × BoundaryDecl)) : IO (Array (Name × BoundaryDecl)) := do
+  let names ← Store.tmpPath root "names"
+  let out ← Store.tmpPath root "statements"
+  let script ← Store.tmpPath root "statements.lean"
+  IO.FS.writeFile names (String.join (declarations.toList.map fun (n, _) => n.toString ++ "\n"))
+  IO.FS.writeFile script (statementScript mods names out)
+  let r ← IO.Process.output { cmd := "lake", args := #["env", "lean", script.toString], cwd := root }
+  let cleanup : IO Unit := do
+    for f in [names, out, script] do
+      if ← f.pathExists then IO.FS.removeFile f
+  if r.exitCode != 0 then
+    cleanup
+    fail s!"printing the statements failed (exit {r.exitCode}):\n{r.stdout}{r.stderr}"
+  let text ← IO.FS.readFile out
+  cleanup
+  let j ← IO.ofExcept (Json.parse text)
+  declarations.mapM fun (n, d) => do
+    let some sj := (j.getObjVal? n.toString).toOption | fail s!"no statement printed for {n}"
+    match Statement.fromJson? sj with
+    | .ok st => pure (n, { d with statement := st })
+    | .error e => fail s!"{n}: {e}"
 
 /-- Whether a user could tag `n`, that is, Lean did not generate it (docs/design/03): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
@@ -206,6 +296,8 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let (declarations, errors') ← expand env tags
   unless (errors ++ errors').isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
+  IO.eprintln "leanblame: printing statements"
+  let declarations ← withStatements root mods declarations
   let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations := declarations.map (·.2) }
   let boundaryText := jsonText boundaryList
   -- The constants to export: the library's own (non-internal) constants and the boundary list.

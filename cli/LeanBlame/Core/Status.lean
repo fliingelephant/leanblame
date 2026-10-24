@@ -151,7 +151,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     states := states.insert n state
     entries := entries.push (d, {
       module := d.module, kind := d.kind, role := d.role, informal := d.informal
-      informalSource := d.informalSource
+      informalSource := d.informalSource, statement := d.statement
       claim, state, change, signers, history := historyOf ledger n
       blockedBy := #[]
       proof := { status := .na }

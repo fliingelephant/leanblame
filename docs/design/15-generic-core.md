@@ -298,7 +298,7 @@ short, plain, no marketing.
 
 ## 8. Out of scope
 
-Not part of this change, do not add: the statement-text field for the web;
+Not part of this change, do not add:
 transfer of signatures between different declarations; evidence theorems;
 citation conventions; change classification; verifiable signatures; a second
 frontend; any CI mechanism; any new command or flag; any change to records.

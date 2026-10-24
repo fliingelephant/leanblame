@@ -26,7 +26,11 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
       "kind": "def",
       "role": "defined",
       "informal": "Nearest-neighbour Ising Hamiltonian on a finite chain, H = -J Σ σᵢσᵢ₊₁, open boundary.",
-      "informal_source": "docstring"
+      "informal_source": "docstring",
+      "statement": {
+        "pretty": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : " }, { "const": "Real", "text": "ℝ" }, { "text": ") (σ : " }, { "const": "Fin", "text": "Fin" }, { "text": " n → " }, { "const": "Spin", "text": "Spin" }, { "text": ") : " }, { "const": "Real", "text": "ℝ" }],
+        "plain": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : " }, { "const": "Real", "text": "Real" }, { "text": ") (σ : " }, { "const": "Fin", "text": "Fin" }, { "text": " n → " }, { "const": "Spin", "text": "Spin" }, { "text": ") : " }, { "const": "Real", "text": "Real" }]
+      }
     }
   ]
 }
@@ -39,6 +43,7 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on; required |
 | `informal_source` | `docstring`, `blueprint:<label>`, or `manual` |
+| `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` with notation off; a segment is `{"text"}` or `{"const", "text"}`, `const` the printed name of the constant the text refers to |
 
 ## 2. Record (storage, TOML)
 
@@ -111,6 +116,7 @@ never need another source.
       "role": "proved",
       "informal": "…",
       "informal_source": "docstring",
+      "statement": { "pretty": [ "…" ], "plain": [ "…" ] },
       "claim": "sha256:77c0…",
       "state": "outdated",
       "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
@@ -139,3 +145,4 @@ never need another source.
 | `proof` | role `proved`: `proven` (every axiom standard, or tagged, `assumed` and valid), `open` (`sorryAx` or another axiom); `n/a` otherwise; with all axioms |
 | `evidence` | hash of an `equiv` proof that the current hash means what the last live approval meant, if any; `history` shows withdrawals |
 | `closure_size` | constants hashed into `claim`, proofs excluded |
+| `statement` | as in the boundary list (§1): the signature as segments, `pretty` and `plain` |

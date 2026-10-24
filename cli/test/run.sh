@@ -110,7 +110,7 @@ import json, sys
 s = json.loads(sys.argv[1])
 assert s["schema"] == "leanblame.status.2"
 assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
-keys = {"module", "kind", "role", "informal", "informal_source", "claim", "state", "change", "signers",
+keys = {"module", "kind", "role", "informal", "informal_source", "statement", "claim", "state", "change", "signers",
         "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
@@ -120,6 +120,12 @@ for name, d in s["declarations"].items():
     assert d["proof"]["status"] == want, (name, d["proof"])
     assert d["history"][0]["action"] == "approve" and d["history"][0]["claim"] == d["claim"], name
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
+text = lambda segs: "".join(seg["text"] for seg in segs)
+even = s["declarations"]["Sample.energy_even"]["statement"]
+assert text(even["pretty"]) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even["pretty"])
+assert "HMod.hMod" in text(even["plain"]), text(even["plain"])
+assert {"const": "Sample.energy", "text": "Sample.energy"} in even["pretty"], even["pretty"]
+assert text(s["declarations"]["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 assert s["declarations"]["Sample.energy"]["role"] == "defined"
