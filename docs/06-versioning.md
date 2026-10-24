@@ -15,13 +15,9 @@ leanblame export      # at commit B
 leanblame status      # recompute claim hashes, look them up in records
 ```
 
-Per tagged declaration X:
-
-- **Hash matches a live record:** valid.
-- **Hash differs:** outdated, with causes (`own-text`, `own-body`,
-  `dep-spec`, `cut-moved`, `untagged`; see [03-trust-model.md](03-trust-model.md)),
-  each naming the constants that changed under X since its last live approval.
-- **A tagged dependency is not valid:** blocked by it.
+Per tagged declaration: its state, what blocks it, and the causes of any hash
+move since its last live approval, each naming the constants that changed; all
+defined in [03-trust-model.md](03-trust-model.md) (Validity, Why a hash moved).
 
 Every `status` run writes a log to the object store, so a wrong "still valid"
 can be traced.
@@ -73,27 +69,11 @@ Renames succeed in one line. Changed structures go to a human.
 The same machinery serves authoring: a new declaration provably equal to a
 signed one can be replaced by it, skipping review.
 
-## Rules for "still valid"
-
-1. Claim hash unchanged: **valid**.
-2. Only proofs changed anywhere: **valid**.
-3. Only the body of a tagged dependency changed: **valid**, **blocked** until
-   that dependency's signer re-approves.
-4. Changed by `untagged` only, and `equiv` proved the meaning equal:
-   **valid after the reviewer approves the new hash**.
-5. Anything else: **outdated** until a human re-approves.
-
 ## Blame
 
 Blame follows records. Each record says what one person approved at one hash.
-Nothing is retroactive.
-
-**Bob changes the body of `Hamiltonian`.** Alice's hash holds the spec, not
-the body. It does not move. Her theorem is blocked until Bob re-signs, then
-valid. Bob's page shows him everything that depends on `Hamiltonian`.
-
-**Bob changes its type, kind or informal text.** Alice's hash moves, cause
-`dep-spec`. She re-signs, shown the diff.
+Nothing is retroactive. Who acts on which change is the table in
+[03-trust-model.md](03-trust-model.md), "What happens on change".
 
 **A and B changed independently, both fine alone. Later, module C uses both
 and is wrong.** C's signer owns C.
@@ -110,8 +90,7 @@ conventions module as it stood at signing time.
 
 ## The conventions module
 
-A normal tagged module, named in `leanblame.toml`. Conventions are
-**declarations**: a def `hbar : ℝ := 1`, a sign choice inside a body, a
+A normal tagged module of the library. Conventions are **declarations**: a def `hbar : ℝ := 1`, a sign choice inside a body, a
 docstring stating boundary conditions. Other declarations reference them, so a
 convention's spec is part of their claim hash. Changing a convention's text
 re-signs everyone who uses it, which is correct.
@@ -125,5 +104,5 @@ the reviewer sees what the kernel sees.
 - **Revert a declaration.** `git revert` the source. The old claim hash comes
   back if nothing else under it moved, and the old record covers it.
 - **Withdraw a signoff.** New record with `action = "withdraw"`, by the same
-  signer. The declaration drops to `outdated` or `unsigned` with flag
-  `withdrawn`; everything that depends on it shows `blocked-by`.
+  signer. The declaration drops to `outdated` or `unsigned`; everything that
+  depends on it is blocked by it.

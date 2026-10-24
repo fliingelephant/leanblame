@@ -127,7 +127,7 @@ never need another source.
 
 | Field | Values |
 |-------|--------|
-| `state` | `valid`, `outdated`, `unsigned` |
+| `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |
 | `change` | causes since the last live approval: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`, each with the names involved; empty when valid |
 | `signers` | live approve records matching `claim` |
 | `history` | every record that ever touched this declaration |

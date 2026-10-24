@@ -13,11 +13,11 @@
 | **spec** | Name, type, informal text of a declaration. What its users sign. |
 | **claim hash** | Hash of what one signoff covers. See [03-trust-model.md](03-trust-model.md). |
 | **record** | One signoff file: approve or withdraw. |
-| **live record** | An approve record no withdraw points at. |
+| **live record** | An approve record that counts for a constant: no counting withdraw covers it, signer allowed. Defined in [05-records.md](05-records.md). |
 | **blocked** | Your hash is fine but a tagged dependency isn't valid. Wait for its signer. |
 | **`equiv`** | Command that rebuilds an old meaning from the old export and asks the kernel whether it is definitionally equal to the new one. |
 | **kernel gate** | `leanchecker --from-export` replaying the whole export inside `release`. |
-| **axiom report** | Per theorem, the axioms it rests on: proven, open (`sorryAx`), or relative to a signed axiom. |
+| **axiom report** | Per theorem, the axioms it rests on: proven (standard or signed tagged axioms only) or open (`sorryAx`, or any other axiom). |
 | **cause** | Why a hash moved: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`. |
 | **group hash** | Hash of a cycle (an inductive with its constructors, or mutual definitions) as one unit. |
 | **exclude** | A maintainer's decision in `leanblame.toml` to stop counting an approve record. The dispute mechanism. Withdrawals cannot be excluded. |

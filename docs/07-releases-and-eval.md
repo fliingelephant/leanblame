@@ -16,11 +16,10 @@ Two gates, then a report.
 2. **Kernel gate.** `leanchecker --from-export` replays the whole export. Fails
    on a kernel error.
 3. **Axiom report.** From the export, per theorem, the axioms it rests on:
-   - only the three standard axioms: **proven**;
+   - only permitted axioms, that is the three standard ones and tagged, signed
+     `axiom`s: **proven**, each axiom listed;
    - includes `sorryAx`: **open**;
-   - includes a tagged, signed `axiom`: **proven relative to** it, listed;
-   - anything else: **fail**. The three standard axioms plus tagged, signed
-     axioms are the whole permitted set. No config.
+   - anything else: **fail**. No axiom config.
 
 `release` never fails on open theorems. It reports how many are proven and
 how many are open, by name. A reader who wants only proven results filters the

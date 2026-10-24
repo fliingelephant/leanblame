@@ -11,6 +11,9 @@ comparator's closure walk (`Compare.lean`, Apache-2.0).
 
 ## Build, in order
 
+Done in `cli/`: 1 to 5, 8, 9, and the `local:` and `--withdraw` parts of 7.
+Next: 6, the rest of 7, 10.
+
 | # | Item | Size |
 |---|------|------|
 | 1 | `@[trusted]` in a Lake-free target; `init`; the four schemas in [14-schemas.md](14-schemas.md) | small |

@@ -12,4 +12,4 @@ LeanBlame is field-independent. The first library built on it is OpenPhysics.
 
 Documentation: [docs/README.md](docs/README.md)
 
-Status: design stage, 2026-10-23.
+Status: the CLI (eight commands) is implemented and tested; the web part is not started. 2026-10-24.

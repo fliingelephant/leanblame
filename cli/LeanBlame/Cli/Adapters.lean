@@ -25,8 +25,8 @@ structure Tag where
   informal : String
   informalSource : String
 
-/-- The informal text of a docstring or list entry. docs/03 asks for Unicode normalization, which
-Lean core does not have: ASCII whitespace is trimmed and line endings are normalized. -/
+/-- The informal text of a docstring or list entry, as docs/03 hashes it: ASCII whitespace trimmed,
+line endings normalized, no Unicode normalization (Lean core has none). -/
 def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
 /-- A constant name as boundary lists write it. -/

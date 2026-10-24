@@ -12,7 +12,6 @@ Read in order. Each file is short.
 | 6 | [06-versioning.md](06-versioning.md) | What happens when mathlib or the library changes? Who is blamed? |
 | 7 | [07-releases-and-eval.md](07-releases-and-eval.md) | How are versions released, and how do we measure library quality? |
 | 8 | [08-identity.md](08-identity.md) | How do reviewers log in and get an ID? |
-| 9 | [09-performance.md](09-performance.md) | Where does checking time go, and what can be made faster? |
 | 10 | [10-prior-art.md](10-prior-art.md) | Who did similar things, in Lean and elsewhere? |
 | 11 | [11-decisions.md](11-decisions.md) | Decision log and FAQ. Why not X? |
 | 12 | [12-roadmap.md](12-roadmap.md) | What exists, what to build, in what order. |

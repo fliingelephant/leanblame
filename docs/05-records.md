@@ -71,32 +71,33 @@ may write declarations. Only humans sign.
 
 ## Several records for one declaration
 
-A record is **live** if no valid withdraw points at it, or at this constant in
-it, and its signer is allowed by `leanblame.toml`. A declaration is `valid` if
-at least `required_signers` distinct signers have live approve records carrying
-its current claim hash (default one). Otherwise `outdated` if live records
-exist, `unsigned` if none. Flag `withdrawn` if any record for it was ever
-withdrawn.
+An approve record is **live** for a constant if no counting withdraw (rules
+above) covers that constant in it, and its signer is allowed by
+`leanblame.toml`. This is the one definition; validity is built on it
+([03-trust-model.md](03-trust-model.md), Validity). Withdrawals stay visible in
+`blame` and in the `history` of `status --json`.
 
 ## Storage
 
 - One file per record in `records/`. Filename = sha256 of the file bytes as
   the sign server wrote them.
-- Written by the sign server. Terminal `sign` writes `local:` records only,
-  unless given a provider token.
+- Terminal `sign` writes `local:` records. Provider identities (OpenReview,
+  ORCID, GitHub) come through the sign server, which is not built yet.
 - `validate` runs as a required CI check: schema, authority rules, and no
   modification or deletion of an existing record.
 - The party you trust is whoever holds the sign server's push credential,
   normally the hosting institution. Name it in the library's README.
 
-A library may list several records repos in `leanblame.toml` and exclude
-individual approve records by hash. `exclude` is applied before liveness. A
+A library lists its records directories in `leanblame.toml` (local
+directories; remote repositories later) and excludes individual approve records
+by hash. `exclude` is applied before liveness. A
 withdrawal cannot be excluded: a signer's word about their own record stands,
 and nobody can be made to vouch for what they took back.
 
 ## Decisions
 
-- One signer suffices. Several records for the same hash simply accumulate.
+- One signer suffices by default (`required_signers = 1`). Several records for
+  the same hash accumulate.
 - No delta records ("old → new is fine"). The signer approves the new hash;
   `equiv` evidence is attached as information.
 - `action` is the only type field.

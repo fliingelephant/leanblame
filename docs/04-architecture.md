@@ -18,9 +18,10 @@ only from library targets.
 
 The executable reads a **boundary list**, an **export**, and **records**. It
 uses the toolchain's export parser and its own closure walk, adapted from
-comparator's `Compare.lean` (one Apache-2.0 file): seeds from the boundary
-list, cuts at tagged declarations, hashes specs, skips proofs, collects every
-mismatch, charges each change to a cause.
+comparator's (`Lake/Check/Compare.lean` in the toolchain, Apache-2.0): seeds
+from the boundary list, cuts at tagged declarations, hashes specs, skips
+proofs, collects every mismatch, charges each change to a cause. The export is
+turned back into a kernel environment by an adaptation of core's `Replay.lean`.
 
 Eight commands:
 
@@ -31,7 +32,7 @@ Eight commands:
 | `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
 | `blame X` | Who signed `X`, when, at which claim hash. |
 | `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
-| `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path; `local:` ids unless a provider token is given. |
+| `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
 | `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Runs in CI on every pull request. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
@@ -79,18 +80,26 @@ signed `axiom` in the library or its tagged dependencies.
 
 - Code, records, config: git.
 - Exports, boundary lists, `equiv` proofs, `status` logs, release manifests:
-  an object store keyed by hash. Every export named by a live record is kept.
+  an object store keyed by hash (`.leanblame/store/`). Every export named by a
+  live record is kept.
+- Hashed exports: a local cache (`.leanblame/cache/`), keyed by export and
+  boundary list. Derived data: `export` writes it, the other commands read it
+  and hash again when it is missing. Safe to delete.
+- `equiv` evidence: `.leanblame/equiv/evidence/`, one file per declaration and
+  claim hash, naming the proof and the record it was compared with.
 
 ## Platform
 
-`status`, `blame`, `sign`, `validate` run anywhere. `export`, `equiv` and
-`release` build code or run checkers and run in Linux CI.
+Every command runs wherever the library's toolchain is installed. `export`
+builds the library (`lake build`) and runs the exporter in-process; `release`
+and `equiv` run `leanchecker`; the rest read the object store and hash an export
+only when the cache lacks it, which needs no build.
 
 ## Reuse
 
 | Used as is | Copied and changed | New |
 |------------|--------------------|-----|
-| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, doc-gen4, OIDC/OAuth libraries, git | comparator's closure walk | claim hash, cause analysis, records and validator, `status`/`blame`/`release`, sign server, `Old.` reconstruction, page overlay |
+| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, doc-gen4, OIDC/OAuth libraries, git | comparator's closure walk; core's `Replay.lean` | claim hash, cause analysis, records and validator, `status`/`blame`/`release`, sign server, `Old.` reconstruction, page overlay |
 
 No forks.
 
@@ -105,19 +114,8 @@ author tags declarations
   -> cli status --json -> page
 ```
 
-On change:
-
-```
-cli export
-  -> cli status
-       -> hash unchanged: valid
-       -> tagged dependency not valid: blocked, wait for its signer
-       -> hash changed: outdated, with causes
-            -> cause is only `untagged`: cli equiv
-                 -> proven: evidence shown; reviewer approves with one click
-                 -> not proven: reviewer reads the change
-            -> any other cause: reviewer reads the shown diff
-```
+On change, `status` reports state and causes and `equiv` may add evidence; who
+acts is the table in [03-trust-model.md](03-trust-model.md).
 
 ## Interfaces
 
@@ -132,6 +130,7 @@ second export parser or an orchestration-only binary.
 
 ## Beyond Lean
 
-Only `export`, `equiv` and `release` know Lean. A backend for another proof
-assistant replaces those three. Records, hashing rules, `status`, `blame`,
-`sign`, `validate` and the web are unchanged.
+What reads an export knows Lean: `export`, the hashing walk (run by `export`,
+and by `status` when the cache lacks an export), `equiv` and `release`. A
+backend for another proof assistant replaces those. Records, the validity
+rules, `blame`, `sign`, `validate` and the web are unchanged.

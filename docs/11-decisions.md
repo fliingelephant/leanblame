@@ -106,7 +106,8 @@ TOML for records and config, JSON for machine output. Eight commands: `init`,
 
 ### No forks
 
-Copy one Apache-2.0 file (comparator's closure walk). Use `leanexport`,
+Adapt two Apache-2.0 files, comparator's closure walk and core's `Replay.lean`
+(export to kernel environment). Use `leanexport`,
 `leanchecker`, Lake's TOML reader, doc-gen4 as is. Rejected: forking the
 archived comparator (it lacks `--from-export`), running `lake comparator` on
 `equiv`'s proofs (the kernel has already checked them in-process; `leanchecker`

@@ -85,14 +85,15 @@ as X's `evidence`.
 
 Per tagged declaration X, `status` computes:
 
-- **state**: `valid` if a live approve record carries X's current hash;
-  `outdated` if live records exist but none match; `unsigned` if none exist.
+- **state**: `valid` if at least `required_signers` distinct signers have live
+  approve records carrying X's current hash (default one); `outdated` if live
+  approve records list X but not enough of them carry the current hash;
+  `unsigned` if none lists X.
 - **blocked_by**: tagged dependencies whose state is not `valid`, recursively.
 - **evidence**: the `equiv` proof that X's current hash means what its last
   live approval meant, if there is one.
 
-A record is live if no withdraw record by the same signer points at it. See
-[05-records.md](05-records.md) for who may do what.
+"Live" is defined in [05-records.md](05-records.md), with who may do what.
 
 A release requires every tagged declaration `valid`, which implies no blocks.
 
@@ -105,9 +106,9 @@ Hashes are not. Hashes depend only on the code.
 Rule: hash everything that changes meaning, nothing else.
 
 **In:** kind, name, ordered universe parameters, type, body of a def, safety
-(`partial`, `opaque`), informal text (tagged declarations only,
-Unicode-normalized and trimmed). Type and body enter with every proof
-subterm erased.
+(`partial`, `opaque`), informal text (tagged declarations only; ASCII
+whitespace trimmed, line endings normalized, no Unicode normalization). Type
+and body enter with every proof subterm erased.
 
 **Out:** theorem proofs, proof subterms anywhere (in types as in bodies),
 binder names, argument implicitness, kernel height hints, recursor rules.
@@ -167,5 +168,5 @@ withdrawals are for.
   declarations without informal text are an error.
 - A wording-only edit of that text cascades re-signs. The page makes that a
   one-click diff.
-- Mathlib definition refactors cascade. `equiv` catches most. Fewer upstream
-  dependencies means fewer cascades.
+- Mathlib definition refactors cascade. `equiv` catches the definitional
+  ones. Fewer upstream dependencies means fewer cascades.
