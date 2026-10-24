@@ -425,6 +425,10 @@ run status
 expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
 expect_line Sample.double_zero "Sample.double_zero outdated flags=equiv-proven change=untagged:Sample.double"
 ok "n + n and 2 * n are not definitionally equal: both bodies shown; double_zero still holds by evaluation"
+run sign --withdraw "$record" --signer local:alice --constants Sample.double_zero
+run status
+expect_line Sample.double_zero "Sample.double_zero outdated flags=withdrawn change=untagged:Sample.double"
+ok "a proof against a withdrawn approval does not count"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
 export_lib

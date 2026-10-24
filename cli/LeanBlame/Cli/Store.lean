@@ -76,11 +76,13 @@ judged on. -/
 def evidencePath (root : System.FilePath) (name claim : String) : System.FilePath :=
   dir root / "equiv" / "evidence" / s!"{Sha256.hexOfString s!"{name} {claim}"}.json"
 
-/-- The proof hash of the evidence for `name` at `claim`, if `equiv` wrote one. -/
-def evidence? (root : System.FilePath) (name claim : String) : IO (Option String) := do
+/-- The evidence for `name` at `claim`, if `equiv` wrote one: the proof hash and the approve record
+whose meaning it was compared with. -/
+def evidence? (root : System.FilePath) (name claim : String) : IO (Option (String × String)) := do
   let some text ← readFileIfExists (evidencePath root name claim) | return none
-  match Lean.Json.parse text >>= (·.getObjValAs? String "evidence") with
-  | .ok h => return if isHash h then some h else none
-  | .error _ => return none
+  let field (k : String) := (Lean.Json.parse text >>= (·.getObjValAs? String k)).toOption.filter isHash
+  return match field "evidence", field "old_record" with
+    | some proof, some record => some (proof, record)
+    | _, _ => none
 
 end LeanBlame.Store

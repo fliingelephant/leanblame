@@ -74,6 +74,11 @@ def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
 def liveApprovals (ledger : Ledger) (name : String) : Array (LoadedRecord × ApproveRecord × String) :=
   (ledger.approvalsOf name).filter fun (r, a, _) => ledger.isLive r.hash a.signer name
 
+/-- The `equiv` proof that `name` at `claim` means what a live approval of it meant, if any. -/
+def evidenceFor (root : System.FilePath) (ledger : Ledger) (name claim : String) : IO (Option String) := do
+  let some (proof, record) ← Store.evidence? root name claim | return none
+  return if (liveApprovals ledger name).any (·.1.hash == record) then some proof else none
+
 /-- Everything `status` computes. -/
 structure Result where
   report : StatusReport
@@ -141,7 +146,7 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     let state :=
       if signers.size ≥ cfg.requiredSigners then "valid"
       else if live.isEmpty then "unsigned" else "outdated"
-    let evidence ← Store.evidence? root d.name claim
+    let evidence ← evidenceFor root ledger d.name claim
     let flags := (if state != "valid" && evidence.isSome then #["equiv-proven"] else #[]) ++
       (if (ledger.withdrawalsOf d.name).isEmpty then #[] else #["withdrawn"])
     -- Causes: against --base, or against the export of the last live approval.

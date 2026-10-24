@@ -94,6 +94,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let cur ← Store.readCurrent root
   let memo : Status.Memo ← IO.mkRef {}
   let some hashed ← Status.hashed root memo cur.exportHash cur.boundary | unreachable!
+  let ledger := Ledger.build cfg (← loadAllRecords root cfg).1
   let boundary := hashed.boundary
   let claimOf : Std.HashMap String String :=
     hashed.declarations.foldl (init := {}) fun m (n, d) => m.insert d.name hashed.nodes[n]!.claim
@@ -117,7 +118,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
     let constants := (selected.filter (·.module == m)).map (fun d => (d.name, claimOf[d.name]!))
       |>.qsort (fun a b => a.1 < b.1)
     -- An `equiv` proof the signer relies on, if the record's constants name exactly one.
-    let proofs := dedup (← constants.filterMapM fun (n, c) => Store.evidence? root n c)
+    let proofs := dedup (← constants.filterMapM fun (n, c) => Status.evidenceFor root ledger n c)
     if proofs.size > 1 then
       IO.eprintln s!"note: the constants of {m} have {proofs.size} different equiv proofs; the record names none"
     let r : Record := .approve {
