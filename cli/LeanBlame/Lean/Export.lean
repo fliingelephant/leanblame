@@ -146,7 +146,8 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
 /-- The Lean script that prints the statements (docs/design/14-schemas.md §1) of the constants named
 in `names`, one per line, as JSON into `out`. It runs in the library with `lake env lean`, so the
 library's notations and other environment extensions are loaded as in an editor; this process
-cannot load them, since the library imports `LeanBlame.Attr`, which is linked into it. The
+cannot load them, since the library imports `LeanBlame.Attr`, which is linked into it. Its
+definitions live in their own namespace so that no library name shadows them. The
 signature is pretty-printed with every constant reference tagged (`Widget.tagCodeInfos`, the way
 doc-gen4 renders signatures) and flattened to segments; a reference prints with its surrounding
 spaces (` + ` for `HAdd.hAdd`), which stay outside its segment. Should the printer fail on a
@@ -154,6 +155,8 @@ constant, its raw type stands in. -/
 def statementScript (mods : Array Name) (names out : System.FilePath) : String :=
   "import Lean\n" ++ String.join (mods.toList.map fun m => s!"import {m}\n") ++ r#"
 open Lean Meta Widget
+
+namespace LeanBlameStatements
 
 def constOf (i : SubexprInfo) : Option Name :=
   match i.info.val.info with
@@ -207,7 +210,9 @@ def run (names out : System.FilePath) : MetaM Unit := do
     let some c := Syntax.decodeNameLit ("`" ++ line) | throwError "not a constant name: {line}"
     fields := fields.push (line, ← statement c)
   IO.FS.writeFile out (Json.mkObj fields.toList).compress
-"# ++ s!"\n#eval run {repr names.toString} {repr out.toString}\n"
+
+end LeanBlameStatements
+"# ++ s!"\n#eval LeanBlameStatements.run {repr names.toString} {repr out.toString}\n"
 
 /-- `declarations` with their statements, printed by `statementScript` in the library. -/
 def withStatements (root : System.FilePath) (mods : Array Name)
