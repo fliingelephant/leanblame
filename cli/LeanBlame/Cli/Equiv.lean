@@ -133,8 +133,13 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
   let mut dup : NameSet := {}
   repeat
     let size := dup.size
-    for r in seeds ++ dup.toArray.flatMap uses do
-      if !dup.contains r && needs dup r then dup := dup.insert r
+    let mut todo := seeds ++ dup.toArray.flatMap uses
+    while h : todo.size > 0 do
+      let r := todo[todo.size - 1]
+      todo := todo.pop
+      if !dup.contains r && needs dup r then
+        dup := dup.insert r
+        todo := todo ++ uses r
     if dup.size == size then break
   -- `Old.` constants: the duplicated ones, and each target definition.
   let consts : Std.HashMap Name ConstantInfo :=
@@ -211,7 +216,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
   let solution ← put env "solution"
   let challengeHash ← put challenge "challenge"
   -- The generated proofs use no axiom: the statements' own axioms are permitted.
-  let axioms := (Walk.axiomsOf (← Status.loadExported root solution) (proved.map (·.1))).fold
+  let axioms := (Walk.axiomsOf env.find? (proved.map (·.1))).fold
     (init := Walk.standardAxioms) fun acc _ as => acc ++ as
   let config := Json.mkObj [
     ("challenge_module", "Challenge"), ("solution_module", "Solution"),
@@ -231,11 +236,11 @@ def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
   let cfg ← Config.load root
   let (all, _) ← loadAllRecords root cfg
   let ledger := Ledger.build cfg all
-  let decls := (← Status.compute root cfg ledger none).report.declarations
+  let memo : Status.Memo ← IO.mkRef {}
+  let decls := (← Status.compute root cfg ledger none (warn := false) (memo? := some memo)).report.declarations
   for n in names do
     unless decls.any (·.1 == n) do fail s!"{n} is not on the boundary list"
   let cur ← Store.readCurrent root
-  let memo : Status.Memo ← IO.mkRef {}
   let some new ← Status.hashed root memo cur.exportHash cur.boundary | unreachable!
   let nameOf : Std.HashMap String Name := new.declarations.foldl (init := {}) fun m (x, _) => m.insert x.toString x
   -- Eligible: outdated, and `untagged` the only cause.

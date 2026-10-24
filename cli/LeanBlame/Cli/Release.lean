@@ -19,7 +19,7 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
   let (all, bad) ← loadAllRecords root cfg
   for (p, _) in bad do
     IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
-  let r ← Status.compute root cfg (Ledger.build cfg all) none (causes := false)
+  let r ← Status.compute root cfg (Ledger.build cfg all) none (causes := false) (warn := false)
   let decls := r.report.declarations
   -- 1. Signoff gate.
   let invalid := decls.filter (·.2.state != "valid")

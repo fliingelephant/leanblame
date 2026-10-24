@@ -203,9 +203,9 @@ environment `Load` builds (constants in types and values, and the constructors o
 unsafe and partial constants are not there), but in one pass over the components of the constant
 graph instead of one walk per root.
 -/
-def axiomsOf (exported : LeanExport.ExportedEnv) (roots : Array Name) :
+def axiomsOf (find? : Name → Option ConstantInfo) (roots : Array Name) :
     Std.HashMap Name (Array Name) := Id.run do
-  let info? (n : Name) := exported.constMap[n]?.filter fun ci => !ci.isUnsafe && !ci.isPartial
+  let info? (n : Name) := (find? n).filter fun ci => !ci.isUnsafe && !ci.isPartial
   let uses : ConstantInfo → Array Name
     | .quotInfo _ => #[]
     | .inductInfo v => v.type.getUsedConstants ++ v.ctors.toArray
@@ -250,7 +250,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
   let env ← Load.environmentOfExport exported
   let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }).toIO
     { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
-  let axioms := axiomsOf exported order
+  let axioms := axiomsOf (exported.constMap[·]?) order
   let mut nodes := st.nodes
   let isTagged (n : Name) := tagged.contains n
   let succ (n : Name) : Array Name :=
@@ -286,8 +286,8 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
   return { nodes, tagged := taggedSet, axioms, boundary, declarations }
 
 /--
-The closure under `x`: the tagged declarations where the walk stops (the cut), and the untagged
-constants passed through. `x` itself is in neither.
+The closure under `x`: the tagged declarations where the walk stops (the cut, sorted), and the
+untagged constants passed through (unsorted). `x` itself is in neither.
 -/
 def closureOf (h : Hashed) (x : Name) : Array Name × Array Name := Id.run do
   let mut cut : Std.HashSet Name := {}
@@ -304,7 +304,7 @@ def closureOf (h : Hashed) (x : Name) : Array Name × Array Name := Id.run do
     else
       untagged := untagged.insert d
       worklist := worklist ++ ((h.nodes[d]?.map (·.deps)).getD #[])
-  return (sortNames cut.toArray, sortNames untagged.toArray)
+  return (sortNames cut.toArray, untagged.toArray)
 
 /--
 Why `claim(x)` differs between `old` and `new` (docs/03, "Why a hash moved"). Collects every
@@ -316,20 +316,21 @@ mismatch instead of stopping at the first:
 * `untagged`: untagged constants in both closures whose own hash differs.
 Dependencies that appear or disappear are explained by the change of whatever references them.
 -/
-def changes (old new : Hashed) (x : Name) : Array Change := Id.run do
+def changes (old new : Hashed) (x : Name) (closure : Array Name × Array Name := closureOf new x) :
+    Array Change := Id.run do
   let some n := new.nodes[x]? | return #[]
   let some o := old.nodes[x]? | return #[{ cause := "own-body", names := #[x.toString] }]
   let mut out : Array Change := #[]
   if o.informal != n.informal then out := out.push { cause := "own-text", names := #[x.toString] }
   if o.fields != n.fields then out := out.push { cause := "own-body", names := #[x.toString] }
   let (cut0, unt0) := closureOf old x
-  let (cut1, unt1) := closureOf new x
+  let (cut1, unt1) := closure
   let cut0s : Std.HashSet Name := cut0.foldl (·.insert ·) {}
   let unt0s : Std.HashSet Name := unt0.foldl (·.insert ·) {}
   let depSpec := cut1.filter fun d => cut0s.contains d &&
     (old.nodes[d]?.bind (·.spec)) != (new.nodes[d]?.bind (·.spec))
   let cutMoved := sortNames ((cut1.filter unt0s.contains) ++ (unt1.filter cut0s.contains))
-  let untagged := unt1.filter fun u => unt0s.contains u &&
+  let untagged := sortNames <| unt1.filter fun u => unt0s.contains u &&
     (old.nodes[u]?.map (·.own)) != (new.nodes[u]?.map (·.own))
   let names (xs : Array Name) := xs.map (·.toString)
   unless depSpec.isEmpty do out := out.push { cause := "dep-spec", names := names depSpec }

@@ -12,8 +12,10 @@ open Lean
 
 def schema : String := "leanblame.cache.2"
 
-def path (root : System.FilePath) (exportHash boundary : String) : System.FilePath :=
-  Store.dir root / "cache" / (Sha256.hexOfString s!"{exportHash} {boundary}" ++ ".json")
+/-- Keyed by what the hashing reads: the export and the boundary list's declarations (not its
+`commit`, `toolchain` or `deps`). -/
+def path (root : System.FilePath) (exportHash : String) (b : BoundaryList) : System.FilePath :=
+  Store.dir root / "cache" / (Sha256.hexOfString s!"{exportHash} {(toJson b.declarations).compress}" ++ ".json")
 
 /-- A name as its array of components: printed names do not always read back. -/
 def nameToJson (n : Name) : Json :=
@@ -46,8 +48,8 @@ def nodeFromJson? (j : Json) : Except String Walk.Node := do
     own := ← get String "own", spec := ← get (Option String) "spec", claim := ← get String "claim" }
 
 /-- Cache `h`, the hashing of export `exportHash` against boundary list `boundary`. -/
-def save (root : System.FilePath) (exportHash boundary : String) (h : Walk.Hashed) : IO Unit :=
-  writeFileMkdirs (path root exportHash boundary) <| Json.compress <| Json.mkObj [
+def save (root : System.FilePath) (exportHash : String) (h : Walk.Hashed) : IO Unit :=
+  writeFileMkdirs (path root exportHash h.boundary) <| Json.compress <| Json.mkObj [
     ("schema", schema),
     ("declarations", .arr (h.declarations.map (nameToJson ·.1))),
     ("nodes", .arr (h.nodes.fold (init := #[]) fun acc _ n => acc.push (nodeToJson n))),
@@ -56,9 +58,9 @@ def save (root : System.FilePath) (exportHash boundary : String) (h : Walk.Hashe
 
 /-- The cached hashing of export `exportHash` against boundary list `b`, whose hash is
 `boundary`. -/
-def load? (root : System.FilePath) (exportHash boundary : String) (b : BoundaryList) :
+def load? (root : System.FilePath) (exportHash : String) (b : BoundaryList) :
     IO (Option Walk.Hashed) := do
-  let some text ← readFileIfExists (path root exportHash boundary) | return none
+  let some text ← readFileIfExists (path root exportHash b) | return none
   return Except.toOption do
     let j ← Json.parse text
     unless (← j.getObjValAs? String "schema") == schema do throw "another schema"

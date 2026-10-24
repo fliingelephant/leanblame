@@ -47,12 +47,12 @@ def hashed (root : System.FilePath) (memo : Memo) (exportHash boundary : String)
   if let some h? := (← memo.get)[(exportHash, boundary)]? then return h?
   memo.modify (·.insert (exportHash, boundary) none)
   let b ← loadBoundary root boundary
-  let h ← match ← Cache.load? root exportHash boundary b with
+  let h ← match ← Cache.load? root exportHash b with
     | some h => pure h
     | none =>
       let h ← try Walk.hashExport (← loadExported root exportHash) b
         catch e => fail s!"cannot hash export {exportHash}: {e}"
-      Cache.save root exportHash boundary h
+      Cache.save root exportHash h
       pure h
   memo.modify (·.insert (exportHash, boundary) (some h))
   return some h
@@ -106,19 +106,20 @@ def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name 
   for (x, d) in h.declarations do
     unless modules.contains d.module do continue
     for u in (closures[x]?.map (·.2)).getD #[] do
-      if owned.contains u.toString then
-        users := users.insert u ((users.getD u #[]).push x)
+      users := users.alter u fun xs => some ((xs.getD #[]).push x)
   let mut out := #[]
-  for u in Walk.sortNames (users.fold (init := #[]) fun acc u _ => acc.push u) do
+  for u in Walk.sortNames (users.fold (init := #[]) fun acc u _ =>
+      if owned.contains u.toString then acc.push u else acc) do
     let xs := Walk.sortNames (users.getD u #[])
     out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate (xs.toList.map toString)}; tag it so it gets its own signer"
   return out
 
-/-- The status report; `causes := false` leaves every `change` empty and hashes no other export. -/
+/-- The status report; `causes := false` leaves every `change` empty and hashes no other export, and
+`warn := false` skips the untagged-dependency warnings. -/
 def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : Option String)
-    (causes := true) : IO Result := do
+    (causes := true) (warn := true) (memo? : Option Memo := none) : IO Result := do
   let cur ← Store.readCurrent root
-  let memo : Memo ← IO.mkRef {}
+  let memo ← memo?.getDM (IO.mkRef {})
   let some new ← hashed root memo cur.exportHash cur.boundary | unreachable!
   -- `--base`: the export and boundary list an approve record names.
   let base ← match base? with
@@ -149,11 +150,12 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     let evidence ← evidenceFor root ledger d.name claim
     let flags := (if state != "valid" && evidence.isSome then #["equiv-proven"] else #[]) ++
       (if (ledger.withdrawalsOf d.name).isEmpty then #[] else #["withdrawn"])
+    let closure := Walk.closureOf new n
     -- Causes: against --base, or against the export of the last live approval.
     let mut change : Array Change := #[]
     match base with
     | some old =>
-      if (old.nodes[n]?.map (·.claim)) != some claim then change := Walk.changes old new n
+      if (old.nodes[n]?.map (·.claim)) != some claim then change := Walk.changes old new n closure
     | none =>
       -- The last live approval: the ledger's records are in (date, id) order.
       if let some (lastRec, last, lastClaim) := live.back? then
@@ -161,11 +163,11 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
           -- A record from elsewhere may name objects this store lacks, or that do not hash.
           try
             if let some old ← hashed root memo last.exportHash last.boundary then
-              change := Walk.changes old new n
+              change := Walk.changes old new n closure
           catch e =>
             IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
-    let (cut, untagged) := Walk.closureOf new n
-    closures := closures.insert n (cut, untagged)
+    let (cut, untagged) := closure
+    closures := closures.insert n closure
     states := states.insert n state
     entries := entries.push (n, d, {
       module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
@@ -208,8 +210,10 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
   let report : StatusReport := {
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }
-  let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
-  return { report, warnings := untaggedWarnings new closures cur.modules owned ++ warnings
+  let untagged ← if !warn then pure #[] else do
+    let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
+    pure (untaggedWarnings new closures cur.modules owned)
+  return { report, warnings := untagged ++ warnings
            validRecords := (dedup validRecords).qsort (· < ·), unpermitted }
 
 /-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
@@ -249,7 +253,7 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
   let (all, _) ← loadAllRecords root cfg
   let ledger := Ledger.build cfg all
   let current? ← if (← (Store.currentPath root).pathExists) then
-      some <$> compute root cfg ledger none (causes := false)
+      some <$> compute root cfg ledger none (causes := false) (warn := false)
     else pure none
   let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let history := historyOf ledger name

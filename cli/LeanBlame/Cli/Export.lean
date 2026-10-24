@@ -220,13 +220,12 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   runToStderr "lake" #["build"] root "`lake build`"
   let libs ← libraryNames root libsGiven
   let mods ← libraryModules root libs
-  let leanPath := strTrim (← IO.Process.run
-    { cmd := "lake", args := #["env", "printenv", "LEAN_PATH"], cwd := root })
-  let sp : SearchPath := (leanPath.splitOn ":").filter (· != "") |>.map System.FilePath.mk
-  initSearchPath (← findSysroot) sp
+  let vars := strLines (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root })
+  let var (k : String) := (vars.find? (·.startsWith (k ++ "="))).map (strDrop · (k.length + 1))
+  let sp : SearchPath := (((var "LEAN_PATH").getD "").splitOn ":").filter (· != "") |>.map System.FilePath.mk
+  initSearchPath (← match var "LEAN_SYSROOT" with | some r => pure (System.FilePath.mk r) | none => findSysroot) sp
   IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
   let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
-  let modSet : NameSet := mods.foldl (·.insert ·) {}
   -- The boundary list.
   let commit ← gitCommit root
   let deps ← manifestDeps root
@@ -244,8 +243,12 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   -- what `lake comparator` needs.
   let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
-  for (n, ci) in env.constants.map₁.toList do
-    if modSet.contains (moduleOf env n) then
+  for m in mods do
+    let some idx := env.getModuleIdx? m | continue
+    for n in env.header.moduleData[idx.toNat]!.constNames do
+      let some ci := env.constants.map₁[n]? | continue
+      -- A name in several modules belongs to the first, as in `moduleOf`.
+      unless env.getModuleIdxFor? n == some idx do continue
       own := own.push (n, ci)
       if !n.isInternal && roundTrips n then
         roots := roots.push n
@@ -255,21 +258,26 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   for d in boundaryList.declarations do
     let some n := constName? d.name | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
-    unless roots.contains n do roots := roots.push n
+    roots := roots.push n
   for n in comparatorRoots do
-    if env.contains n && !roots.contains n then roots := roots.push n
-  roots := roots.qsort (fun a b => a.cmp b == .lt)
+    if env.contains n then roots := roots.push n
+  roots := (dedup roots).qsort (fun a b => a.cmp b == .lt)
   -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
   let hex ← dumpToFile env roots tmp
-  -- Compute every claim hash now, so that problems surface at export time.
-  let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
-  let hashed ← try Walk.hashExport exported boundaryList
-    catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
-  let exportHash ← Store.putFile root tmp hex
   let boundary ← Store.putString root boundaryText
-  Cache.save root exportHash boundary hashed
+  -- Compute every claim hash now, so that problems surface at export time; a cached hashing of
+  -- the same export and boundary list has already passed.
+  let hashed ← match ← Cache.load? root (mkHash hex) boundaryList with
+    | some h => pure h
+    | none =>
+      let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
+      let h ← try Walk.hashExport exported boundaryList
+        catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
+      Cache.save root (mkHash hex) h
+      pure h
+  let exportHash ← Store.putFile root tmp hex
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
     { exportHash, boundary, modules := mods.map toString, owned := ownedHash }
