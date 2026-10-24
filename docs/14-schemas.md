@@ -132,6 +132,6 @@ never need another source.
 | `signers` | live approve records matching `claim` |
 | `history` | every record that ever touched this declaration |
 | `blocked_by` | tagged dependencies whose state is not `valid`, recursively |
-| `proof` | `proven`, `open`, `unchecked` (no report for this export), or `n/a`; with axioms and the export it was computed on |
+| `proof` | theorems: `proven` (every axiom standard or tagged and valid), `open` (`sorryAx` or another axiom), `unchecked` (no report for this export); `n/a` otherwise; with all axioms and the export it was computed on |
 | `evidence` | hash of an `equiv` proof for the current hash, if any |
 | `closure_size` | constants hashed into `claim`, proofs excluded |

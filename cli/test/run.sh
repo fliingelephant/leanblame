@@ -105,11 +105,14 @@ keys = {"module", "kind", "informal", "informal_source", "claim", "state", "flag
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
-    assert d["proof"]["status"] == ("unchecked" if d["kind"] == "theorem" else "n/a"), name
+    want = {"Sample.energy_even": "open", "Sample.second_site": "proven"}.get(name, "n/a")
+    assert d["proof"]["status"] == want, (name, d["proof"])
+    assert d["proof"]["export"] == (s["export"] if d["kind"] == "theorem" else None), name
     assert d["history"][0]["action"] == "approve" and d["history"][0]["claim"] == d["claim"], name
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
+assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 PY
-ok "status --json has the docs/14 fields"
+ok "status --json has the docs/14 fields; the proof field shows proven and open theorems"
 
 echo "== edit a proof inside a statement: second_site"
 edit Sample/Energy.lean 's/2, by decide/2, by omega/'

@@ -14,7 +14,9 @@ Per tagged declaration X of the current boundary list:
   causes since approve record R (the export and boundary list it names), for
   every declaration whose claim differs from R's;
 * blocked_by: tagged dependencies, followed transitively, that are not valid;
-* proof: `unchecked` for theorems (no axiom report in this slice), `n/a` otherwise.
+* proof: for a theorem, the axioms it rests on (computed by `export`): `proven` when each is
+  standard or a tagged `axiom` that is valid, `open` otherwise (`sorryAx`, or an axiom that is
+  neither, which also gets a warning); `unchecked` without axiom data; `n/a` for the rest.
 -/
 import LeanBlame.Cli.Cache
 import LeanBlame.Cli.Records
@@ -70,8 +72,23 @@ def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
 /-- Everything `status` computes. -/
 structure Result where
   report : StatusReport
-  /-- Untagged declarations of this library used by tagged ones (docs/03). -/
+  /-- Untagged declarations of this library used by tagged ones (docs/03), and theorems resting on
+  axioms that are not permitted. -/
   warnings : Array String := #[]
+  /-- Live approve records carrying the current claim of some tagged declaration, sorted. -/
+  validRecords : Array String := #[]
+  /-- (theorem, axiom) pairs where the axiom is neither standard nor a valid tagged axiom. -/
+  unpermitted : Array (Name × Name) := #[]
+
+/-- The axioms every Lean library may rest on (docs/07). -/
+def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
+
+/-- A theorem's axioms against the permitted ones (docs/07): `proven` when each is standard or
+`signed`, `open` otherwise; and the axioms that are neither `sorryAx` nor permitted. -/
+def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : String × Array Name :=
+  let permitted (a : Name) := standardAxioms.contains a || signed a
+  (if axioms.all permitted then "proven" else "open",
+   axioms.filter fun a => a != ``sorryAx && !permitted a)
 
 /-- `status` warns when a tagged declaration of this library uses an untagged one of it that could
 be tagged: `owned` lists the library's taggable constants, from `export`. `closures` holds
@@ -108,6 +125,7 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     | none => pure none
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}
+  let mut validRecords : Array String := #[]
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
   -- Each tagged declaration's closure, walked once: (cut, untagged constants).
   let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
@@ -118,6 +136,7 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     let live := approvals.filter fun (r, a, _) => ledger.isLive r.hash a.signer d.name
     let matching := live.filter fun (_, _, c) => c == claim
     let signers := (dedup (matching.map fun (_, a, _) => a.signer)).qsort (· < ·)
+    validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
       if signers.size ≥ cfg.requiredSigners then "valid"
       else if live.isEmpty then "unsigned" else "outdated"
@@ -137,7 +156,6 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
               change := Walk.changes old new n
           catch e =>
             IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
-    let isThm := d.kind == "theorem"
     let (cut, untagged) := Walk.closureOf new n
     closures := closures.insert n (cut, untagged)
     states := states.insert n state
@@ -145,15 +163,28 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
       module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
       claim, state, flags, change, signers, history := historyOf ledger d.name
       blockedBy := #[]
-      proof := { status := if isThm then "unchecked" else "n/a" }
+      proof := { status := "n/a" }
       evidence := none
       taggedDeps := cut.map (·.toString)
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size })
-  -- Pass 2: blocked_by, following tagged dependencies transitively.
+  -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
   let cutOf (n : Name) : Array Name := (closures[n]?.map (·.1)).getD #[]
+  let signed (a : Name) : Bool := new.isTagged a && states[a]? == some "valid" &&
+    (new.nodes[a]?.map (·.fields.kind)) == some "axiom"
   let mut decls := #[]
-  for (n, _, sd) in entries do
+  let mut warnings := #[]
+  let mut unpermitted := #[]
+  for (n, d, sd) in entries do
+    let proof : ProofReport ← if d.kind != "theorem" then pure sd.proof else
+      match new.axioms[n]? with
+      | none => pure { status := "unchecked" }
+      | some axioms =>
+        let (status, bad) := classifyAxioms axioms signed
+        for a in bad do
+          warnings := warnings.push s!"warning: theorem {n} rests on axiom {a}, which is neither standard nor tagged and signed"
+          unpermitted := unpermitted.push (n, a)
+        pure { status, axioms := axioms.map toString, exportHash := cur.exportHash }
     let mut seen : Std.HashSet Name := {}
     let mut blocked : Array Name := #[]
     let mut stack := cutOf n
@@ -164,13 +195,14 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
       seen := seen.insert y
       if states[y]?.getD "unsigned" != "valid" then blocked := blocked.push y
       stack := stack ++ cutOf y
-    decls := decls.push (n.toString, { sd with blockedBy := (Walk.sortNames blocked).map (·.toString) })
+    decls := decls.push (n.toString,
+      { sd with blockedBy := (Walk.sortNames blocked).map (·.toString), proof })
   let report : StatusReport := {
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }
   let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
-  let warnings := untaggedWarnings new closures cur.modules owned
-  return { report, warnings }
+  return { report, warnings := untaggedWarnings new closures cur.modules owned ++ warnings
+           validRecords := (dedup validRecords).qsort (· < ·), unpermitted }
 
 /-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
 def textLine (name : String) (d : StatusDecl) : String :=
