@@ -1,4 +1,4 @@
-# LeanBlame documentation
+# LeanBlame design documents
 
 Read in order. Each file is short.
 

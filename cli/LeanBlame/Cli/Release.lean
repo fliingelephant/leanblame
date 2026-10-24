@@ -1,5 +1,5 @@
 /-
-`leanblame release --tag TAG [--out FILE]` (docs/07-releases-and-eval.md, docs/14-schemas.md §3).
+`leanblame release --tag TAG [--out FILE]` (docs/design/07-releases-and-eval.md, docs/design/14-schemas.md §3).
 
 Two gates and a report, on the current export:
 1. signoff: every tagged declaration is `valid`;

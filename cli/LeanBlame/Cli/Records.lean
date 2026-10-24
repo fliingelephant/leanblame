@@ -1,5 +1,5 @@
 /-
-Loading records and deciding liveness (docs/05-records.md).
+Loading records and deciding liveness (docs/design/05-records.md).
 
 A record is a file of a records directory named `<sha256 of its bytes>.toml`
 that parses; that hash is its id. `exclude` drops approve records before
@@ -37,7 +37,7 @@ def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePa
   return out
 
 /-- Load a records directory. An entry is a record iff it is a file named `<sha256 of its
-bytes>.toml` that parses (docs/05); every other entry is a problem, returned with its path. A
+bytes>.toml` that parses (docs/design/05); every other entry is a problem, returned with its path. A
 missing directory holds no records. -/
 def loadRecordDir (dir : System.FilePath) :
     IO (Array LoadedRecord × Array (System.FilePath × Array String)) := do
@@ -78,7 +78,7 @@ def loadAllRecords (root : System.FilePath) (cfg : Config) :
   return (good, bad)
 
 /--
-The withdraw rule (docs/05): `w` refers to an approve record, is signed by that record's signer,
+The withdraw rule (docs/design/05): `w` refers to an approve record, is signed by that record's signer,
 and lists only constants of it. Returns the constants it withdraws (all of the record's when it
 lists none), or every problem. `byId` holds the records by id.
 -/

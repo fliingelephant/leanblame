@@ -1,5 +1,5 @@
 /-
-`leanblame equiv [NAME...]` (docs/06-versioning.md, "`equiv`").
+`leanblame equiv [NAME...]` (docs/design/06-versioning.md, "`equiv`").
 
 Mechanical: no build, no tactics. For each tagged declaration X that is `outdated` with `untagged`
 as the only cause (the named ones, else all), compared with X's last live approval:
@@ -71,7 +71,7 @@ def runMeta (env : Kernel.Environment) (x : MetaM α) : IO α := do
     { env := .ofKernelEnv env }
   return a
 
-/-- `e` printed with notation (field notation too) off, as the sign server shows types (docs/06). -/
+/-- `e` printed with notation (field notation too) off, as the sign server shows types (docs/design/06). -/
 def pp (env : Kernel.Environment) (e : Expr) : IO String := do
   try return toString (← runMeta env (PrettyPrinter.ppExpr e)) catch _ => return toString e
 

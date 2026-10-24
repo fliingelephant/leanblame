@@ -105,7 +105,7 @@ grep -qxF "$want" "$work/status.err" || fail "no untagged-dependency warning: $(
 [[ "$(grep -c '^warning' "$work/status.err")" == 1 ]] || fail "unexpected warnings: $(cat "$work/status.err")"
 ok "status warns that tagged Sample.energy uses untagged Sample.double, and nothing else"
 run status --json
-python3 - "$out" <<'PY' || fail "status --json does not match docs/14"
+python3 - "$out" <<'PY' || fail "status --json does not match docs/design/14"
 import json, sys
 s = json.loads(sys.argv[1])
 assert s["schema"] == "leanblame.status.1"
@@ -123,14 +123,14 @@ assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 PY
-ok "status --json has the docs/14 fields; the proof field shows proven and open theorems"
+ok "status --json has the docs/design/14 fields; the proof field shows proven and open theorems"
 
 echo "== release"
 run release --tag 2026.10 --out "$work/release.json"
 release_hash="$(awk '/^release /{print $2}' <<<"$out")"
 cmp -s "$work/release.json" ".leanblame/store/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
 python3 - "$work/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
-  || fail "release manifest does not match docs/14"
+  || fail "release manifest does not match docs/design/14"
 import hashlib, json, sys
 path, h, export, basic, energy = sys.argv[1:]
 text = open(path).read()

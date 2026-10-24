@@ -1,5 +1,5 @@
 /-
-Input adapters (docs/04-architecture.md, "Adapters"): the declarations a boundary-list file puts on
+Input adapters (docs/design/04-architecture.md, "Adapters"): the declarations a boundary-list file puts on
 the boundary, with their informal text. `export --boundary FILE` checks them against the library
 and expands them like `@[trusted]` tags. Two formats:
 
@@ -25,7 +25,7 @@ structure Tag where
   informal : String
   informalSource : String
 
-/-- The informal text of a docstring or list entry, as docs/03 hashes it: ASCII whitespace trimmed,
+/-- The informal text of a docstring or list entry, as docs/design/03 hashes it: ASCII whitespace trimmed,
 line endings normalized, no Unicode normalization (Lean core has none). -/
 def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 

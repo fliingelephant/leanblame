@@ -1,5 +1,5 @@
 /-
-`leanblame validate [--base-ref REF]` (docs/05-records.md, docs/14-schemas.md §2).
+`leanblame validate [--base-ref REF]` (docs/design/05-records.md, docs/design/14-schemas.md §2).
 
 Checks every entry of the records directories:
 * it is a record: a file named by the SHA-256 of its bytes (`<hex>.toml`) that

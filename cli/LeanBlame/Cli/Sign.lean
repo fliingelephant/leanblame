@@ -1,5 +1,5 @@
 /-
-`leanblame init` and `leanblame sign` (docs/04-architecture.md, docs/05-records.md).
+`leanblame init` and `leanblame sign` (docs/design/04-architecture.md, docs/design/05-records.md).
 
 `sign` is the terminal dev path: it writes `local:` records only. Provider
 logins (OpenReview, ORCID, GitHub) belong to the sign server.

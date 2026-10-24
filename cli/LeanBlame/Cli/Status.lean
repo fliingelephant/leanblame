@@ -1,6 +1,6 @@
 /-
 `leanblame status [--json]` and `leanblame blame NAME`
-(docs/03-trust-model.md "Validity", docs/06-versioning.md, docs/14-schemas.md §4).
+(docs/design/03-trust-model.md "Validity", docs/design/06-versioning.md, docs/design/14-schemas.md §4).
 
 Per tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve
@@ -81,7 +81,7 @@ structure Result where
   cur : Store.Current
   new : Walk.Hashed
   report : StatusReport
-  /-- Untagged declarations of this library used by tagged ones (docs/03), and theorems resting on
+  /-- Untagged declarations of this library used by tagged ones (docs/design/03), and theorems resting on
   axioms that are not permitted. -/
   warnings : Array String := #[]
   /-- Live approve records carrying the current claim of some tagged declaration, sorted. -/
@@ -89,7 +89,7 @@ structure Result where
   /-- (theorem, axiom) pairs where the axiom is neither standard nor a valid tagged axiom. -/
   unpermitted : Array (Name × Name) := #[]
 
-/-- A theorem's axioms against the permitted ones (docs/07): `proven` when each is standard or
+/-- A theorem's axioms against the permitted ones (docs/design/07): `proven` when each is standard or
 `signed`, `open` otherwise; and the axioms that are neither `sorryAx` nor permitted. -/
 def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : String × Array Name :=
   let permitted (a : Name) := Walk.standardAxioms.contains a || signed a

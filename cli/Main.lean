@@ -1,5 +1,5 @@
 /-
-`leanblame`: command-line entry point (docs/04-architecture.md, eight commands).
+`leanblame`: command-line entry point (docs/design/04-architecture.md, eight commands).
 -/
 import LeanBlame.Cli.Equiv
 import LeanBlame.Cli.Release

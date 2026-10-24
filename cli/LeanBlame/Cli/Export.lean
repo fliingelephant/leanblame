@@ -1,5 +1,5 @@
 /-
-`leanblame export [--boundary FILE] [--lib NAME]...` (docs/04-architecture.md).
+`leanblame export [--boundary FILE] [--lib NAME]...` (docs/design/04-architecture.md).
 
 Builds the library with `lake build`, imports its modules, and makes the
 boundary list: the declarations tagged `@[trusted]` (own and imported) or
@@ -140,7 +140,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
         | none => decl m mi t.informal t.informalSource
   return (out.qsort (·.2.name < ·.2.name), errors)
 
-/-- Whether a user could tag `n`, that is, Lean did not generate it (docs/03): not a compiler
+/-- Whether a user could tag `n`, that is, Lean did not generate it (docs/design/03): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
 reserved name, nor anything Lean's own `isAutoDeclOrPrivate_Internal` counts as generated
 (`T.brecOn.go`, `T.ctorIdx`, …). Constructors are tagged with their type. -/
@@ -177,7 +177,7 @@ structure Result where
 def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsGiven : Array String) :
     IO Result := do
   let deps ← manifestDeps root
-  -- docs/04: build using the mathlib cache, when the library depends on mathlib.
+  -- docs/design/04: build using the mathlib cache, when the library depends on mathlib.
   if deps.any (·.1 == "mathlib") then
     IO.eprintln "leanblame: lake exe cache get"
     try runToStderr "lake" #["exe", "cache", "get"] root "`lake exe cache get`"

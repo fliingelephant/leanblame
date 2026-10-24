@@ -12,7 +12,7 @@ Changes: the worklist loop is kept, but it walks one export instead of
 comparing a challenge with a solution. It seeds from the boundary list, cuts at
 tagged declarations, skips proofs (theorem values, and proof subterms erased
 from types and definition bodies), and hashes every constant it reaches
-(docs/03-trust-model.md, "The hash, precisely"). Cycles are found with
+(docs/design/03-trust-model.md, "The hash, precisely"). Cycles are found with
 Tarjan's algorithm and hashed as groups. Instead of stopping at the first
 mismatch, `changes` collects every difference between two hashed exports under
 a declaration and charges it to a cause.
@@ -192,7 +192,7 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
           st := { st with low := st.low.insert u (min st.low[u]! st.low[v]!) }
   return st.sccs
 
-/-- The axioms every Lean library may rest on (docs/07). -/
+/-- The axioms every Lean library may rest on (docs/design/07). -/
 def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
 
 /--
@@ -304,7 +304,7 @@ def closureOf (h : Hashed) (x : Name) : Array Name × Array Name := Id.run do
   return (sortNames cut.toArray, untagged.toArray)
 
 /--
-Why `claim(x)` differs between `old` and `new` (docs/03, "Why a hash moved"). Collects every
+Why `claim(x)` differs between `old` and `new` (docs/design/03, "Why a hash moved"). Collects every
 mismatch instead of stopping at the first:
 * `own-text`: the informal text of `x`;
 * `own-body`: kind, name, universe parameters, type, body or safety of `x`;

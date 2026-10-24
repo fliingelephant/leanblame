@@ -1,5 +1,5 @@
 /-
-Canonical printing of exported terms (docs/03-trust-model.md, "The hash,
+Canonical printing of exported terms (docs/design/03-trust-model.md, "The hash,
 precisely"), and the per-constant hashes built from it.
 
 Terms are printed from the parsed export with de Bruijn indices, constants by

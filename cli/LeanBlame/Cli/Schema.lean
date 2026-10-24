@@ -1,8 +1,8 @@
 /-
-The interfaces of docs/14-schemas.md: boundary list (JSON), record (TOML),
+The interfaces of docs/design/14-schemas.md: boundary list (JSON), record (TOML),
 release manifest (JSON) and status (JSON), each a Lean structure with an
 emitter; the boundary list and the record have a strict reader. Records keep the
-field order of docs/05; JSON key order is not part of the schema.
+field order of docs/design/05; JSON key order is not part of the schema.
 
 Declaration names are kept as strings, exactly as `Lean.Name.toString` prints
 them; the commands map them back to constants through the export.
@@ -64,7 +64,7 @@ def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
 
 /-! ## 1. Boundary list -/
 
-/-- Kinds a boundary-list entry may have: the export kinds of docs/14. -/
+/-- Kinds a boundary-list entry may have: the export kinds of docs/design/14. -/
 def boundaryKinds : Array String := #["def", "theorem", "axiom", "inductive", "ctor", "opaque", "quot"]
 
 def isInformalSource (s : String) : Bool :=
@@ -192,7 +192,7 @@ def date : Record → Std.Time.Timestamp
   | .withdraw r => r.date
 
 open Lake.Toml (Value ppTable) in
-/-- The record as TOML, printed by Lake: the fields of docs/05 in order, tables last. -/
+/-- The record as TOML, printed by Lake: the fields of docs/design/05 in order, tables last. -/
 def toToml (rec : Record) : String :=
   let head (action signer : String) (date : Std.Time.Timestamp) : Table :=
     Table.empty |>.insert `schema schemaId |>.insert `action action |>.insert `signer signer

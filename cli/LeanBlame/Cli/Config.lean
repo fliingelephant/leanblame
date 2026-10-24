@@ -1,5 +1,5 @@
 /-
-`leanblame.toml`, the library's trust policy (docs/04-architecture.md, Config).
+`leanblame.toml`, the library's trust policy (docs/design/04-architecture.md, Config).
 -/
 import Lake.Toml
 import LeanBlame.Cli.Schema
@@ -21,7 +21,7 @@ def Config.fileName : String := "leanblame.toml"
 
 /-- What `init` writes. -/
 def Config.defaultText : String :=
-  "# LeanBlame trust policy. See docs/04-architecture.md in the leanblame repository.
+  "# LeanBlame trust policy. See docs/design/04-architecture.md in the leanblame repository.
 records = [\"records/\"]   # records repositories (local directories)
 exclude = []              # approve records this library refuses to count
 required_signers = 1      # distinct live approvals a declaration needs

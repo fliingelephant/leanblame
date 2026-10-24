@@ -1,5 +1,5 @@
 /-
-The object store (docs/04-architecture.md, Storage): exports, boundary lists and
+The object store (docs/design/04-architecture.md, Storage): exports, boundary lists and
 status logs, each in `.leanblame/store/<hex>` where `<hex>` is the SHA-256 of
 the file's bytes.
 
