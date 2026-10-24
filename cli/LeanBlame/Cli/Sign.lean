@@ -124,13 +124,6 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
     IO.println s!"approve {id} {path} ({constants.size} constants of {m})"
   return 0
 
-/-- A record id from `sha256:<hex>`, `<hex>` or the path of a record file. -/
-def recordId (ref : String) : IO String := do
-  if isHash ref then return ref
-  if isHexDigest ref then return mkHash ref
-  if ← (System.FilePath.mk ref).pathExists then return sha256OfBytes (← IO.FS.readBinFile ref)
-  fail s!"{ref}: not a record id or file"
-
 /-- Withdraw some or all constants of one of your approve records. -/
 def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
     (constants? : Option (Array String)) (note? : Option String) : IO UInt32 := do

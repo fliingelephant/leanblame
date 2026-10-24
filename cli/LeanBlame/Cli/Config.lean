@@ -9,7 +9,7 @@ namespace LeanBlame
 structure Config where
   /-- Records repositories. Local directories, relative to the library root. -/
   records : Array String := #["records/"]
-  /-- Record hashes this library refuses to count. -/
+  /-- Approve records this library refuses to count. Withdrawals cannot be excluded. -/
   exclude : Array String := #[]
   conventions : Option String := none
   providers : Array String := #[]
@@ -25,7 +25,7 @@ def Config.fileName : String := "leanblame.toml"
 def Config.defaultText : String :=
   "# LeanBlame trust policy. See docs/04-architecture.md in the leanblame repository.
 records = [\"records/\"]   # records repositories (local directories)
-exclude = []              # record hashes this library refuses to count
+exclude = []              # approve records this library refuses to count
 required_signers = 1      # distinct live approvals a declaration needs
 allowed_signers = \"any\"   # or a list of provider:id
 # conventions = \"MyLib.Conventions\"

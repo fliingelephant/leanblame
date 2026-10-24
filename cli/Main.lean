@@ -15,7 +15,7 @@ commands:
   init                                   create leanblame.toml, records/ and the CI job
   export [--boundary FILE] [--lib NAME]  build, export, write the boundary list
                                          (FILE: leanblame.boundary.1 JSON; adapters not implemented)
-  status [--base EXPORT] [--json]        state of every tagged declaration
+  status [--base RECORD] [--json]        state of every tagged declaration
   blame NAME                             who signed NAME, when, at which claim hash
   equiv                                  (not implemented)
   sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]

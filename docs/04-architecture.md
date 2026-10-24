@@ -28,7 +28,7 @@ Eight commands:
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`, and the CI job that runs `validate`. |
 | `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list. `--boundary` takes a list from an adapter instead of `@[trusted]`. |
-| `status [--base A] [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; flags `equiv-proven`, `withdrawn`, `blocked-by`; the cause of any hash move. `--base A`: compare with export `A`. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
+| `status [--base A] [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; flags `equiv-proven`, `withdrawn`, `blocked-by`; the cause of any hash move. `--base A`: compare with approve record `A`, that is with the export and boundary list it names. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
 | `blame X` | Who signed `X`, when, at which claim hash. |
 | `equiv` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.`, ask an agent to prove it equal to the new one, check with `lake comparator`, store the proof. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path; `local:` ids unless a provider token is given. |
@@ -59,7 +59,7 @@ verso-blueprint's `blueprint-manifest.json`; a hand-written TOML list
 
 ```toml
 records = ["records/", "https://github.com/some-institute/records"]
-exclude = ["sha256:…"]          # records this library refuses to count
+exclude = ["sha256:…"]          # approve records this library refuses to count
 conventions = "OpenPhysics.Conventions"
 providers = ["openreview", "orcid", "github"]
 required_signers = 1            # distinct live approvals a declaration needs

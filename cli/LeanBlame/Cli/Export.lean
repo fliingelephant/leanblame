@@ -245,7 +245,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   Cache.save root exportHash boundary hashed
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, modules := mods.map toString, owned := ownedHash } commit
+    { exportHash, boundary, modules := mods.map toString, owned := ownedHash }
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

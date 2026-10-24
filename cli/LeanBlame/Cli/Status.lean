@@ -1,5 +1,5 @@
 /-
-`leanblame status [--base EXPORT] [--json]` and `leanblame blame NAME`
+`leanblame status [--base RECORD] [--json]` and `leanblame blame NAME`
 (docs/03-trust-model.md "Validity", docs/06-versioning.md, docs/14-schemas.md §4).
 
 Per tagged declaration X of the current boundary list:
@@ -10,8 +10,9 @@ Per tagged declaration X of the current boundary list:
   `equiv`, not in this slice);
 * change: for a declaration that is not valid, the causes of the move since the
   last live approval, found by hashing the export and boundary list that record
-  names (from the object store) and comparing hash parts; with `--base A`, the
-  causes since export A, for every declaration whose claim differs from A's;
+  names (from the object store) and comparing hash parts; with `--base R`, the
+  causes since approve record R (the export and boundary list it names), for
+  every declaration whose claim differs from R's;
 * blocked_by: tagged dependencies, followed transitively, that are not valid;
 * proof: `unchecked` for theorems (no axiom report in this slice), `n/a` otherwise.
 -/
@@ -52,25 +53,6 @@ def hashed (root : System.FilePath) (memo : Memo) (exportHash boundary : String)
       pure h
   memo.modify (·.insert (exportHash, boundary) (some h))
   return some h
-
-/--
-The boundary list to compare with for `--base A`: the one of the latest local `export` of `A`,
-else the one of the latest record naming `A`. A docstring edit leaves the export unchanged, so
-several lists can pair with one export; `status` then says which one it took.
--/
-def boundaryForExport (root : System.FilePath) (ledger : Ledger) (exportHash : String) :
-    IO String := do
-  let fromLog ← Store.boundariesForExport root exportHash
-  -- The ledger's records are in (date, id) order: latest last.
-  let fromRecords := (ledger.records.filterMap fun r => match r.record with
-    | .approve a => if a.exportHash == exportHash then some a.boundary else none
-    | .withdraw _ => none).reverse
-  let candidates := dedup (fromLog ++ fromRecords)
-  let some b := candidates[0]? | fail s!"no boundary list known for export {exportHash}"
-  if candidates.size > 1 then
-    let source := if fromLog.contains b then "the latest local export" else "the latest record"
-    IO.eprintln s!"warning: export {exportHash} pairs with {candidates.size} boundary lists (docstring edits); comparing with {b}, from {source}"
-  return b
 
 /-- The approve records listing `name` and the counting withdraws covering it, in (date, id)
 order. -/
@@ -114,10 +96,15 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
   let cur ← Store.readCurrent root
   let memo : Memo ← IO.mkRef {}
   let some new ← hashed root memo cur.exportHash cur.boundary | unreachable!
+  -- `--base`: the export and boundary list an approve record names.
   let base ← match base? with
-    | some a =>
-      let a := if isHash a then a else mkHash a
-      hashed root memo a (← boundaryForExport root ledger a)
+    | some ref =>
+      let id ← recordId ref
+      let a ← match (ledger.byId[id]?.map (·.record) : Option Record) with
+        | some (.approve a) => pure a
+        | some (.withdraw _) => fail s!"{id} is a withdraw record; --base takes an approve record"
+        | none => fail s!"{id}: no such record (--base takes the id or file of an approve record)"
+      hashed root memo a.exportHash a.boundary
     | none => pure none
   -- Pass 1: state, flags, change, signers, history.
   let mut states : Std.HashMap Name String := {}

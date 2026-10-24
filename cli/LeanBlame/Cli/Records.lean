@@ -2,7 +2,9 @@
 Loading records and deciding liveness (docs/05-records.md).
 
 A record is a file of a records directory named `<sha256 of its bytes>.toml`
-that parses; that hash is its id. `exclude` drops records before anything else. A withdraw counts only if it refers to an approve record and is
+that parses; that hash is its id. `exclude` drops approve records before
+anything else; a withdrawal cannot be excluded, a signer's word about their own
+record stands. A withdraw counts only if it refers to an approve record and is
 signed by that record's signer; it kills the listed constants of that record,
 or all of them. An approve record is live for a constant if no counting
 withdraw covers it and its signer is allowed by `leanblame.toml`.
@@ -58,6 +60,13 @@ def loadRecordDir (dir : System.FilePath) :
     | .error es => bad := bad.push (e.path, es)
   return (good, bad)
 
+/-- A record id from `sha256:<hex>`, `<hex>` or the path of a record file. -/
+def recordId (ref : String) : IO String := do
+  if isHash ref then return ref
+  if isHexDigest ref then return mkHash ref
+  if ← (System.FilePath.mk ref).pathExists then return sha256OfBytes (← IO.FS.readBinFile ref)
+  fail s!"{ref}: not a record id or file"
+
 def loadAllRecords (root : System.FilePath) (cfg : Config) :
     IO (Array LoadedRecord × Array (System.FilePath × Array String)) := do
   let mut good := #[]
@@ -104,8 +113,6 @@ structure Ledger where
   cfg : Config
   /-- Every record loaded, excluded or not, by id. -/
   byId : Std.HashMap String LoadedRecord
-  /-- The records not excluded, in (date, id) order. -/
-  records : Array LoadedRecord
   approves : Std.HashMap String (LoadedRecord × ApproveRecord)
   /-- (approve record id, constant) pairs that a counting withdraw covers. -/
   withdrawn : Std.HashSet (String × String)
@@ -115,7 +122,7 @@ structure Ledger where
   /-- Withdraws that break the withdraw rule, excluded or not, with the problems. -/
   problems : Array (LoadedRecord × Array String)
 
-/-- A withdraw counts iff it is not excluded and keeps the withdraw rule. -/
+/-- A withdraw counts iff it keeps the withdraw rule; `exclude` applies to approve records only. -/
 def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
   let all := all.qsort fun a b =>
     ((compare a.record.date b.record.date).then (compare a.hash b.hash)) == .lt
@@ -125,10 +132,9 @@ def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
   let mut entries : Std.HashMap String (Array Entry) := {}
   let mut problems := #[]
   for r in all do
-    let excluded := cfg.exclude.contains r.hash
     match r.record with
     | .approve a =>
-      if excluded then continue
+      if cfg.exclude.contains r.hash then continue
       approves := approves.insert r.hash (r, a)
       for (c, claim) in a.constants do
         entries := entries.alter c fun es => (es.getD #[]).push (.approve r a claim)
@@ -136,13 +142,11 @@ def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
       match withdrawCovers byId w with
       | .error ps => problems := problems.push (r, ps)
       | .ok covered =>
-        if excluded then continue
         let cw : CountingWithdraw := { loaded := r, withdraw := w, constants := covered }
         for c in covered do
           withdrawn := withdrawn.insert (w.refersTo, c)
           entries := entries.alter c fun es => (es.getD #[]).push (.withdraw cw)
-  let records := all.filter fun r => !cfg.exclude.contains r.hash
-  return { cfg, byId, records, approves, withdrawn, entries, problems }
+  return { cfg, byId, approves, withdrawn, entries, problems }
 
 def Ledger.entriesOf (l : Ledger) (name : String) : Array Ledger.Entry :=
   l.entries.getD name #[]

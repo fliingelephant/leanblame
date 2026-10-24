@@ -3,10 +3,8 @@ The object store (docs/04-architecture.md, Storage): exports, boundary lists and
 status logs, each in `.leanblame/store/<hex>` where `<hex>` is the SHA-256 of
 the file's bytes.
 
-Two small local files point into it:
-* `.leanblame/current` (JSON): the export and boundary list of the last `export` run;
-* `.leanblame/exports`: one line per `export` run, `<export> <boundary> <commit>`,
-  so `status --base A` can find the boundary list exported with export `A`.
+One small local file points into it: `.leanblame/current` (JSON), the export
+and boundary list of the last `export` run.
 -/
 import LeanBlame.Cli.Util
 
@@ -60,13 +58,8 @@ structure Current where
 
 def currentPath (root : System.FilePath) : System.FilePath := dir root / "current"
 
-def writeCurrent (root : System.FilePath) (c : Current) (commit : String) : IO Unit := do
+def writeCurrent (root : System.FilePath) (c : Current) : IO Unit :=
   writeFileMkdirs (currentPath root) (jsonText c)
-  -- The log keeps one line per (export, boundary list, commit), the latest run last.
-  let log := dir root / "exports"
-  let line := s!"{c.exportHash} {c.boundary} {commit}"
-  let old := ((← readFileIfExists log).getD "" |> strLines).filter (fun l => l != "" && l != line)
-  IO.FS.writeFile log ("\n".intercalate (old ++ [line]) ++ "\n")
 
 def readCurrent (root : System.FilePath) : IO Current := do
   let some text ← readFileIfExists (currentPath root)
@@ -75,13 +68,5 @@ def readCurrent (root : System.FilePath) : IO Current := do
   | .ok (c : Current) => if isHash c.exportHash && isHash c.boundary then return c
   | .error _ => pure ()
   fail s!"{currentPath root} is malformed; run `leanblame export`"
-
-/-- The boundary lists exported together with `exportHash`, from the local export log, latest
-first. Docstrings are not in exports, so a docstring edit pairs a new list with the same export. -/
-def boundariesForExport (root : System.FilePath) (exportHash : String) : IO (Array String) := do
-  let some text ← readFileIfExists (dir root / "exports") | return #[]
-  return dedup <| (strLines text).reverse.toArray.filterMap fun l => match l.splitOn " " with
-    | e :: b :: _ => if e == exportHash then some b else none
-    | _ => none
 
 end LeanBlame.Store

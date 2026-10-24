@@ -50,7 +50,7 @@ Dates are native TOML datetimes in UTC.
 | Over | Who | Can |
 |------|-----|-----|
 | **a record** | its signer, only | approve, withdraw, approve again |
-| **a library** | its maintainers, via git | tag declarations, choose which records repos count, exclude a record by hash, cut releases, edit the conventions module |
+| **a library** | its maintainers, via git | tag declarations, choose which records repos count, exclude an approve record by hash, cut releases, edit the conventions module |
 | **identity** | the login provider; the institution hosting a records repo | say who a signer is; host and back their records |
 
 A record is one person's statement. Nobody edits it, not even a maintainer.
@@ -90,7 +90,9 @@ withdrawn.
   normally the hosting institution. Name it in the library's README.
 
 A library may list several records repos in `leanblame.toml` and exclude
-individual records by hash. `exclude` is applied before liveness.
+individual approve records by hash. `exclude` is applied before liveness. A
+withdrawal cannot be excluded: a signer's word about their own record stands,
+and nobody can be made to vouch for what they took back.
 
 ## Decisions
 

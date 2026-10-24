@@ -20,7 +20,7 @@
 | **axiom report** | Per theorem, the axioms it rests on: proven, open (`sorryAx`), or relative to a signed axiom. |
 | **cause** | Why a hash moved: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`. |
 | **group hash** | Hash of a cycle (an inductive with its constructors, or mutual definitions) as one unit. |
-| **exclude** | A maintainer's decision in `leanblame.toml` to stop counting a record. The dispute mechanism. |
+| **exclude** | A maintainer's decision in `leanblame.toml` to stop counting an approve record. The dispute mechanism. Withdrawals cannot be excluded. |
 | **comparator** | Lean FRO's checker for untrusted proofs against a trusted statement file. |
 | **nanoda, con-ron, con-leche** | Independent re-implementations of the Lean kernel, used as extra checkers. |
 | **AXLE, Kimina, Pantograph** | Fast proof-check services that trust the elaborator. Filters, not gates. |

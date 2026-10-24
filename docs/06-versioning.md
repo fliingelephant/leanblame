@@ -20,7 +20,7 @@ Per tagged declaration X:
 - **Hash matches a live record:** valid.
 - **Hash differs:** outdated, with causes (`own-text`, `own-body`,
   `dep-spec`, `cut-moved`, `untagged`; see [03-trust-model.md](03-trust-model.md)).
-  `status --base A` names the changed constants under X.
+  `status --base R` names the constants that changed under X since approve record R.
 - **A tagged dependency is not valid:** blocked by it.
 
 Every `status` run writes a log to the object store, so a wrong "still valid"

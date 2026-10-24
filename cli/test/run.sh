@@ -78,6 +78,7 @@ echo "== sign"
 run sign --signer local:alice --note "first review"
 [[ "$(grep -c '^approve ' <<<"$out")" == 2 ]] || fail "expected one approve record per module: $out"
 basic_record="$(awk '/of Sample.Basic\)$/ {print $2}' <<<"$out")"
+energy_record="$(awk '/of Sample.Energy\)$/ {print $2}' <<<"$out")"
 ok "two approve records, Sample.Basic is $basic_record"
 run validate
 ok "validate: $out"
@@ -119,7 +120,7 @@ export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
 run status
 expect_line Sample.second_site "Sample.second_site valid"
-run status --base "$before"
+run status --base "$energy_record"
 expect_line Sample.second_site "Sample.second_site valid"
 ok "a proof inside a statement is not part of the hash"
 
@@ -130,11 +131,11 @@ export_lib
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"
-# --base compares with an export, not with the records.
-run status --base "$first_export"
+# --base compares with the export and boundary list an approve record names.
+run status --base "$energy_record"
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
-run status --base "$(current_export)"
-expect_line Sample.pointEnergy "Sample.pointEnergy outdated"
+must_fail "no such record" -- "$lb" status --base "$(current_export)"
+ok "--base takes a record, not an export"
 
 echo "== edit a dependency body: energy"
 edit Sample/Basic.lean 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/'
@@ -159,9 +160,10 @@ commit "energy: new docstring"
 before="$(current_export)"
 export_lib
 [[ "$(current_export)" == "$before" ]] || fail "a docstring edit changed the export"
-"$lb" status --base "$before" >/dev/null 2>"$work/status.err" || fail "status --base $before"
-grep -q "pairs with 2 boundary lists" "$work/status.err" || fail "no ambiguity warning: $(cat "$work/status.err")"
-ok "a docstring edit keeps the export; --base says which of its two boundary lists it takes"
+run status --base "$basic_record"
+expect_line Sample.energy \
+  "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
+ok "a docstring edit keeps the export; --base RECORD compares with the record's boundary list"
 run status
 expect_line Sample.energy \
   "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
@@ -182,6 +184,15 @@ expect_line Sample.energy "Sample.energy unsigned flags=withdrawn"
 expect_line Sample.Point "Sample.Point unsigned flags=withdrawn blocked-by=Sample.Point.mk"
 expect_line Sample.energy_even \
   "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
+
+echo "== a withdrawal cannot be excluded"
+edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$withdraw_record\"]|"
+grep -q '^exclude = \["sha256:' leanblame.toml || fail "test setup: exclude not set"
+must_fail "withdrawals cannot be excluded" -- "$lb" validate
+run status
+expect_line Sample.energy "Sample.energy unsigned flags=withdrawn"
+git checkout -q -- leanblame.toml
+ok "excluding a withdraw record fails validate and does not revive the approval"
 
 echo "== blame"
 run blame Sample.energy
