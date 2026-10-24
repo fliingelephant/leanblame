@@ -41,27 +41,29 @@ def Args.getAll (a : Args) (k : String) : Array String :=
 
 def Args.has (a : Args) (k : String) : Bool := a.switches.contains k
 
-/-- Split `args` given which options take a value. -/
-def parseArgs (valued switches : Array String) (args : List String) : Except String Args :=
+/-- Split `args` given which options take a value; positional arguments only when `positional`. -/
+def parseArgs (valued switches : Array String) (args : List String) (positional := false) :
+    IO Args :=
   go args {}
 where
-  go : List String → Args → Except String Args
-    | [], acc => .ok acc
+  go : List String → Args → IO Args
+    | [], acc => pure acc
     | a :: rest, acc =>
       if valued.contains a then
         match rest with
         | v :: rest' => go rest' { acc with flags := acc.flags.push (a, v) }
-        | [] => .error s!"{a} needs a value"
+        | [] => fail s!"{a} needs a value"
       else if switches.contains a then
         go rest { acc with switches := acc.switches.push a }
       else if a.startsWith "--" then
-        .error s!"unknown option {a}"
-      else
+        fail s!"unknown option {a}"
+      else if positional then
         go rest { acc with positional := acc.positional.push a }
+      else
+        fail s!"unexpected argument {a}"
 
 def cmdExport (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--boundary", "--lib"] #[] args)
-  unless a.positional.isEmpty do throw (IO.userError "export takes no positional arguments")
+  let a ← parseArgs #["--boundary", "--lib"] #[] args
   let root ← IO.currentDir
   let r ← Export.run root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
@@ -70,47 +72,44 @@ def cmdExport (args : List String) : IO UInt32 := do
   return 0
 
 def cmdStatus (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #[] #["--json"] args)
-  unless a.positional.isEmpty do throw (IO.userError "status takes no positional arguments")
+  let a ← parseArgs #[] #["--json"] args
   Status.run (← IO.currentDir) (a.has "--json")
 
 def cmdBlame (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #[] #[] args)
-  let #[name] := a.positional | throw (IO.userError "usage: leanblame blame NAME")
+  let a ← parseArgs #[] #[] args (positional := true)
+  let #[name] := a.positional | fail "usage: leanblame blame NAME"
   Status.blame (← IO.currentDir) name
 
 def cmdValidate (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--base-ref"] #[] args)
-  unless a.positional.isEmpty do throw (IO.userError "validate takes no positional arguments")
+  let a ← parseArgs #["--base-ref"] #[] args
   Validate.run (← IO.currentDir) (a.get? "--base-ref")
 
 def cmdInit (args : List String) : IO UInt32 := do
-  unless args.isEmpty do throw (IO.userError "init takes no arguments")
+  discard <| parseArgs #[] #[] args
   Sign.init (← IO.currentDir)
 
 def cmdSign (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--signer", "--module", "--note", "--withdraw", "--constants"] #[] args)
+  let a ← parseArgs #["--signer", "--module", "--note", "--withdraw", "--constants"] #[] args (positional := true)
   let root ← IO.currentDir
   match a.get? "--withdraw" with
   | some ref =>
     unless a.positional.isEmpty && (a.get? "--module").isNone do
-      throw (IO.userError "sign --withdraw RECORD takes --constants A,B instead of names or --module")
+      fail "sign --withdraw RECORD takes --constants A,B instead of names or --module"
     let constants? := (a.get? "--constants").map fun s =>
       ((s.splitOn ",").map strTrim |>.filter (· != "")).toArray
     Sign.withdraw root (a.get? "--signer") ref constants? (a.get? "--note")
   | none =>
     if (a.get? "--constants").isSome then
-      throw (IO.userError "--constants goes with --withdraw; to approve, list the names")
+      fail "--constants goes with --withdraw; to approve, list the names"
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
 def cmdEquiv (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #[] #[] args)
+  let a ← parseArgs #[] #[] args (positional := true)
   Equiv.run (← IO.currentDir) a.positional
 
 def cmdRelease (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--tag", "--out"] #[] args)
-  unless a.positional.isEmpty do throw (IO.userError "release takes no positional arguments")
-  let some tag := a.get? "--tag" | throw (IO.userError "usage: leanblame release --tag TAG [--out FILE]")
+  let a ← parseArgs #["--tag", "--out"] #[] args
+  let some tag := a.get? "--tag" | fail "usage: leanblame release --tag TAG [--out FILE]"
   Release.run (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
 
 def dispatch : List String → IO UInt32

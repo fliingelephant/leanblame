@@ -92,7 +92,7 @@ def goal (env : Kernel.Environment) (dup : NameSet) (c : Name) (o n : ConstantIn
   | .thmInfo _, .thmInfo _ =>
     let a := (renameExpr dup o.type).instantiateLevelParams o.levelParams us
     let b := n.type
-    return .ok (mkApp2 (.const ``Iff []) a b,
+    return .ok (mkIff a b,
                 mkApp4 (.const ``Iff.intro []) a b (.lam `h a (.bvar 0) .default) (.lam `h b (.bvar 0) .default))
   | _, _ => return .error s!"no goal for a changed {Walk.kindOf n}"
 
@@ -143,6 +143,8 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
       | some ci => if isTarget c && !(ci matches .defnInfo _) then m else m.insert (oldName c) (renameConst dup ci)
       | none => m
   let succ (c : Name) := (uses c).filter dup.contains
+  -- `Old.` constants are added in the old export's order, which is dependency-first.
+  let pos : Std.HashMap Name Nat := oldExp.constOrder.foldl (init := {}) fun m c => m.insert (oldName c) m.size
   -- In dependency order: rebuild each component, then check its goals. `taint` holds, per constant,
   -- the failures at or below it that its goal may rest on.
   let mut env := base
@@ -152,7 +154,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
   for comp in Walk.tarjan (dup.toArray ++ targets.map (·.name)) succ do
     let deps := (comp.flatMap succ).filter (!comp.contains ·)
     let below := dedup (deps.flatMap (taint.getD · #[]))
-    let names := NameSet.ofArray (comp.map oldName |>.filter consts.contains)
+    let names := (comp.map oldName |>.filter consts.contains).qsort fun a b => pos.getD a 0 < pos.getD b 0
     let rebuilt ← if deps.any broken.contains then pure false else
       try
         env ← Load.addConstants env consts names true

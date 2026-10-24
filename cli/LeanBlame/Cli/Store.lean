@@ -31,9 +31,8 @@ def putFile (root : System.FilePath) (tmp : System.FilePath) (hex : String) : IO
 /-- Store a string; returns `sha256:<hex>`. -/
 def putString (root : System.FilePath) (contents : String) : IO String := do
   let hex := Sha256.hexOfString contents
-  let dest := objectsDir root / hex
-  unless ← dest.pathExists do
-    writeFileMkdirs dest contents
+  IO.FS.createDirAll (objectsDir root)
+  Lake.writeFileIfNew (objectsDir root / hex) contents
   return mkHash hex
 
 /-- A fresh temporary path inside the store directory (same file system as the objects). -/

@@ -25,7 +25,7 @@ structure LoadedRecord where
 `records` name the same directory); `none` for a remote repository. -/
 def localRecordDir? (r : String) : Option String :=
   if r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@" then none
-  else some (if r.endsWith "/" && r.length > 1 then (r.dropEnd 1).copy else r)
+  else some (if r.length > 1 then (r.dropSuffix "/").copy else r)
 
 /-- The records directories of the configuration. Remote repositories are not supported yet. -/
 def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePath) := do

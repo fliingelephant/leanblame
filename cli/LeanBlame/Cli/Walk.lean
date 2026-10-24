@@ -4,9 +4,9 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving
 -/
 /-
-Adapted for LeanBlame from comparator's `Comparator/Compare.lean` and
-`Comparator/Util.lean` (https://github.com/leanprover/comparator, commit
-865edc1). The licence text is in `cli/LICENSES/Apache-2.0.txt`.
+Adapted for LeanBlame from comparator's closure walk, which ships in the Lean toolchain as
+`Lake/Check/Compare.lean` and `Lake/Check/Util.lean` (`runForUsedConsts`). The licence text is in
+`cli/LICENSES/Apache-2.0.txt`.
 
 Changes: the worklist loop is kept, but it walks one export instead of
 comparing a challenge with a solution. It seeds from the boundary list, cuts at
@@ -118,7 +118,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
     deps := deps ++ iv.ctors.toArray ++ iv.all.toArray
   | .ctorInfo cv => deps := deps.push cv.induct
   | _ => pure ()
-  let directDeps := sortNames (dedup (deps.filter (· != info.name)))
+  let directDeps := (sortNames (deps.filter (· != info.name))).eraseReps
   let fields : Canon.Fields := {
     kind := kindOf info, name := info.name, uparams := ups.length, typeHash, bodyHash, safety }
   return {
@@ -273,7 +273,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
       let members := sortNames comp
       let memberSet : Std.HashSet Name := members.foldl (·.insert ·) {}
       let owns := members.toList.map fun m => nodes[m]!.own
-      let external := sortNames <| dedup <|
+      let external := Array.eraseReps <| sortNames <|
         members.foldl (init := #[]) fun acc m => acc ++ (nodes[m]!.deps.filter (!memberSet.contains ·))
       let entries ← external.toList.mapM (entry nodes)
       let g := Canon.group owns entries

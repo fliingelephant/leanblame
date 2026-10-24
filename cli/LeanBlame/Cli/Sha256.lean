@@ -92,15 +92,12 @@ def State.finish (s : State) : ByteArray := Id.run do
     out := out.push word.toUInt8
   return out
 
-private def hexDigit (n : UInt8) : Char :=
-  if n < 10 then Char.ofNat (48 + n.toNat) else Char.ofNat (87 + n.toNat)
-
 /-- Lowercase hexadecimal rendering of a byte array. -/
 def toHex (bytes : ByteArray) : String := Id.run do
   let mut s := ""
   for b in bytes do
-    s := s.push (hexDigit (b >>> 4))
-    s := s.push (hexDigit (b &&& 0xf))
+    s := s.push (Nat.digitChar (b >>> 4).toNat)
+    s := s.push (Nat.digitChar (b &&& 0xf).toNat)
   return s
 
 /-- Lowercase hex SHA-256 of a byte array. -/

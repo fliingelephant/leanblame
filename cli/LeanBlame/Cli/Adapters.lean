@@ -1,7 +1,7 @@
 /-
 Input adapters (docs/04-architecture.md, "Adapters"): the declarations a boundary-list file puts on
 the boundary, with their informal text. `export --boundary FILE` checks them against the library
-and expands them like `@[trusted]` tags. Besides the `leanblame.boundary.1` JSON list:
+and expands them like `@[trusted]` tags. Two formats:
 
 * a hand-written TOML list, `schema = "leanblame.manual.1"`, whose `[declarations]` table maps
   constant names to their text (`informal_source = "manual"`);
@@ -73,8 +73,8 @@ def blueprintTags (path : System.FilePath) (j : Json) : IO (Array Tag × Array S
     unless str? e "facet" == some "statement" &&
         (str? e "targetKind").all (· ∈ ["block", "externalMarkup"]) do continue
     let label := labelString ((str? e "label").getD "")
-    let code := (e.getObjVal? "codeData").toOption.getD .null
-    let lit := (code.getObjVal? "literateDeclarations").toOption.getD .null
+    let code := e.getObjValD "codeData"
+    let lit := code.getObjValD "literateDeclarations"
     let written := (arr code "externalDecls").filterMap (str? · "canonical") ++
       (arr lit "definedDefs" ++ arr lit "definedTheorems").filterMap (str? · "name")
     if written.isEmpty then continue

@@ -31,11 +31,11 @@ def appendOnlyErrors (root : System.FilePath) (base : String) (loaded : Array Lo
   let mut errors := #[]
   let out ← IO.Process.run
     { cmd := "git", args := #["ls-tree", "-r", "--name-only", base, "--"] ++ dirs, cwd := root }
-  for path in strLines out do
-    let name := (System.FilePath.mk path).fileName.getD ""
-    let id := mkHash (name.dropEnd ".toml".length).copy
-    if name.endsWith ".toml" && isHash id && !ids.contains id then
-      errors := errors.push s!"{path}: record {id} of the merge base is missing (records are append-only)"
+  for path in out.lines do
+    let p := System.FilePath.mk path.copy
+    let id := mkHash (p.fileStem.getD "")
+    if p.extension == some "toml" && isHash id && !ids.contains id then
+      errors := errors.push s!"{p}: record {id} of the merge base is missing (records are append-only)"
   return errors
 
 def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do

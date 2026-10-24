@@ -132,7 +132,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     let claim := node.claim
     let live := liveApprovals ledger d.name
     let matching := live.filter fun (_, _, c) => c == claim
-    let signers := (dedup (matching.map fun (_, a, _) => a.signer)).qsort (· < ·)
+    let signers := ((matching.map fun (_, a, _) => a.signer).qsort (· < ·)).eraseReps
     validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
       if signers.size ≥ ledger.cfg.requiredSigners then "valid"
@@ -194,10 +194,10 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }
   let untagged ← if !warn then pure #[] else do
-    let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
+    let owned : Std.HashSet String := (← Store.readString root cur.owned).lines.fold (·.insert ·.copy) {}
     pure (untaggedWarnings new closures cur.modules owned)
   return { cur, new, report, warnings := untagged ++ warnings
-           validRecords := (dedup validRecords).qsort (· < ·), unpermitted }
+           validRecords := (validRecords.qsort (· < ·)).eraseReps, unpermitted }
 
 /-- One line per declaration: `NAME STATE [evidence=..] [blocked-by=..] [change=cause:names;..]`;
 the evidence is shown while there is something to sign. -/

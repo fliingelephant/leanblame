@@ -32,27 +32,20 @@ jobs:
 "
 
 def init (root : System.FilePath) : IO UInt32 := do
-  let report (what : String) (created : Bool) :=
-    IO.println s!"{if created then "created" else "exists "}  {what}"
-  let cfgPath := root / Config.fileName
-  if ← cfgPath.pathExists then report Config.fileName false
-  else
-    IO.FS.writeFile cfgPath Config.defaultText
-    report Config.fileName true
-  let recordsDir := root / "records"
-  if ← recordsDir.isDir then report "records/" false
-  else
-    IO.FS.createDirAll recordsDir
-    report "records/" true
+  -- Create `path` unless it exists; `what` names it in the report.
+  let ensure (path : System.FilePath) (what : String) (create : IO Unit) : IO Unit := do
+    if ← path.pathExists then IO.println s!"exists   {what}"
+    else
+      create
+      IO.println s!"created  {what}"
+  ensure (root / Config.fileName) Config.fileName (IO.FS.writeFile (root / Config.fileName) Config.defaultText)
+  ensure (root / "records") "records/" (IO.FS.createDirAll (root / "records"))
   let wf := root / ".github" / "workflows" / "leanblame.yml"
-  if ← wf.pathExists then report ".github/workflows/leanblame.yml" false
-  else
-    writeFileMkdirs wf ciWorkflow
-    report ".github/workflows/leanblame.yml" true
+  ensure wf ".github/workflows/leanblame.yml" (writeFileMkdirs wf ciWorkflow)
   -- The object store is local and large; keep it out of git.
   let gi := root / ".gitignore"
   let old := (← readFileIfExists gi).getD ""
-  unless (strLines old).any (fun l => strTrim l == ".leanblame/" || strTrim l == "/.leanblame/") do
+  unless old.lines.any (fun l => l.trimAscii == ".leanblame/".toSlice || l.trimAscii == "/.leanblame/".toSlice) do
     let sep := if old.isEmpty || old.endsWith "\n" then "" else "\n"
     IO.FS.writeFile gi (old ++ sep ++ ".leanblame/\n")
     IO.println "updated  .gitignore (.leanblame/)"
@@ -82,8 +75,8 @@ def writeRecord (dir : System.FilePath) (r : Record) : IO (String × System.File
   let hex := Sha256.hexOfString text
   let path := dir / (hex ++ ".toml")
   IO.FS.createDirAll dir
-  if ← path.pathExists then fail s!"{path} already exists"
-  IO.FS.writeFile path text
+  -- A record is never overwritten: `writeNew` fails if the file exists.
+  IO.FS.withFile path .writeNew (·.putStr text)
   return (mkHash hex, path)
 
 /-- Approve: one record per module, at the claim hashes of the current export. -/

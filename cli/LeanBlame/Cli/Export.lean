@@ -50,9 +50,9 @@ def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Na
   let out ← IO.Process.run
     { cmd := "lake", args := #["query", "--json"] ++ libs.map (· ++ ":modules"), cwd := root }
   let mut mods := #[]
-  for line in strLines out do
-    if strTrim line == "" then continue
-    match Json.parse line with
+  for line in out.lines do
+    if line.trimAscii.isEmpty then continue
+    match Json.parse line.copy with
     | .ok (.arr xs) =>
       for x in xs do
         if let .str s := x then
@@ -111,17 +111,17 @@ def boundaryFileTags (f : System.FilePath) : IO (Array Tag × Array String) := d
     | .ok tags => return (tags, #[])
     | .error es => fail s!"{f}: {accepted}; as a manual list:\n{"\n".intercalate (es.toList.map ("  " ++ ·))}"
 
-/-- The boundary list's declarations, sorted by name: the tagged ones, and the constructors and
-projections of tagged inductives and structures that are not tagged themselves, with their own
-docstring or else the parent's text. `module` and `kind` come from `env`. Also the problems. -/
-def expand (env : Environment) (tags : Array Tag) : IO (Array BoundaryDecl × Array String) := do
-  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : BoundaryDecl :=
-    { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci, informal,
-      informalSource }
+/-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
+constructors and projections of tagged inductives and structures that are not tagged themselves, with
+their own docstring or else the parent's text. `module` and `kind` come from `env`. Also the
+problems. -/
+def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
+  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : Name × BoundaryDecl :=
+    (n, { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci, informal,
+          informalSource })
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
   let mut out := #[]
   let mut errors := #[]
-  let mut members : Array (Name × Tag) := #[]
   for t in tags do
     let some ci := env.find? t.name
       | errors := errors.push s!"{t.name}: tagged but not in the environment"; continue
@@ -130,17 +130,15 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array BoundaryDecl × Ar
     if ci matches .recInfo _ then
       errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
     out := out.push (decl t.name ci t.informal t.informalSource)
-    if let .inductInfo iv := ci then
-      let projs := ((getStructureInfo? env t.name).map (·.fieldInfo.map (·.projFn))).getD #[]
-      for m in iv.ctors.toArray ++ projs do
-        unless tagged.contains m do members := members.push (m, t)
-  for (m, parent) in members do
-    let some ci := env.find? m | errors := errors.push s!"{m}: member of {parent.name} not found"; continue
-    out := out.push <| match (← findSimpleDocString? env m).map normalizeInformal with
-      | some doc => if doc.isEmpty then decl m ci parent.informal parent.informalSource
-        else decl m ci doc "docstring"
-      | none => decl m ci parent.informal parent.informalSource
-  return (out.qsort (·.name < ·.name), errors)
+    let .inductInfo iv := ci | continue
+    let projs := ((getStructureInfo? env t.name).map (·.fieldInfo.map (·.projFn))).getD #[]
+    for m in iv.ctors.toArray ++ projs do
+      if tagged.contains m then continue
+      let some mi := env.find? m | errors := errors.push s!"{m}: member of {t.name} not found"; continue
+      out := out.push <| match ((← findSimpleDocString? env m).map normalizeInformal).filter (· != "") with
+        | some doc => decl m mi doc "docstring"
+        | none => decl m mi t.informal t.informalSource
+  return (out.qsort (·.2.name < ·.2.name), errors)
 
 /-- Whether a user could tag `n`, that is, Lean did not generate it (docs/03): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
@@ -178,8 +176,9 @@ structure Result where
 /-- Run the export in library root `root`. -/
 def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsGiven : Array String) :
     IO Result := do
+  let deps ← manifestDeps root
   -- docs/04: build using the mathlib cache, when the library depends on mathlib.
-  if (← manifestDeps root).any (·.1 == "mathlib") then
+  if deps.any (·.1 == "mathlib") then
     IO.eprintln "leanblame: lake exe cache get"
     try runToStderr "lake" #["exe", "cache", "get"] root "`lake exe cache get`"
     catch e => IO.eprintln s!"warning: could not fetch the mathlib cache: {e}"
@@ -187,15 +186,15 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   runToStderr "lake" #["build"] root "`lake build`"
   let libs ← libraryNames root libsGiven
   let mods ← libraryModules root libs
-  let vars := strLines (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root })
-  let var (k : String) := (vars.find? (·.startsWith (k ++ "="))).map (strDrop · (k.length + 1))
-  let sp : SearchPath := (((var "LEAN_PATH").getD "").splitOn ":").filter (· != "") |>.map System.FilePath.mk
-  initSearchPath (← match var "LEAN_SYSROOT" with | some r => pure (System.FilePath.mk r) | none => findSysroot) sp
+  let vars := (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root }).lines.toArray
+  let var (k : String) := vars.findSome? fun l => (l.dropPrefix? (k ++ "=")).map (·.copy)
+  let some leanPath := var "LEAN_PATH" | fail "`lake env printenv` did not report LEAN_PATH"
+  initSearchPath (← match var "LEAN_SYSROOT" with | some r => pure (System.FilePath.mk r) | none => findSysroot)
+    (System.SearchPath.parse leanPath)
   IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
   let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
   -- The boundary list.
   let commit ← gitCommit root
-  let deps ← manifestDeps root
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
   let (tags, errors) ← match boundaryFile? with
@@ -204,7 +203,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let (declarations, errors') ← expand env tags
   unless (errors ++ errors').isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
-  let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations }
+  let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations := declarations.map (·.2) }
   let boundaryText := jsonText boundaryList
   -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
@@ -221,11 +220,10 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   -- The library's taggable constants, for `status`'s untagged-dependency warning.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
-  for d in boundaryList.declarations do
-    let some n := constName? d.name | fail s!"{d.name}: not a constant name"
+  for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     roots := roots.push n
-  roots := (dedup roots).qsort (fun a b => a.cmp b == .lt)
+  roots := (roots.qsort (fun a b => a.cmp b == .lt)).eraseReps
   -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
