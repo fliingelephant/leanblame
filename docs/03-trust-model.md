@@ -104,17 +104,21 @@ Hashes are not. Hashes depend only on the code.
 
 Rule: hash everything that changes meaning, nothing else.
 
-**In:** kind, name, ordered universe parameters, type, body of a def with
-proof subterms erased, safety (`partial`, `opaque`), informal text (tagged
-declarations only, Unicode-normalized and trimmed).
+**In:** kind, name, ordered universe parameters, type, body of a def, safety
+(`partial`, `opaque`), informal text (tagged declarations only,
+Unicode-normalized and trimmed). Type and body enter with every proof
+subterm erased.
 
-**Out:** theorem proofs, proof subterms inside bodies, binder names, argument
-implicitness, kernel height hints, recursor rules. None of these change
-meaning; all of them churn on toolchain bumps.
+**Out:** theorem proofs, proof subterms anywhere (in types as in bodies),
+binder names, argument implicitness, kernel height hints, recursor rules.
+None of these change meaning; all of them churn on toolchain bumps. Proofs
+in particular: Lean treats all proofs of one proposition as equal (proof
+irrelevance) and hides them when it displays a term, so a signer never read
+them.
 
 ```
-own(c)   = H(kind, name, uparams, type, body-with-proofs-erased, safety,
-             informal-text-if-tagged)
+own(c)   = H(kind, name, uparams, type, body, safety, informal-text-if-tagged)
+           type and body with proofs erased
 spec(c)  = H(kind, name, uparams, type, informal-text)
 claim(c) = H(own(c), sorted over direct dependencies d of c:
                tagged(d)   -> ("spec", spec(d))

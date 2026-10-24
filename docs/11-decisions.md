@@ -21,9 +21,9 @@ agent) is separate from who signed it (always a human).
 ### What goes into the hash
 
 Everything that changes meaning, nothing else. In: kind, name, universe
-parameters, type, body with proof subterms erased, safety, informal text of
-tagged declarations. Out: proofs, binder names, implicitness, kernel hints,
-recursor rules. Cycles hashed as groups. `unsafe` cannot be tagged.
+parameters, type and body with proof subterms erased, safety, informal text of
+tagged declarations. Out: proofs (wherever they occur: proof irrelevance),
+binder names, implicitness, kernel hints, recursor rules. Cycles hashed as groups. `unsafe` cannot be tagged.
 
 ### `equiv` says why, and only for untagged causes
 

@@ -11,7 +11,7 @@ Adapted for LeanBlame from comparator's `Comparator/Compare.lean` and
 Changes: the worklist loop is kept, but it walks one export instead of
 comparing a challenge with a solution. It seeds from the boundary list, cuts at
 tagged declarations, skips proofs (theorem values, and proof subterms erased
-from definition bodies), and hashes every constant it reaches
+from types and definition bodies), and hashes every constant it reaches
 (docs/03-trust-model.md, "The hash, precisely"). Cycles are found with
 Tarjan's algorithm and hashed as groups. Instead of stopping at the first
 mismatch, `changes` collects every difference between two hashed exports under
@@ -87,7 +87,7 @@ def addWorklist (n : Name) : HashM Unit := do
 Hash one constant. Like comparator's `runForUsedConsts`, the dependencies are the constants
 in the type and the value, plus constructors for inductives and the inductive for constructors;
 unlike it, a theorem's value, the value of an `opaque` or `partial` definition, proof subterms
-of definition bodies and recursor rules are skipped.
+of types and definition bodies, and recursor rules are skipped.
 -/
 def mkNode (info : ConstantInfo) : HashM Node := do
   let ctx ← read
@@ -95,15 +95,16 @@ def mkNode (info : ConstantInfo) : HashM Node := do
   if info.isUnsafe then
     throwError s!"'{info.name}' is unsafe: unsafe declarations cannot be tagged or hashed"
   let ups := info.levelParams
-  let typeHash := Canon.exprHash ups info.type
-  let mut deps := info.type.getUsedConstants
+  let type ← Erase.eraseProofs info.type
+  let typeHash := Canon.exprHash ups type
+  let mut deps := type.getUsedConstants
   let mut bodyHash : Option String := none
   let mut safety := "safe"
   match info with
   | .defnInfo d =>
     match d.safety with
     | .safe =>
-      let body ← Erase.eraseBody d.value
+      let body ← Erase.eraseProofs d.value
       bodyHash := some (Canon.exprHash ups body)
       deps := deps ++ body.getUsedConstants
     | .partial => safety := "partial"

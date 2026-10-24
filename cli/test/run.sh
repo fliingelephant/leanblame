@@ -84,7 +84,7 @@ commit "first signoff"
 echo "== status: everything valid"
 out="$("$lb" status 2>"$work/status.err")"
 for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
-         Sample.energy Sample.energy_even Sample.pointEnergy; do
+         Sample.energy Sample.energy_even Sample.pointEnergy Sample.second_site; do
   expect_line "$n" "$n valid"
 done
 want="warning: untagged Sample.double of this library is used by tagged Sample.energy; tag it so it gets its own signer"
@@ -107,6 +107,19 @@ for name, d in s["declarations"].items():
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 PY
 ok "status --json has the docs/14 fields"
+
+echo "== edit a proof inside a statement: second_site"
+edit Sample/Energy.lean 's/2, by decide/2, by omega/'
+grep -q "by omega" Sample/Energy.lean || fail "test setup: proof not swapped"
+commit "second_site: another proof of 2 < 3 in the statement"
+before="$(current_export)"
+export_lib
+[[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
+run status
+expect_line Sample.second_site "Sample.second_site valid"
+run status --base "$before"
+expect_line Sample.second_site "Sample.second_site valid"
+ok "a proof inside a statement is not part of the hash"
 
 echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'

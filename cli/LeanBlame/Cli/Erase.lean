@@ -1,7 +1,7 @@
 /-
 Proof erasure (docs/03-trust-model.md, "The hash, precisely"): every subterm of
-a definition body whose type is a proposition is replaced by a marker before
-hashing.
+a type or a definition body whose type is a proposition is replaced by a marker
+before hashing.
 
 "Is this subterm a proof?" is `Lean.Meta.isProof`, asked in the environment
 `Load` builds from the export. The answer errs on one side only: when inference
@@ -49,7 +49,7 @@ partial def erase (e : Expr) : MonadCacheT Expr Expr MetaM Expr :=
     | .mdata _ b => erase b
     | _ => return e
 
-/-- Erase the proofs in a closed definition body. -/
-def eraseBody (body : Expr) : MetaM Expr := (erase body).run
+/-- Erase the proofs in a closed term: a type or a definition body. -/
+def eraseProofs (e : Expr) : MetaM Expr := (erase e).run
 
 end LeanBlame.Erase

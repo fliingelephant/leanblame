@@ -78,15 +78,16 @@ structure Fields where
   kind : String
   name : Name
   uparams : Nat
-  /-- Hex hash of the canonical type. -/
+  /-- Hex hash of the canonical type, proofs erased. -/
   typeHash : String
-  /-- Hex hash of the canonical body with proofs erased; `none` when no body is hashed
+  /-- Hex hash of the canonical body, proofs erased; `none` when no body is hashed
   (theorems, axioms, `opaque` and `partial` definitions, constructors, recursors). -/
   bodyHash : Option String
   safety : String
   deriving Inhabited, BEq
 
-/-- `own(c) = H(kind, name, uparams, type, body-with-proofs-erased, safety, informal-if-tagged)`. -/
+/-- `own(c) = H(kind, name, uparams, type, body, safety, informal-if-tagged)`, type and body with
+proofs erased. -/
 def own (f : Fields) (informal? : Option String) : String :=
   hashFields "leanblame.own.1"
     [f.kind, name "" f.name, toString f.uparams, f.typeHash, optField f.bodyHash, f.safety,
