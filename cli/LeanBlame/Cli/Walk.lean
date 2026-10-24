@@ -54,6 +54,9 @@ structure Node where
 structure Hashed where
   nodes : Std.HashMap Name Node
   tagged : Std.HashSet Name
+  /-- The axioms the type and value of each tagged declaration rest on, sorted
+  (`Lean.collectAxioms`). A function of the export alone. -/
+  axioms : Std.HashMap Name (Array Name)
   /-- The boundary list it was hashed with. -/
   boundary : BoundaryList
   /-- The boundary list's declarations with their constants, in list order. -/
@@ -191,6 +194,42 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
           st := { st with low := st.low.insert u (min st.low[u]! st.low[v]!) }
   return st.sccs
 
+/--
+The axioms each of `roots` rests on, sorted: exactly what `Lean.collectAxioms` returns in the
+environment `Load` builds (constants in types and values, and the constructors of inductives;
+unsafe and partial constants are not there), but in one pass over the components of the constant
+graph instead of one walk per root.
+-/
+def axiomsOf (exported : LeanExport.ExportedEnv) (roots : Array Name) :
+    Std.HashMap Name (Array Name) := Id.run do
+  let info? (n : Name) := exported.constMap[n]?.filter fun ci => !ci.isUnsafe && !ci.isPartial
+  let uses : ConstantInfo → Array Name
+    | .quotInfo _ => #[]
+    | .inductInfo v => v.type.getUsedConstants ++ v.ctors.toArray
+    | ci => ci.type.getUsedConstants ++
+      ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
+  -- The reachable graph, each constant's edges computed once.
+  let mut succs : Std.HashMap Name (Array Name) := {}
+  let mut todo := roots
+  while h : todo.size > 0 do
+    let n := todo[todo.size - 1]
+    todo := todo.pop
+    if succs.contains n then continue
+    let ss := ((info? n).map uses).getD #[]
+    succs := succs.insert n ss
+    todo := todo ++ ss
+  -- Components come after every component they reach.
+  let mut axioms : Std.HashMap Name (Array Name) := {}
+  for comp in tarjan roots (succs.getD · #[]) do
+    let mut set : NameSet := {}
+    for n in comp do
+      if info? n matches some (.axiomInfo _) then set := set.insert n
+      for d in succs.getD n #[] do
+        set := (axioms.getD d #[]).foldl (·.insert ·) set
+    let sorted := set.toArray.qsort Name.lt
+    for n in comp do axioms := axioms.insert n sorted
+  return roots.foldl (init := {}) fun m n => m.insert n (axioms.getD n #[])
+
 /-- Hash every constant reachable from the boundary list of `exported`. -/
 def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : IO Hashed := do
   -- Boundary names are strings; map them to the export's constants.
@@ -208,6 +247,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
   let env ← Load.environmentOfExport exported
   let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }).toIO
     { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
+  let axioms := axiomsOf exported order
   let mut nodes := st.nodes
   let isTagged (n : Name) := tagged.contains n
   let succ (n : Name) : Array Name :=
@@ -240,7 +280,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
         let node := nodes[m]!
         nodes := nodes.insert m { node with claim := Canon.member g m }
   let taggedSet : Std.HashSet Name := order.foldl (·.insert ·) {}
-  return { nodes, tagged := taggedSet, boundary, declarations }
+  return { nodes, tagged := taggedSet, axioms, boundary, declarations }
 
 /--
 The closure under `x`: the tagged declarations where the walk stops (the cut), and the untagged

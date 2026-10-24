@@ -10,7 +10,7 @@ namespace LeanBlame.Cache
 
 open Lean
 
-def schema : String := "leanblame.cache.1"
+def schema : String := "leanblame.cache.2"
 
 def path (root : System.FilePath) (exportHash boundary : String) : System.FilePath :=
   Store.dir root / "cache" / (Sha256.hexOfString s!"{exportHash} {boundary}" ++ ".json")
@@ -50,7 +50,9 @@ def save (root : System.FilePath) (exportHash boundary : String) (h : Walk.Hashe
   writeFileMkdirs (path root exportHash boundary) <| Json.compress <| Json.mkObj [
     ("schema", schema),
     ("declarations", .arr (h.declarations.map (nameToJson ·.1))),
-    ("nodes", .arr (h.nodes.fold (init := #[]) fun acc _ n => acc.push (nodeToJson n)))]
+    ("nodes", .arr (h.nodes.fold (init := #[]) fun acc _ n => acc.push (nodeToJson n))),
+    ("axioms", .arr (h.axioms.fold (init := #[]) fun acc n axs =>
+      acc.push (.arr #[nameToJson n, .arr (axs.map nameToJson)])))]
 
 /-- The cached hashing of export `exportHash` against boundary list `b`, whose hash is
 `boundary`. -/
@@ -65,7 +67,10 @@ def load? (root : System.FilePath) (exportHash boundary : String) (b : BoundaryL
     let nodes ← (← j.getObjValAs? (Array Json) "nodes").foldlM (init := {}) fun m j => do
       let n ← nodeFromJson? j
       return m.insert n.fields.name n
-    return { nodes, tagged := names.foldl (·.insert ·) {}, boundary := b
+    let axioms ← (← j.getObjValAs? (Array Json) "axioms").foldlM (init := {}) fun m j => do
+      let #[n, axs] ← j.getArr? | throw "malformed axioms"
+      return m.insert (← nameFromJson? n) (← (← axs.getArr?).mapM nameFromJson?)
+    return { nodes, tagged := names.foldl (·.insert ·) {}, axioms, boundary := b
              declarations := names.zip b.declarations }
 
 end LeanBlame.Cache
