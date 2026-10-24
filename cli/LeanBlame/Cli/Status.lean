@@ -24,12 +24,12 @@ namespace LeanBlame.Status
 open Lean
 
 def loadBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do
-  match BoundaryList.parse (← Store.readString root hash) with
+  match BoundaryList.parse (← Store.readString root .boundaries hash) with
   | .ok b => return b
   | .error e => fail s!"boundary list {hash}: {e}"
 
 def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.ExportedEnv := do
-  let p := Store.objectPath root hash
+  let p := Store.objectPath root .exports hash
   unless ← p.pathExists do fail s!"export {hash} is not in the store"
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk p .read))
 
@@ -194,7 +194,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }
   let untagged ← if !warn then pure #[] else do
-    let owned : Std.HashSet String := (← Store.readString root cur.owned).lines.fold (·.insert ·.copy) {}
+    let owned : Std.HashSet String := (← Store.readString root .owned cur.owned).lines.fold (·.insert ·.copy) {}
     pure (untaggedWarnings new closures cur.modules owned)
   return { cur, new, report, warnings := untagged ++ warnings
            validRecords := (validRecords.qsort (· < ·)).eraseReps, unpermitted }
@@ -213,12 +213,8 @@ def textLine (name : String) (d : StatusDecl) : String :=
 def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
   let r ← compute root (← Ledger.load root)
   for w in r.warnings do IO.eprintln w
-  let text := jsonText r.report
-  -- Every run leaves a log in the object store.
-  let logHash ← Store.putString root text
-  IO.eprintln s!"leanblame: status log {logHash}"
   if json then
-    IO.print text
+    IO.print (jsonText r.report)
   else
     let decls := r.report.declarations
     for (n, d) in decls do IO.println (textLine n d)

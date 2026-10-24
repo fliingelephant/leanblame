@@ -12,10 +12,18 @@ open Lean
 
 def schema : String := "leanblame.cache.2"
 
-/-- Keyed by what the hashing reads: the export and the boundary list's declarations (not its
-`commit`, `toolchain` or `deps`). -/
+def cacheDir (root : System.FilePath) : System.FilePath := Store.dir root / "cache"
+
+/-- Keyed by what the hashing reads: the export (first, so `sweep` can tell an export's files by
+name) and the boundary list's declarations (not its `commit`, `toolchain` or `deps`). -/
 def path (root : System.FilePath) (exportHash : String) (b : BoundaryList) : System.FilePath :=
-  Store.dir root / "cache" / (Sha256.hexOfString s!"{exportHash} {(toJson b.declarations).compress}" ++ ".json")
+  cacheDir root / s!"{hashHex exportHash}-{Sha256.hexOfString (toJson b.declarations).compress}.json"
+
+/-- Delete the cache files of every export whose hex digest is not in `keep`. -/
+def sweep (root : System.FilePath) (keep : Std.HashSet String) : IO Unit := do
+  unless ← (cacheDir root).isDir do return
+  for e in ← (cacheDir root).readDir do
+    unless keep.contains (e.fileName.takeWhile (· != '-')).copy do IO.FS.removeFile e.path
 
 /-- A name as its array of components: printed names do not always read back. -/
 def nameToJson (n : Name) : Json :=

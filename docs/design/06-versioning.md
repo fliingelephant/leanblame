@@ -19,9 +19,6 @@ Per tagged declaration: its state, what blocks it, and the causes of any hash
 move since its last live approval, each naming the constants that changed; all
 defined in [03-trust-model.md](03-trust-model.md) (Validity, Why a hash moved).
 
-Every `status` run writes a log to the object store, so a wrong "still valid"
-can be traced.
-
 ## Proofs never count
 
 A theorem's value is its proof. Proof subterms inside definition bodies are

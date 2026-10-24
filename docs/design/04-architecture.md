@@ -79,12 +79,14 @@ signed `axiom` in the library or its tagged dependencies.
 ## Storage
 
 - Code, records, config: git.
-- Exports, boundary lists, `equiv` proofs, `status` logs, release manifests:
-  an object store keyed by hash (`.leanblame/store/`). Every export named by a
-  live record is kept.
+- Exports, boundary lists, `equiv` proofs, release manifests: an object store
+  keyed by hash, one directory per kind (`.leanblame/store/<kind>/`). `export`
+  deletes what nothing names any more: exports and boundary lists named by no
+  record and not current, evidence whose claim is no longer current, proofs
+  named by no evidence and no record.
 - Hashed exports: a local cache (`.leanblame/cache/`), keyed by export and
   boundary list. Derived data: `export` writes it, the other commands read it
-  and hash again when it is missing. Safe to delete.
+  and hash again when it is missing. Swept with the exports; safe to delete.
 - `equiv` evidence: `.leanblame/equiv/evidence/`, one file per declaration and
   claim hash, naming the proof and the record it was compared with.
 

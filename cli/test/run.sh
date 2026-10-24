@@ -128,7 +128,7 @@ ok "status --json has the docs/design/14 fields; the proof field shows proven an
 echo "== release"
 run release --tag 2026.10 --out "$work/release.json"
 release_hash="$(awk '/^release /{print $2}' <<<"$out")"
-cmp -s "$work/release.json" ".leanblame/store/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
+cmp -s "$work/release.json" ".leanblame/store/manifests/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
 python3 - "$work/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
   || fail "release manifest does not match docs/design/14"
 import hashlib, json, sys
@@ -181,6 +181,10 @@ echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
 export_lib
+# The store keeps the signed export and the current one; the unsigned export in between is gone.
+[[ "$(ls .leanblame/store/exports | wc -l)" -eq 2 ]] || fail "store sweep: $(ls .leanblame/store/exports)"
+[[ "$(ls .leanblame/cache | wc -l)" -eq 2 ]] || fail "cache sweep: $(ls .leanblame/cache)"
+ok "export removes exports and cache files that no record names"
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"
@@ -301,7 +305,7 @@ git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
 
 echo "== adapters: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
-stored_boundary() { echo ".leanblame/store/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
+stored_boundary() { echo ".leanblame/store/boundaries/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
 run export --boundary "$here/blueprint/blueprint-manifest.json"
 python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
 import json, sys
@@ -387,9 +391,9 @@ run equiv
 proof="$(awk '/^Sample.energy proven /{print $3}' <<<"$out")"
 [[ "$proof" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "equiv did not prove Sample.energy: $out"
 grep -qxF "Sample.double_zero proven $proof" <<<"$out" || fail "equiv did not prove Sample.double_zero: $out"
-[[ -f ".leanblame/store/${proof#sha256:}" ]] || fail "the proof $proof is not in the object store"
+[[ -f ".leanblame/store/proofs/${proof#sha256:}" ]] || fail "the proof $proof is not in the object store"
 # The proof is an export anyone can replay with the toolchain's checker.
-"$(lean --print-prefix)/bin/leanchecker" --silent --from-export ".leanblame/store/${proof#sha256:}" \
+"$(lean --print-prefix)/bin/leanchecker" --silent --from-export ".leanblame/store/proofs/${proof#sha256:}" \
   || fail "leanchecker rejects the proof export $proof"
 ok "equiv: Old.Sample.double = Sample.double by the kernel; leanchecker replays the proof export $proof"
 run status

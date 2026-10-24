@@ -17,6 +17,7 @@ import LeanExport.Basic
 import LeanBlame.Attr
 import LeanBlame.Cli.Adapters
 import LeanBlame.Cli.Cache
+import LeanBlame.Cli.Records
 
 namespace LeanBlame.Export
 
@@ -228,7 +229,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
   let hex ← dumpToFile env roots tmp
-  let boundary ← Store.putString root boundaryText
+  let boundary ← Store.putString root .boundaries boundaryText
   -- Compute every claim hash now, so that problems surface at export time; a cached hashing of
   -- the same export and boundary list has already passed.
   let hashed ← match ← Cache.load? root (mkHash hex) boundaryList with
@@ -239,10 +240,29 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
         catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
       Cache.save root (mkHash hex) h
       pure h
-  let exportHash ← Store.putFile root tmp hex
-  let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
+  let exportHash ← Store.putFile root .exports tmp hex
+  let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
     { exportHash, boundary, modules := mods.map toString, owned := ownedHash }
+  -- Sweep. Exports and boundary lists stay while the current pointer or a record names them;
+  -- evidence while its claim is current; a proof while evidence or a record names it.
+  let ledger ← Ledger.load root
+  let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert hex
+  let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
+  let mut proofs : Std.HashSet String := {}
+  for (_, r) in ledger.byId do
+    if let .approve a := r.record then
+      exports := exports.insert (hashHex a.exportHash)
+      boundaries := boundaries.insert (hashHex a.boundary)
+      if let some e := a.evidence then proofs := proofs.insert (hashHex e)
+  let evidence : Std.HashSet String := hashed.declarations.foldl (init := {}) fun s (n, d) =>
+    s.insert ((Store.evidencePath root d.name hashed.nodes[n]!.claim).fileName.getD "")
+  let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
+  removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
+  removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
+  removed := removed + (← Store.sweep root .proofs (proofs.union (← Store.evidenceProofs root)))
+  Cache.sweep root exports
+  if removed > 0 then IO.eprintln s!"leanblame: removed {removed} objects nothing names any more"
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 
 end LeanBlame.Export

@@ -22,7 +22,7 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
     IO.eprintln s!"release: {invalid.size} of {decls.size} tagged declarations are not valid"
     return 1
   -- 2. Kernel gate.
-  unless ← Status.kernelAccepts (Store.objectPath root r.cur.exportHash) do
+  unless ← Status.kernelAccepts (Store.objectPath root .exports r.cur.exportHash) do
     IO.eprintln "release: kernel rejected the export"
     return 1
   -- 3. Axiom gate.
@@ -37,9 +37,9 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
     exportHash := r.cur.exportHash, boundary := r.cur.boundary, records := r.validRecords
     theorems := (decls.filter (·.2.kind == .«theorem»)).map fun (n, d) => (n, d.proof) }
   let text := jsonText manifest
-  let hash ← Store.putString root text
+  let hash ← Store.putString root .manifests text
   if let some out := out? then writeFileMkdirs out text
-  IO.println s!"release {hash} {Store.objectPath root hash}"
+  IO.println s!"release {hash} {Store.objectPath root .manifests hash}"
   return 0
 
 end LeanBlame.Release
