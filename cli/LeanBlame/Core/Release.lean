@@ -3,16 +3,19 @@
 
 Two gates and a report, on the current export:
 1. signoff: every tagged declaration is `valid`;
-2. kernel: `leanchecker --silent --from-export` replays the export, as `lake check` runs it;
+2. kernel: the proof assistant's checker replays the export (`Core.Backend.kernelAccepts`; Lean:
+   `leanchecker --silent --from-export`, as `lake check` runs it);
 3. axioms: no tagged theorem rests on an axiom that is neither standard nor a tagged, signed
    axiom (from `status`; open theorems are counted, not failed).
-Then the manifest goes to the object store, and to FILE with `--out`.
+Then the manifest goes to the object store, and to FILE with `--out`. Its theorems are the tagged
+declarations with role `proved` (docs/design/15-generic-core.md).
 -/
-import LeanBlame.Cli.Status
+import LeanBlame.Core.Status
 
 namespace LeanBlame.Release
 
-def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) : IO UInt32 := do
+def run (backend : Core.Backend) (root : System.FilePath) (tag : String)
+    (out? : Option System.FilePath) : IO UInt32 := do
   let r ← Status.compute root (← Ledger.load root) (causes := false) (warn := false)
   let decls := r.report.declarations
   -- 1. Signoff gate.
@@ -22,7 +25,7 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
     IO.eprintln s!"release: {invalid.size} of {decls.size} tagged declarations are not valid"
     return 1
   -- 2. Kernel gate.
-  unless ← Status.kernelAccepts (Store.objectPath root .exports r.cur.exportHash) do
+  unless ← backend.kernelAccepts (Store.objectPath root .exports r.cur.exportHash) do
     IO.eprintln "release: kernel rejected the export"
     return 1
   -- 3. Axiom gate.
@@ -35,7 +38,8 @@ def run (root : System.FilePath) (tag : String) (out? : Option System.FilePath) 
   let manifest : ReleaseManifest := {
     library := b.library, tag, commit := b.commit, toolchain := b.toolchain, deps := b.deps
     exportHash := r.cur.exportHash, boundary := r.cur.boundary, records := r.validRecords
-    theorems := (decls.filter (·.2.kind == .«theorem»)).map fun (n, d) => (n, d.proof) }
+    checker := r.new.checker
+    theorems := (decls.filter (·.2.role == .proved)).map fun (n, d) => (n, d.proof) }
   let text := jsonText manifest
   let hash ← Store.putString root .manifests text
   if let some out := out? then writeFileMkdirs out text

@@ -13,11 +13,15 @@ and expands them like `@[trusted]` tags. Two formats:
   Other fields are not read.
 -/
 import Lake.Toml
-import LeanBlame.Cli.Schema
+import LeanBlame.Core.Schema
 
 namespace LeanBlame.Export
 
 open Lean
+
+/-- A constant name as the boundary list and records write it (`Lean.Name.toString`), read back.
+`export` lists only names that read back. -/
+def constName? (s : String) : Option Name := Syntax.decodeNameLit ("`" ++ s)
 
 /-- A declaration put on the boundary, by `@[trusted]` or by a boundary-list file. -/
 structure Tag where

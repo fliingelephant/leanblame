@@ -2,55 +2,47 @@
 `leanblame status [--json]` and `leanblame blame NAME`
 (docs/design/03-trust-model.md "Validity", docs/design/06-versioning.md, docs/design/14-schemas.md §4).
 
+Status reads the graphs `export` stored and never hashes (docs/design/15-generic-core.md, §9).
 Per tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve
   records carrying X's current claim hash; else `outdated` if live records for X
   exist; else `unsigned`;
 * change: for a declaration that is not valid, the causes of the move since the
-  last live approval, found by hashing the export and boundary list that record
-  names (from the object store) and comparing hash parts;
+  last live approval, found by comparing hash parts with the graph of the export
+  and boundary list that record names (from the object store);
 * evidence: the `equiv` proof that X's current claim means what its last live
   approval meant, if `equiv` wrote one;
 * blocked_by: tagged dependencies, followed transitively, that are not valid;
-* proof: for a theorem, the axioms it rests on (computed by `export`): `proven` when each is
-  standard or a tagged `axiom` that is valid, `open` otherwise (`sorryAx`, or an axiom that is
-  neither, which also gets a warning); `n/a` for the rest.
+* proof: for a declaration with role `proved`, the assumptions it rests on (computed by `export`):
+  `proven` when each is standard or a tagged, `assumed` declaration that is valid, `open` otherwise
+  (an incomplete proof such as `sorry`, or an assumption that is neither, which also gets a
+  warning); `n/a` for the rest. Which assumptions are standard and which stand for a missing proof
+  is recorded in the graph by `export`, from the proof assistant (`Core.Backend`).
 -/
-import LeanBlame.Cli.Cache
-import LeanBlame.Cli.Records
+import LeanBlame.Core.Records
+import LeanBlame.Core.Walk
 
 namespace LeanBlame.Status
-
-open Lean
 
 def loadBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do
   match BoundaryList.parse (← Store.readString root .boundaries hash) with
   | .ok b => return b
   | .error e => fail s!"boundary list {hash}: {e}"
 
-def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.ExportedEnv := do
-  let p := Store.objectPath root .exports hash
-  unless ← p.pathExists do fail s!"export {hash} is not in the store"
-  LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk p .read))
+/-- The graph of export `exportHash` against boundary list `boundary`, from the object store. -/
+def graph? (root : System.FilePath) (exportHash boundary : String) : IO (Option Core.Hashed) := do
+  Graph.load? root exportHash (← loadBoundary root boundary)
 
-/-- Export `exportHash` hashed against boundary list `boundary`, from the local cache or else from
-the object store (and then cached). -/
-def hashed (root : System.FilePath) (exportHash boundary : String) : IO Walk.Hashed := do
-  let b ← loadBoundary root boundary
-  if let some h ← Cache.load? root exportHash b then return h
-  let h ← try Walk.hashExport (← loadExported root exportHash) b
-    catch e => fail s!"cannot hash export {exportHash}: {e}"
-  Cache.save root exportHash h
+/-- The graph of an export a record names. -/
+def graph (root : System.FilePath) (exportHash boundary : String) : IO Core.Hashed := do
+  let some h ← graph? root exportHash boundary | fail s!"no graph for export {exportHash}"
   return h
 
-/-- Whether the toolchain's `leanchecker` replays the export file `path` without error: the
-kernel check `release` and `equiv` run on what they store. -/
-def kernelAccepts (path : System.FilePath) : IO Bool := do
-  unless ← path.pathExists do fail s!"{path} is not in the store"
-  let leanchecker := (← findSysroot) / "bin" / "leanchecker" |>.addExtension System.FilePath.exeExtension
-  let child ← IO.Process.spawn { cmd := leanchecker.toString, stdin := .null, stdout := .null
-                                 args := #["--silent", "--from-export", path.toString] }
-  return (← child.wait) == 0
+/-- The graph of the last `export`. -/
+def currentGraph (root : System.FilePath) (cur : Store.Current) : IO Core.Hashed := do
+  let some h ← graph? root cur.exportHash cur.boundary
+    | fail "no graph for the current export; run leanblame export"
+  return h
 
 /-- The approve records listing `name` and the counting withdraws covering it, in (date, id)
 order. -/
@@ -77,9 +69,9 @@ def evidenceFor (root : System.FilePath) (ledger : Ledger) (name claim : String)
 
 /-- Everything `status` computes. -/
 structure Result where
-  /-- The last `export`, hashed. -/
+  /-- The last `export`; `new` is its graph. -/
   cur : Store.Current
-  new : Walk.Hashed
+  new : Core.Hashed
   report : StatusReport
   /-- Untagged declarations of this library used by tagged ones (docs/design/03), and theorems resting on
   axioms that are not permitted. -/
@@ -87,66 +79,69 @@ structure Result where
   /-- Live approve records carrying the current claim of some tagged declaration, sorted. -/
   validRecords : Array String := #[]
   /-- (theorem, axiom) pairs where the axiom is neither standard nor a valid tagged axiom. -/
-  unpermitted : Array (Name × Name) := #[]
+  unpermitted : Array (String × String) := #[]
 
-/-- A theorem's axioms against the permitted ones (docs/design/07): `proven` when each is standard or
-`signed`, `open` otherwise; and the axioms that are neither `sorryAx` nor permitted. -/
-def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : ProofStatus × Array Name :=
-  let permitted (a : Name) := Walk.standardAxioms.contains a || signed a
+/-- A theorem's axioms against the permitted ones (docs/design/07): `proven` when each is in
+`standard` or `signed`, `open` otherwise; and the axioms that are neither in `incomplete` nor
+permitted. -/
+def classifyAxioms (standard incomplete : Array String) (axioms : Array String)
+    (signed : String → Bool) : ProofStatus × Array String :=
+  let permitted (a : String) := standard.contains a || signed a
   (if axioms.all permitted then .proven else .«open»,
-   axioms.filter fun a => a != ``sorryAx && !permitted a)
+   axioms.filter fun a => !incomplete.contains a && !permitted a)
 
 /-- `status` warns when a tagged declaration of this library uses an untagged one of it that could
 be tagged: `owned` lists the library's taggable constants, from `export`. `closures` holds
 `Walk.closureOf` of each tagged declaration. -/
-def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name × Array Name))
+def untaggedWarnings (h : Core.Hashed) (closures : Std.HashMap String (Array String × Array String))
     (modules : Array String) (owned : Std.HashSet String) : Array String := Id.run do
-  let mut users : Std.HashMap Name (Array Name) := {}
-  for (x, d) in h.declarations do
+  let mut users : Std.HashMap String (Array String) := {}
+  for d in h.boundary.declarations do
     unless modules.contains d.module do continue
-    for u in (closures[x]?.map (·.2)).getD #[] do
-      users := users.alter u fun xs => some ((xs.getD #[]).push x)
+    for u in (closures[d.name]?.map (·.2)).getD #[] do
+      users := users.alter u fun xs => some ((xs.getD #[]).push d.name)
   let mut out := #[]
-  for u in Walk.sortNames (users.fold (init := #[]) fun acc u _ =>
-      if owned.contains u.toString then acc.push u else acc) do
-    let xs := Walk.sortNames (users.getD u #[])
-    out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate (xs.toList.map toString)}; tag it so it gets its own signer"
+  for u in Core.sortNames (users.fold (init := #[]) fun acc u _ =>
+      if owned.contains u then acc.push u else acc) do
+    let xs := Core.sortNames (users.getD u #[])
+    out := out.push s!"warning: untagged {u} of this library is used by tagged {", ".intercalate xs.toList}; tag it so it gets its own signer"
   return out
 
-/-- The status report; `causes := false` leaves every `change` empty and hashes no other export, and
+/-- The status report; `causes := false` leaves every `change` empty and reads no other graph, and
 `warn := false` skips the untagged-dependency warnings. -/
 def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn := true) :
     IO Result := do
   let cur ← Store.readCurrent root
-  let new ← hashed root cur.exportHash cur.boundary
-  -- Exports of last live approvals, hashed; `none` remembers a failure, warned about once.
-  let mut olds : Std.HashMap (String × String) (Option Walk.Hashed) := {}
+  let new ← currentGraph root cur
+  -- Graphs of last live approvals; `none` remembers a failure, warned about once.
+  let mut olds : Std.HashMap (String × String) (Option Core.Hashed) := {}
   -- Pass 1: state, change, signers, history.
-  let mut states : Std.HashMap Name State := {}
+  let mut states : Std.HashMap String State := {}
   let mut validRecords : Array String := #[]
-  let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
-  -- Each tagged declaration's closure, walked once: (cut, untagged constants).
-  let mut closures : Std.HashMap Name (Array Name × Array Name) := {}
-  for (n, d) in new.declarations do
+  let mut entries : Array (BoundaryDecl × StatusDecl) := #[]
+  -- Each tagged declaration's closure, walked once: (cut, untagged declarations).
+  let mut closures : Std.HashMap String (Array String × Array String) := {}
+  for d in new.boundary.declarations do
+    let n := d.name
     let node := new.nodes[n]!
     let claim := node.claim
-    let live := liveApprovals ledger d.name
+    let live := liveApprovals ledger n
     let matching := live.filter fun (_, _, c) => c == claim
     let signers := ((matching.map fun (_, a, _) => a.signer).qsort (· < ·)).eraseReps
     validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
       if signers.size ≥ ledger.cfg.requiredSigners then State.valid
       else if live.isEmpty then .unsigned else .outdated
-    let evidence ← evidenceFor root ledger d.name claim
+    let evidence ← evidenceFor root ledger n claim
     let closure := Walk.closureOf new n
-    -- Causes: against the export of the last live approval (the ledger is in (date, id) order).
+    -- Causes: against the graph of the last live approval (the ledger is in (date, id) order).
     let mut change : Array Change := #[]
     if let some (lastRec, last, lastClaim) := live.back? then
       if causes && state != .valid && lastClaim != claim then
-        -- A record from elsewhere may name objects this store lacks, or that do not hash.
+        -- A record from elsewhere may name objects this store lacks.
         let key := (last.exportHash, last.boundary)
         unless olds.contains key do
-          let old? ← try some <$> hashed root last.exportHash last.boundary catch e => do
+          let old? ← try some <$> graph root last.exportHash last.boundary catch e => do
             IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
             pure none
           olds := olds.insert key old?
@@ -154,32 +149,34 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     let (cut, untagged) := closure
     closures := closures.insert n closure
     states := states.insert n state
-    entries := entries.push (n, d, {
-      module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
-      claim, state, change, signers, history := historyOf ledger d.name
+    entries := entries.push (d, {
+      module := d.module, kind := d.kind, role := d.role, informal := d.informal
+      informalSource := d.informalSource
+      claim, state, change, signers, history := historyOf ledger n
       blockedBy := #[]
       proof := { status := .na }
       evidence
-      taggedDeps := cut.map (·.toString)
+      taggedDeps := cut
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size })
   -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
-  let cutOf (n : Name) : Array Name := (closures[n]?.map (·.1)).getD #[]
-  let signed (a : Name) : Bool := states[a]? == some .valid &&
-    match new.nodes[a]? with | some nd => nd.fields.kind == .«axiom» | none => false
+  let cutOf (n : String) : Array String := (closures[n]?.map (·.1)).getD #[]
+  let signed (a : String) : Bool := states[a]? == some .valid &&
+    match new.nodes[a]? with | some nd => nd.decl.role == .assumed | none => false
   let mut decls := #[]
   let mut warnings := #[]
   let mut unpermitted := #[]
-  for (n, d, sd) in entries do
-    let proof : ProofReport ← if d.kind != .«theorem» then pure sd.proof else do
+  for (d, sd) in entries do
+    let n := d.name
+    let proof : ProofReport ← if d.role != .proved then pure sd.proof else do
       let some axioms := new.axioms[n]? | fail s!"internal: no axiom data for {n}"
-      let (status, bad) := classifyAxioms axioms signed
+      let (status, bad) := classifyAxioms new.standard new.incomplete axioms signed
       for a in bad do
         warnings := warnings.push s!"warning: theorem {n} rests on axiom {a}, which is neither standard nor tagged and signed"
         unpermitted := unpermitted.push (n, a)
-      pure { status, axioms := axioms.map toString }
-    let mut seen : Std.HashSet Name := {}
-    let mut blocked : Array Name := #[]
+      pure { status, axioms }
+    let mut seen : Std.HashSet String := {}
+    let mut blocked : Array String := #[]
     let mut stack := cutOf n
     while h : stack.size > 0 do
       let y := stack[stack.size - 1]
@@ -188,8 +185,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
       seen := seen.insert y
       if states[y]?.getD .unsigned != .valid then blocked := blocked.push y
       stack := stack ++ cutOf y
-    decls := decls.push (n.toString,
-      { sd with blockedBy := (Walk.sortNames blocked).map (·.toString), proof })
+    decls := decls.push (n, { sd with blockedBy := Core.sortNames blocked, proof })
   let report : StatusReport := {
     library := new.boundary.library, commit := new.boundary.commit, exportHash := cur.exportHash
     generated := ← Std.Time.Timestamp.nowSeconds, declarations := decls }

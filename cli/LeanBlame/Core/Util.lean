@@ -3,7 +3,7 @@ Small helpers shared by the commands: strings, hashes, JSON, files, processes.
 -/
 import Lake.Util.IO
 import Lean.Data.Json
-import LeanBlame.Cli.Sha256
+import LeanBlame.Core.Sha256
 
 namespace LeanBlame
 

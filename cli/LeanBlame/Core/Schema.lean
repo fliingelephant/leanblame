@@ -4,13 +4,14 @@ release manifest (JSON) and status (JSON), each a Lean structure with an
 emitter; the boundary list and the record have a strict reader. Records keep the
 field order of docs/design/05; JSON key order is not part of the schema.
 
-Declaration names are kept as strings, exactly as `Lean.Name.toString` prints
-them; the commands map them back to constants through the export.
+Declaration names are kept as strings, exactly as the frontend prints them (Lean:
+`Lean.Name.toString`); only the frontend maps them back to its constants
+(docs/design/15-generic-core.md).
 -/
 import Lake.Toml
 import Lean.Data.Json
-import LeanBlame.Cli.Time
-import LeanBlame.Cli.Util
+import LeanBlame.Core.Time
+import LeanBlame.Core.Util
 
 namespace LeanBlame
 
@@ -62,23 +63,15 @@ def decodeStr (t : Table) (k : Lean.Name) (ok : String → Bool := fun _ => true
 def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
   Lake.Toml.tryDecodeD .empty do (← t.decodeValue k).decodeTable
 
-/-- A constant name as the boundary list and records write it (`Lean.Name.toString`), read back.
-`export` lists only names that read back. -/
-def constName? (s : String) : Option Lean.Name := Lean.Syntax.decodeNameLit ("`" ++ s)
-
 /-! ## 0. Closed value sets
 
-Each value prints as the string the schemas use; `Kind` and `Safety` enter the hash as that string. -/
+Each value prints as the string the schemas use; `Role` enters the hash as that string. -/
 
-/-- The export kind of a constant. Every kind but `rec` may be on the boundary list. (`recursor`,
-because `Kind.rec` is the type's own recursor.) -/
-inductive Kind where
-  | «def» | «theorem» | «axiom» | «inductive» | ctor | «opaque» | quot | recursor
-  deriving Inhabited, Repr, BEq, Hashable
-
-/-- What the kernel sees of a definition's body: `partial` and `opaque` bodies are hidden. -/
-inductive Safety where
-  | safe | «partial» | «opaque»
+/-- What a signer reads of a declaration's body (docs/design/15-generic-core.md): `assumed`, there
+is none and the statement is taken as true; `defined`, the body is the meaning; `proved`, the body
+is a proof, which the kernel checks and nobody reads. -/
+inductive Role where
+  | assumed | defined | proved
   deriving Inhabited, Repr, BEq, Hashable
 
 /-- The state of a tagged declaration (docs/design/03, "Validity"). -/
@@ -101,22 +94,11 @@ inductive Action where
   | approve | withdraw
   deriving Inhabited, Repr, BEq, Hashable
 
-instance : ToString Kind where
+instance : ToString Role where
   toString
-    | .«def» => "def"
-    | .«theorem» => "theorem"
-    | .«axiom» => "axiom"
-    | .«inductive» => "inductive"
-    | .ctor => "ctor"
-    | .«opaque» => "opaque"
-    | .quot => "quot"
-    | .recursor => "rec"
-
-instance : ToString Safety where
-  toString
-    | .safe => "safe"
-    | .«partial» => "partial"
-    | .«opaque» => "opaque"
+    | .assumed => "assumed"
+    | .defined => "defined"
+    | .proved => "proved"
 
 instance : ToString State where
   toString
@@ -143,15 +125,13 @@ instance : ToString Action where
     | .approve => "approve"
     | .withdraw => "withdraw"
 
-def Kind.all : List Kind := [.«def», .«theorem», .«axiom», .«inductive», .ctor, .«opaque», .quot, .recursor]
-def Safety.all : List Safety := [.safe, .«partial», .«opaque»]
+def Role.all : List Role := [.assumed, .defined, .proved]
 def Action.all : List Action := [.approve, .withdraw]
 
 /-- The value among `all` that prints as `s`. -/
 def ofString? [ToString α] (all : List α) (s : String) : Option α := all.find? (toString · == s)
 
-instance : ToJson Kind := ⟨(Json.str <| toString ·)⟩
-instance : ToJson Safety := ⟨(Json.str <| toString ·)⟩
+instance : ToJson Role := ⟨(Json.str <| toString ·)⟩
 instance : ToJson State := ⟨(Json.str <| toString ·)⟩
 instance : ToJson Cause := ⟨(Json.str <| toString ·)⟩
 instance : ToJson ProofStatus := ⟨(Json.str <| toString ·)⟩
@@ -166,7 +146,9 @@ def isInformalSource (s : String) : Bool :=
 structure BoundaryDecl where
   name : String
   module : String
-  kind : Kind
+  /-- The proof assistant's own label (Lean: `def`, `theorem`, …); never interpreted. -/
+  kind : String
+  role : Role
   informal : String
   informalSource : String
   deriving Inhabited, Repr
@@ -179,11 +161,11 @@ structure BoundaryList where
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.1"
+def BoundaryList.schemaId : String := "leanblame.boundary.2"
 
 instance : ToJson BoundaryDecl where
-  toJson d := Json.mkObj [("name", d.name), ("module", d.module), ("kind", toJson d.kind),
-    ("informal", d.informal), ("informal_source", d.informalSource)]
+  toJson d := Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind),
+    ("role", toJson d.role), ("informal", d.informal), ("informal_source", d.informalSource)]
 
 instance : ToJson BoundaryList where
   toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
@@ -199,10 +181,12 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   let name ← getStrField j "declaration" "name"
   let what := s!"declaration {name}"
   let kind ← getStrField j what "kind"
-  let some kind := (ofString? Kind.all kind).filter (· != .recursor)
-    | throw s!"{what}: kind `{kind}` is not one of {", ".intercalate ((Kind.all.filter (· != .recursor)).map toString)}"
+  if kind.isEmpty then throw s!"{what}: kind is required"
+  let role ← getStrField j what "role"
+  let some role := ofString? Role.all role
+    | throw s!"{what}: role `{role}` is not one of {", ".intercalate (Role.all.map toString)}"
   let d : BoundaryDecl := {
-    name, kind
+    name, kind, role
     module := ← getStrField j what "module"
     informal := ← getStrField j what "informal"
     informalSource := ← getStrField j what "informal_source" }
@@ -362,13 +346,15 @@ structure ReleaseManifest where
   exportHash : String
   boundary : String
   records : Array String
-  /-- Tagged theorems, `proven` or `open`. -/
+  /-- The checker that replayed the export (`Core.Backend.checker`). -/
+  checker : String
+  /-- Tagged declarations with role `proved`, each `proven` or `open`. -/
   theorems : Array (String × ProofReport)
   deriving Inhabited, Repr
 
 def ReleaseManifest.schemaId : String := "leanblame.release.1"
 
-/-- A manifest is written only after `leanchecker` replayed the export, so `passed` is true. -/
+/-- A manifest is written only after `checker` replayed the export, so `passed` is true. -/
 instance : ToJson ReleaseManifest where
   toJson m :=
     let count (s : ProofStatus) := (m.theorems.filter (·.2.status == s)).size
@@ -376,7 +362,7 @@ instance : ToJson ReleaseManifest where
       ("commit", m.commit), ("toolchain", m.toolchain),
       ("deps", Json.mkObj (m.deps.toList.map fun (k, v) => (k, v))), ("export", m.exportHash),
       ("boundary", m.boundary), ("records", toJson m.records),
-      ("kernel", Json.mkObj [("checker", "leanchecker"), ("version", m.toolchain), ("passed", true)]),
+      ("kernel", Json.mkObj [("checker", m.checker), ("version", m.toolchain), ("passed", true)]),
       ("theorems", Json.mkObj (m.theorems.toList.map fun (n, p) =>
         (n, Json.mkObj [("status", toJson p.status), ("axioms", toJson p.axioms)]))),
       ("counts", Json.mkObj [("proven", count .proven), ("open", count .«open»)])]
@@ -399,7 +385,8 @@ structure HistoryEntry where
 
 structure StatusDecl where
   module : String
-  kind : Kind
+  kind : String
+  role : Role
   informal : String
   informalSource : String
   claim : String
@@ -422,7 +409,7 @@ structure StatusReport where
   declarations : Array (String × StatusDecl)
   deriving Inhabited, Repr
 
-def StatusReport.schemaId : String := "leanblame.status.1"
+def StatusReport.schemaId : String := "leanblame.status.2"
 
 /-- `claim` and `evidence` are `null` when absent; `note` is omitted. -/
 instance : ToJson HistoryEntry where
@@ -431,9 +418,9 @@ instance : ToJson HistoryEntry where
     Json.opt "note" h.note
 
 instance : ToJson StatusDecl where
-  toJson d := Json.mkObj [("module", d.module), ("kind", toJson d.kind), ("informal", d.informal),
-    ("informal_source", d.informalSource), ("claim", d.claim), ("state", toJson d.state),
-    ("change", toJson d.change), ("signers", toJson d.signers),
+  toJson d := Json.mkObj [("module", d.module), ("kind", d.kind), ("role", toJson d.role),
+    ("informal", d.informal), ("informal_source", d.informalSource), ("claim", d.claim),
+    ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
     ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
     ("proof", Json.mkObj [("status", toJson d.proof.status), ("axioms", toJson d.proof.axioms)]),
     ("evidence", toJson d.evidence), ("tagged_deps", toJson d.taggedDeps),

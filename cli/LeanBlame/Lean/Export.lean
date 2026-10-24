@@ -4,10 +4,11 @@
 Builds the library with `lake build`, imports its modules, and makes the
 boundary list: the declarations tagged `@[trusted]` (own and imported) or
 listed in `--boundary FILE`, plus the members of tagged structures and
-inductives, with `module`, `kind` and the provenance fields from the library
-itself. Exports the library's constants and the boundary list with the
+inductives, with `module`, `kind`, `role` and the provenance fields from the
+library itself. Exports the library's constants and the boundary list with the
 toolchain's `leanexport` writer (in-process), and writes both files into the
-object store. Prints the two hashes.
+object store, with their graph: the export hashed through the backend
+(docs/design/15-generic-core.md). Prints the two hashes.
 -/
 import Lean
 import Lake.Load.Manifest
@@ -15,9 +16,10 @@ import Lake.Toml
 import Lake.Util.Git
 import LeanExport.Basic
 import LeanBlame.Attr
-import LeanBlame.Cli.Adapters
-import LeanBlame.Cli.Cache
-import LeanBlame.Cli.Records
+import LeanBlame.Core.Records
+import LeanBlame.Core.Walk
+import LeanBlame.Lean.Adapters
+import LeanBlame.Lean.Source
 
 namespace LeanBlame.Export
 
@@ -114,12 +116,12 @@ def boundaryFileTags (f : System.FilePath) : IO (Array Tag × Array String) := d
 
 /-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
 constructors and projections of tagged inductives and structures that are not tagged themselves, with
-their own docstring or else the parent's text. `module` and `kind` come from `env`. Also the
-problems. -/
+their own docstring or else the parent's text. `module`, `kind` and `role` come from `env`. Also
+the problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
   let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : Name × BoundaryDecl :=
-    (n, { name := n.toString, module := (moduleOf env n).toString, kind := Walk.kindOf ci, informal,
-          informalSource })
+    (n, { name := n.toString, module := (moduleOf env n).toString, kind := Source.kindOf ci,
+          role := Source.roleOf ci, informal, informalSource })
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
   let mut out := #[]
   let mut errors := #[]
@@ -174,9 +176,9 @@ structure Result where
   /-- Constants hashed into the claims. -/
   hashed : Nat
 
-/-- Run the export in library root `root`. -/
-def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsGiven : Array String) :
-    IO Result := do
+/-- Run the export in library root `root`; `backend` hashes it. -/
+def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
+    (libsGiven : Array String) : IO Result := do
   let deps ← manifestDeps root
   -- docs/design/04: build using the mathlib cache, when the library depends on mathlib.
   if deps.any (·.1 == "mathlib") then
@@ -230,22 +232,22 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
   let hex ← dumpToFile env roots tmp
   let boundary ← Store.putString root .boundaries boundaryText
-  -- Compute every claim hash now, so that problems surface at export time; a cached hashing of
-  -- the same export and boundary list has already passed.
-  let hashed ← match ← Cache.load? root (mkHash hex) boundaryList with
+  -- The graph: every claim hash, computed now, as the other commands only read it; a stored graph
+  -- of the same export and boundary list has already passed.
+  let hashed ← match ← Graph.load? root (mkHash hex) boundaryList with
     | some h => pure h
     | none =>
-      let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
-      let h ← try Walk.hashExport exported boundaryList
+      let h ← try Walk.hashExport backend tmp boundaryList
         catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
-      Cache.save root (mkHash hex) h
+      Graph.save root (mkHash hex) h
       pure h
   let exportHash ← Store.putFile root .exports tmp hex
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
     { exportHash, boundary, modules := mods.map toString, owned := ownedHash }
-  -- Sweep. Exports and boundary lists stay while the current pointer or a record names them;
-  -- evidence while its claim is current; a proof while evidence or a record names it.
+  -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
+  -- with their export; evidence while its claim is current; a proof while evidence or a record
+  -- names it.
   let ledger ← Ledger.load root
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert hex
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
@@ -255,13 +257,13 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
       exports := exports.insert (hashHex a.exportHash)
       boundaries := boundaries.insert (hashHex a.boundary)
       if let some e := a.evidence then proofs := proofs.insert (hashHex e)
-  let evidence : Std.HashSet String := hashed.declarations.foldl (init := {}) fun s (n, d) =>
-    s.insert ((Store.evidencePath root d.name hashed.nodes[n]!.claim).fileName.getD "")
+  let evidence : Std.HashSet String := hashed.boundary.declarations.foldl (init := {}) fun s d =>
+    s.insert ((Store.evidencePath root d.name hashed.nodes[d.name]!.claim).fileName.getD "")
   let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
   removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
   removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
   removed := removed + (← Store.sweep root .proofs (proofs.union (← Store.evidenceProofs root)))
-  Cache.sweep root exports
+  Graph.sweep root exports
   if removed > 0 then IO.eprintln s!"leanblame: removed {removed} objects nothing names any more"
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
 

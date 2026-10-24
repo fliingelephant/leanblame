@@ -83,7 +83,7 @@ above) covers that constant in it, and its signer is allowed by
   the sign server wrote them.
 - Terminal `sign` writes `local:` records. Provider identities (OpenReview,
   ORCID, GitHub) come through the sign server, which is not built yet.
-- `validate` runs as a required CI check: schema, authority rules, and no
+- `validate` gates every record, wherever the adopter runs it: schema, authority rules, and no
   modification or deletion of an existing record.
 - The party you trust is whoever holds the sign server's push credential,
   normally the hosting institution. Name it in the library's README.

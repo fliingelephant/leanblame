@@ -4,32 +4,9 @@
 `sign` is the terminal dev path: it writes `local:` records only. Provider
 logins (OpenReview, ORCID, GitHub) belong to the sign server.
 -/
-import LeanBlame.Cli.Status
+import LeanBlame.Core.Status
 
 namespace LeanBlame.Sign
-
-/-- The CI job `init` writes: `validate` on every pull request. -/
-def ciWorkflow : String :=
-  "# Written by `leanblame init`. Make this a required check.
-# A pull request runs this job as the pull request changed it, with its own lakefile and
-# leanblame.toml. Protect .github/, the lakefile, lake-manifest.json and leanblame.toml
-# with CODEOWNERS and required reviews.
-name: leanblame validate
-on: pull_request
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install elan
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
-          echo \"$HOME/.elan/bin\" >> \"$GITHUB_PATH\"
-      - name: Validate records (schema, authority, append-only)
-        run: lake exe leanblame validate --base-ref \"origin/${{ github.base_ref }}\"
-"
 
 def init (root : System.FilePath) : IO UInt32 := do
   -- Create `path` unless it exists; `what` names it in the report.
@@ -40,8 +17,6 @@ def init (root : System.FilePath) : IO UInt32 := do
       IO.println s!"created  {what}"
   ensure (root / Config.fileName) Config.fileName (IO.FS.writeFile (root / Config.fileName) Config.defaultText)
   ensure (root / "records") "records/" (IO.FS.createDirAll (root / "records"))
-  let wf := root / ".github" / "workflows" / "leanblame.yml"
-  ensure wf ".github/workflows/leanblame.yml" (writeFileMkdirs wf ciWorkflow)
   -- The object store is local and large; keep it out of git.
   let gi := root / ".gitignore"
   let old := (← readFileIfExists gi).getD ""
@@ -85,10 +60,10 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
-  let hashed ← Status.hashed root cur.exportHash cur.boundary
-  let boundary := hashed.boundary
+  let graph ← Status.currentGraph root cur
+  let boundary := graph.boundary
   let claimOf : Std.HashMap String String :=
-    hashed.declarations.foldl (init := {}) fun m (n, d) => m.insert d.name hashed.nodes[n]!.claim
+    boundary.declarations.foldl (init := {}) fun m d => m.insert d.name graph.nodes[d.name]!.claim
   let selected ← if !names.isEmpty then
       names.mapM fun n => do
         match boundary.declarations.find? (·.name == n) with

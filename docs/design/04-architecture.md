@@ -16,24 +16,34 @@ nothing else, so user modules never import Lake. And the executable, whose own
 modules sit in an internal third library: Lake builds an executable's imports
 only from library targets.
 
-The executable reads a **boundary list**, an **export**, and **records**. It
-uses the toolchain's export parser and its own closure walk, adapted from
-comparator's (`Lake/Check/Compare.lean` in the toolchain, Apache-2.0): seeds
-from the boundary list, cuts at tagged declarations, hashes specs, skips
-proofs, collects every mismatch, charges each change to a cause. The export is
-turned back into a kernel environment by an adaptation of core's `Replay.lean`.
+The executable reads a **boundary list**, an **export**, and **records**. Its
+modules form two layers ([15-generic-core.md](15-generic-core.md)):
+
+- `Core/`, the generic tool: schemas, hashes, the closure walk, records,
+  validity, the object store, git. It knows declarations only by printed name,
+  with what a frontend reports about each, and never sees a term. The closure
+  walk is adapted from comparator's (`Lake/Check/Compare.lean` in the
+  toolchain, Apache-2.0): seeds from the boundary list, cuts at tagged
+  declarations, hashes specs, collects every mismatch, charges each change to
+  a cause.
+- `Lean/`, the Lean frontend: `export` and its adapters, the toolchain's export
+  parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
+  `equiv`. The export is turned back into a kernel environment by an
+  adaptation of core's `Replay.lean`.
+
+`Main` passes the Lean frontend to the core commands.
 
 Eight commands:
 
 | Command | Does |
 |---------|------|
-| `init` | Create `leanblame.toml`, `records/`, and the CI job that runs `validate`. |
+| `init` | Create `leanblame.toml` and `records/`. |
 | `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list. `--boundary` takes a list from an adapter instead of `@[trusted]`. |
 | `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
 | `blame X` | Who signed `X`, when, at which claim hash. |
 | `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
-| `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Runs in CI on every pull request. |
+| `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
@@ -79,23 +89,26 @@ signed `axiom` in the library or its tagged dependencies.
 ## Storage
 
 - Code, records, config: git.
-- Exports, boundary lists, `equiv` proofs, release manifests: an object store
-  keyed by hash, one directory per kind (`.leanblame/store/<kind>/`). `export`
-  deletes what nothing names any more: exports and boundary lists named by no
-  record and not current, evidence whose claim is no longer current, proofs
+- Exports, boundary lists, graphs, `equiv` proofs, release manifests: an
+  object store keyed by hash, one directory per kind
+  (`.leanblame/store/<kind>/`). A graph is an export hashed against a boundary
+  list: every claim hash, with the parts `status` compares and the axiom
+  report. `export` writes it; the other commands read it and never hash. It is
+  the one kind keyed by what it was computed from instead of its own bytes:
+  `graphs/<export>-<boundary list>.json`. `export` deletes what nothing names
+  any more: exports and boundary lists named by no record and not current, the
+  graphs of deleted exports, evidence whose claim is no longer current, proofs
   named by no evidence and no record.
-- Hashed exports: a local cache (`.leanblame/cache/`), keyed by export and
-  boundary list. Derived data: `export` writes it, the other commands read it
-  and hash again when it is missing. Swept with the exports; safe to delete.
 - `equiv` evidence: `.leanblame/equiv/evidence/`, one file per declaration and
   claim hash, naming the proof and the record it was compared with.
 
 ## Platform
 
-Every command runs wherever the library's toolchain is installed. `export`
-builds the library (`lake build`) and runs the exporter in-process; `release`
-and `equiv` run `leanchecker`; the rest read the object store and hash an export
-only when the cache lacks it, which needs no build.
+`export`, `equiv` and `release` run wherever the library's toolchain is
+installed: `export` builds the library (`lake build`), runs the exporter
+in-process and hashes; `release` and `equiv` run `leanchecker`. `status`,
+`blame`, `sign` and `validate` need no toolchain: they read graphs from the
+object store, and records.
 
 ## Reuse
 
@@ -132,7 +145,13 @@ second export parser or an orchestration-only binary.
 
 ## Beyond Lean
 
-What reads an export knows Lean: `export`, the hashing walk (run by `export`,
-and by `status` when the cache lacks an export), `equiv` and `release`. A
-backend for another proof assistant replaces those. Records, the validity
-rules, `blame`, `sign`, `validate` and the web are unchanged.
+Another proof assistant needs a frontend. It implements `Source`, which serves
+one export to the core: per declaration its name, kind, role, universe
+parameters, the hashes of its canonical statement and body with proofs erased,
+its dependencies, and what it rests on for the axiom report. And `Backend`:
+the `Source` of a stored export, a replay by the assistant's own checker and
+that checker's name, its standard axioms, and the axioms that stand for a
+missing proof. `export` keeps the names in the graph. Exact fields in
+[15-generic-core.md](15-generic-core.md). `export` and `equiv` belong to the
+frontend too. The core, records, the validity rules, `status`, `blame`, `sign`,
+`validate`, `release` and the web are unchanged.

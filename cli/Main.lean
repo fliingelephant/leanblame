@@ -1,11 +1,14 @@
 /-
-`leanblame`: command-line entry point (docs/design/04-architecture.md, eight commands).
+`leanblame`: command-line entry point (docs/design/04-architecture.md, eight commands). It passes
+the Lean frontend's backend to the two commands that need one (docs/design/15-generic-core.md):
+`export` hashes with it, `release` runs its kernel check.
 -/
-import LeanBlame.Cli.Equiv
-import LeanBlame.Cli.Release
-import LeanBlame.Cli.Status
-import LeanBlame.Cli.Validate
-import LeanBlame.Cli.Sign
+import LeanBlame.Core.Release
+import LeanBlame.Core.Sign
+import LeanBlame.Core.Status
+import LeanBlame.Core.Validate
+import LeanBlame.Lean.Equiv
+import LeanBlame.Lean.Source
 
 open LeanBlame
 
@@ -13,7 +16,7 @@ def usage : String :=
   "usage: leanblame <command> [options]
 
 commands:
-  init                                   create leanblame.toml, records/ and the CI job
+  init                                   create leanblame.toml and records/
   export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
                                          verso-blueprint blueprint-manifest.json or a
                                          leanblame.manual.1 TOML list)
@@ -65,7 +68,7 @@ where
 def cmdExport (args : List String) : IO UInt32 := do
   let a ← parseArgs #["--boundary", "--lib"] #[] args
   let root ← IO.currentDir
-  let r ← Export.run root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
+  let r ← Export.run Source.backend root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"
@@ -110,7 +113,7 @@ def cmdEquiv (args : List String) : IO UInt32 := do
 def cmdRelease (args : List String) : IO UInt32 := do
   let a ← parseArgs #["--tag", "--out"] #[] args
   let some tag := a.get? "--tag" | fail "usage: leanblame release --tag TAG [--out FILE]"
-  Release.run (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
+  Release.run Source.backend (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
 
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0

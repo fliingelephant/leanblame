@@ -13,7 +13,7 @@ Checks every entry of the records directories:
   compared by id, so moving them passes; editing or deleting one does not.
 -/
 import Lake.Util.Git
-import LeanBlame.Cli.Records
+import LeanBlame.Core.Records
 
 namespace LeanBlame.Validate
 

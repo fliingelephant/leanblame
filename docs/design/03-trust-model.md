@@ -105,36 +105,61 @@ Hashes are not. Hashes depend only on the code.
 
 Rule: hash everything that changes meaning, nothing else.
 
-**In:** kind, name, ordered universe parameters, type, body of a def, safety
-(`partial`, `opaque`), informal text (tagged declarations only; ASCII
-whitespace trimmed, line endings normalized, no Unicode normalization). Type
-and body enter with every proof subterm erased.
+Every declaration has a **role**, which says what its body is to a signer
+([15-generic-core.md](15-generic-core.md)):
+
+| Role | The body | Lean kinds |
+|------|----------|------------|
+| `assumed` | none; the statement is taken as true | `axiom` |
+| `defined` | is the meaning; the signer reads it | `def`, `opaque`, `inductive`, `ctor`, `quot`, `rec` |
+| `proved` | is a proof; the kernel checks it, nobody reads it | `theorem` |
+
+The **kind** is the proof assistant's own label, as in the table. It is hashed
+as text and never interpreted; the rules below read the role. A definition the
+export marks partial would be labelled `partial def`; Lean 4.35 exports them as
+`opaque`.
+
+**In:** kind, role, name, ordered universe parameters, type, the body of a
+`defined` declaration when the kernel sees it, informal text (tagged
+declarations only; ASCII whitespace trimmed, line endings normalized, no
+Unicode normalization). Type and body enter with every proof subterm erased.
 
 **Out:** theorem proofs, proof subterms anywhere (in types as in bodies),
 binder names, argument implicitness, kernel height hints, recursor rules.
 None of these change meaning; all of them churn on toolchain bumps. Proofs
 in particular: Lean treats all proofs of one proposition as equal (proof
 irrelevance) and hides them when it displays a term, so a signer never read
-them.
+them. The kernel does not see the body of `opaque` and `partial`
+definitions, and `quot` and `rec` have none to read.
 
 ```
-own(c)   = H(kind, name, uparams, type, body, safety, informal-text-if-tagged)
-           type and body with proofs erased
-spec(c)  = H(kind, name, uparams, type, informal-text)
-claim(c) = H(own(c), sorted over direct dependencies d of c:
+own(c)   = H("leanblame.own.2",   kind, role, name, uparams, type, body?, informal?)
+spec(c)  = H("leanblame.spec.2",  kind, role, name, uparams, type, informal)
+claim(c) = H("leanblame.claim.2", own(c), sorted over direct dependencies d of c:
                tagged(d)   -> ("spec", spec(d))
                untagged(d) -> ("full", claim(d)))
 ```
+
+`H` is SHA-256 over the tag and the fields, each as `<byte length>:<bytes>`.
+`name` is the printed name. `type` and `body` are hashes of the canonical
+terms, proofs erased. `body?` and `informal?` are `+<len>:<bytes>` when
+present (a hashed body; the informal text of a tagged declaration), else `-`.
 
 Terms are printed canonically from the parsed export with de Bruijn indices;
 constants by name, never by export index; universe parameters by position. A
 repeated subterm is printed once and referred to afterwards, so printing is
 linear in the size of the term as a graph (a term can be exponentially larger
-as a tree). Dependencies of a theorem are those of its type only.
+as a tree). Dependencies of a `proved` declaration are those of its type only.
 
 Cycles: an inductive type and its constructors reference each other, and
 mutual definitions do too. Such a group is hashed as one unit; each member's
-hash is the group hash plus its name.
+hash is the group hash plus its name. Owns are sorted by member name; the
+external entries are those of `claim`, for dependencies outside the group.
+
+```
+group     = H("leanblame.group.2",  count, member owns, external entries)
+member(c) = H("leanblame.member.2", group, name)
+```
 
 A record stores `claim(c)` for each constant it covers, plus the export hash,
 the boundary-list hash, the library commit, toolchain and dependency commits.

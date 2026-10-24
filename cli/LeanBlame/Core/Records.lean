@@ -9,7 +9,7 @@ signed by that record's signer; it kills the listed constants of that record,
 or all of them. An approve record is live for a constant if no counting
 withdraw covers it and its signer is allowed by `leanblame.toml`.
 -/
-import LeanBlame.Cli.Config
+import LeanBlame.Core.Config
 
 namespace LeanBlame
 

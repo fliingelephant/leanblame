@@ -18,9 +18,12 @@ as the only cause (the named ones, else all), compared with X's last live approv
    solution export: `status` shows it as X's `evidence`, `sign` puts the hash in the record.
 What is left is for a human to read: equiv prints the root causes, with the old and new values of
 each changed definition that is not definitionally equal.
+
+The hashes come from the graphs `export` stored (docs/design/15-generic-core.md, §9), keyed by
+printed name; the terms from the old and current exports.
 -/
-import LeanBlame.Cli.Export
-import LeanBlame.Cli.Status
+import LeanBlame.Core.Status
+import LeanBlame.Lean.Export
 
 namespace LeanBlame.Equiv
 
@@ -79,13 +82,13 @@ def pp (env : Kernel.Environment) (e : Expr) : IO String := do
 definition whose type text and universe parameters are unchanged, `<old type> ↔ <type>` for a
 theorem; or why there is none. -/
 def goal (env : Kernel.Environment) (dup : NameSet) (c : Name) (o n : ConstantInfo)
-    (oldNode newNode : Walk.Node) : IO (Except String (Expr × Expr)) := do
+    (oldNode newNode : Core.Node) : IO (Except String (Expr × Expr)) := do
   let us := n.levelParams.map Level.param
   unless o.levelParams.length == us.length do return .error "its universe parameters changed"
   match o, n with
   | .defnInfo ov, .defnInfo nv =>
     unless ov.safety == .safe && nv.safety == .safe do return .error "it is not a safe definition"
-    unless oldNode.fields.typeHash == newNode.fields.typeHash do return .error "its type changed"
+    unless oldNode.decl.typeHash == newNode.decl.typeHash do return .error "its type changed"
     let u ← runMeta env (Meta.getLevel n.type)
     return .ok (mkApp3 (.const ``Eq [u]) n.type (.const (oldName c) us) (.const c us),
                 mkApp2 (.const ``Eq.refl [u]) n.type (.const c us))
@@ -94,7 +97,7 @@ def goal (env : Kernel.Environment) (dup : NameSet) (c : Name) (o n : ConstantIn
     let b := n.type
     return .ok (mkIff a b,
                 mkApp4 (.const ``Iff.intro []) a b (.lam `h a (.bvar 0) .default) (.lam `h b (.bvar 0) .default))
-  | _, _ => return .error s!"no goal for a changed {Walk.kindOf n}"
+  | _, _ => return .error s!"no goal for a changed {Source.kindOf n}"
 
 /-- One eligible declaration: the approve record it is compared with and its current claim. -/
 structure Target where
@@ -106,7 +109,7 @@ structure Target where
 Prove the targets that share one old export and boundary list (`old`, `oldExp`); returns those
 proven, with the hash of the solution export.
 -/
-def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : Walk.Hashed)
+def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : Core.Hashed)
     (newExp oldExp : LeanExport.ExportedEnv) (targets : Array Target) :
     IO (Array Target × String) := do
   let oldCi (c : Name) := oldExp.constMap[c]?
@@ -119,8 +122,9 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
     | none => #[]
   -- The constants to duplicate, until nothing is added.
   let needs (dup : NameSet) (r : Name) : Bool :=
-    !old.isTagged r && match old.nodes[r]? with
-    | some o => (new.nodes[r]?.map (·.claim)) != some o.claim
+    let s := r.toString
+    !old.isTagged s && match old.nodes[s]? with
+    | some o => (new.nodes[s]?.map (·.claim)) != some o.claim
     | none => match oldCi r, newExp.constMap[r]? with
       | some o, some n => !sameDecl dup o n
       | some _, none => true
@@ -171,7 +175,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
       let report (msg : String) : IO (Array Name) := do
         if below.isEmpty then IO.eprintln msg
         return if below.isEmpty then #[c] else below
-      match oldCi c, newExp.constMap[c]?, old.nodes[c]?, new.nodes[c]? with
+      match oldCi c, newExp.constMap[c]?, old.nodes[c.toString]?, new.nodes[c.toString]? with
       | some o, some n, some oldNode, some newNode =>
         match ← goal env dup c o n oldNode newNode with
         | .error why => taint := taint.insert c (← report s!"{c}: {why}; a human reads")
@@ -199,7 +203,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
   -- The solution export: the accepted theorems and what they use, replayed by `leanchecker`.
   let tmp ← Store.tmpPath root "solution"
   let solution ← Store.putFile root .proofs tmp (← Export.dumpToFile (.ofKernelEnv env) proved tmp)
-  unless ← Status.kernelAccepts (Store.objectPath root .proofs solution) do
+  unless ← Source.kernelAccepts (Store.objectPath root .proofs solution) do
     fail s!"leanchecker rejected the solution export {solution}"
   return (proven, solution)
 
@@ -210,32 +214,34 @@ def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
   for n in names do
     unless decls.any (·.1 == n) do fail s!"{n} is not on the boundary list"
   let new := r.new
-  let nameOf : Std.HashMap String Name := new.declarations.foldl (init := {}) fun m (x, _) => m.insert x.toString x
-  -- Eligible: outdated, and `untagged` the only cause.
-  let mut targets : Array (Target × ApproveRecord) := #[]
+  -- Eligible: outdated, and `untagged` the only cause; with the approve record compared with.
+  let mut eligible : Array (String × String × String × ApproveRecord) := #[]
   let mut left := 0
   for (n, d) in decls do
     unless names.isEmpty || names.contains n do continue
     if d.state == .outdated && d.change.size == 1 && d.change[0]!.cause == .untagged then
       let some (r, a, _) := (Status.liveApprovals ledger n).back? | continue
-      targets := targets.push ({ name := nameOf[n]!, record := r.hash, claim := d.claim }, a)
+      eligible := eligible.push (n, r.hash, d.claim, a)
     else if !names.isEmpty && d.state != .valid then
       left := left + 1
       IO.eprintln (if d.state == .unsigned then s!"{n}: unsigned: no approved meaning to compare with"
         else s!"{Status.textLine n d}\n{n}: no goal: a cause other than `untagged`; a human reads")
-  if targets.isEmpty then
+  if eligible.isEmpty then
     if left == 0 then IO.println "equiv: no outdated declaration whose only cause is untagged"
     return if left == 0 then 0 else 1
-  let newExp ← Status.loadExported root r.cur.exportHash
+  let newExp ← Source.loadExported root r.cur.exportHash
+  let constOf ← Source.nameMap newExp
+  let targets : Array (Target × ApproveRecord) := eligible.map fun (n, record, claim, a) =>
+    ({ name := constOf[n]!, record, claim }, a)
   let base := (← Load.environmentOfExport newExp).toKernelEnv
   -- One group per old export and boundary list.
   let groups := dedup (targets.map fun (_, a) => (a.exportHash, a.boundary))
   let mut proven := 0
   for (e, b) in groups do
-    let old ← Status.hashed root e b
+    let old ← Status.graph root e b
     let group := (targets.filter fun (_, a) => a.exportHash == e && a.boundary == b).map (·.1)
     let (ok, solution) ← proveGroup root base (new := new) (newExp := newExp) (old := old)
-      (oldExp := ← Status.loadExported root e) group
+      (oldExp := ← Source.loadExported root e) group
     for t in ok do
       let evidence := Json.mkObj [("name", t.name.toString), ("claim", t.claim),
         ("old_record", t.record), ("evidence", solution)]

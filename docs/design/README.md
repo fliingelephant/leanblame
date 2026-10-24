@@ -17,6 +17,7 @@ Read in order. Each file is short.
 | 12 | [12-roadmap.md](12-roadmap.md) | What exists, what to build, in what order. |
 | 13 | [13-glossary.md](13-glossary.md) | Every term, one line. |
 | 14 | [14-schemas.md](14-schemas.md) | Exact fields of the four interfaces. For implementers. |
+| 15 | [15-generic-core.md](15-generic-core.md) | What is generic, what knows Lean, and what does a frontend for a proof assistant implement? |
 
 One-paragraph summary:
 

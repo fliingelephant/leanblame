@@ -17,7 +17,7 @@ Next: 6, the rest of 7, 10.
 | # | Item | Size |
 |---|------|------|
 | 1 | `@[trusted]` in a Lake-free target; `init`; the four schemas in [14-schemas.md](14-schemas.md) | small |
-| 2 | `validate`: schema, authority rules, no edits to existing records; CI job | small |
+| 2 | `validate`: schema, authority rules, no edits to existing records | small |
 | 3 | `export` and claim hash: canonical printing, proof erasure, group hashes, structure expansion, spec cut | medium |
 | 4 | `status` (states, causes, blocked-by, `--json`) and `blame` | medium |
 | 5 | `release`: `leanchecker` replay, axiom report, manifest | small |
@@ -34,7 +34,7 @@ Next: 6, the rest of 7, 10.
 - Account linking across providers.
 - Sigstore keyless signatures.
 - Delta records.
-- Exporters for other proof assistants.
+- A frontend, `Backend` and `Source`, for another proof assistant.
 
 ## Evaluation
 

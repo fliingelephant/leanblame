@@ -64,12 +64,12 @@ current_export() { python3 -c 'import json; print(json.load(open(".leanblame/cur
 
 echo "== init"
 run init
-for f in leanblame.toml records .github/workflows/leanblame.yml; do
+for f in leanblame.toml records; do
   [[ -e "$f" ]] || fail "init did not create $f"
 done
 grep -qx ".leanblame/" .gitignore || fail "init did not ignore .leanblame/"
 grep -qx "/.lake/" .gitignore || fail "init dropped the existing .gitignore entries"
-ok "init created leanblame.toml, records/, the CI job, .gitignore entry"
+ok "init created leanblame.toml, records/, .gitignore entry"
 commit "sample library"
 
 echo "== export"
@@ -108,9 +108,9 @@ run status --json
 python3 - "$out" <<'PY' || fail "status --json does not match docs/design/14"
 import json, sys
 s = json.loads(sys.argv[1])
-assert s["schema"] == "leanblame.status.1"
+assert s["schema"] == "leanblame.status.2"
 assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
-keys = {"module", "kind", "informal", "informal_source", "claim", "state", "change", "signers",
+keys = {"module", "kind", "role", "informal", "informal_source", "claim", "state", "change", "signers",
         "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
@@ -122,6 +122,9 @@ for name, d in s["declarations"].items():
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
+assert s["declarations"]["Sample.energy"]["role"] == "defined"
+assert s["declarations"]["Sample.energy_even"]["role"] == "proved"
+assert s["declarations"]["Sample.energy_pos"]["role"] == "assumed"
 PY
 ok "status --json has the docs/design/14 fields; the proof field shows proven and open theorems"
 
@@ -183,8 +186,8 @@ commit "pointEnergy: new body"
 export_lib
 # The store keeps the signed export and the current one; the unsigned export in between is gone.
 [[ "$(ls .leanblame/store/exports | wc -l)" -eq 2 ]] || fail "store sweep: $(ls .leanblame/store/exports)"
-[[ "$(ls .leanblame/cache | wc -l)" -eq 2 ]] || fail "cache sweep: $(ls .leanblame/cache)"
-ok "export removes exports and cache files that no record names"
+[[ "$(ls .leanblame/store/graphs | wc -l)" -eq 2 ]] || fail "graph sweep: $(ls .leanblame/store/graphs)"
+ok "export removes exports and graphs that no record names"
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"

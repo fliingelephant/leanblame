@@ -2,7 +2,7 @@
 `leanblame.toml`, the library's trust policy (docs/design/04-architecture.md, Config).
 -/
 import Lake.Toml
-import LeanBlame.Cli.Schema
+import LeanBlame.Core.Schema
 
 namespace LeanBlame
 

@@ -2,15 +2,16 @@
 The object store (docs/design/04-architecture.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too) and release
-manifests.
+manifests. Graphs, exports hashed against boundary lists (`Graph`), are the one kind that is keyed
+rather than content-addressed: `graphs/<export hex>-<hex of the boundary list's declarations>.json`.
 
 One small local file points into it: `.leanblame/current` (JSON), the export, boundary list and
 constant listing of the last `export` run. `equiv` writes evidence files next to it, in
 `.leanblame/equiv/evidence/`. `export` sweeps: an export, boundary list or listing that neither the
-current pointer nor a record names is deleted, so is evidence for a claim that is no longer current,
-and a proof that neither evidence nor a record names.
+current pointer nor a record names is deleted, so are the graphs of a deleted export, evidence for a
+claim that is no longer current, and a proof that neither evidence nor a record names.
 -/
-import LeanBlame.Cli.Util
+import LeanBlame.Core.Util
 
 namespace LeanBlame.Store
 
@@ -20,7 +21,7 @@ def objectsDir (root : System.FilePath) : System.FilePath := dir root / "store"
 
 /-- The kinds of object, one directory each. -/
 inductive Kind where
-  | exports | boundaries | owned | proofs | manifests
+  | exports | boundaries | owned | proofs | manifests | graphs
   deriving BEq, Repr
 
 def Kind.dir : Kind → String
@@ -29,6 +30,7 @@ def Kind.dir : Kind → String
   | .owned => "owned"
   | .proofs => "proofs"
   | .manifests => "manifests"
+  | .graphs => "graphs"
 
 def kindDir (root : System.FilePath) (k : Kind) : System.FilePath := objectsDir root / k.dir
 

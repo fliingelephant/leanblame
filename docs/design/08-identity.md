@@ -25,9 +25,10 @@ person with two providers is two ids until they link accounts. Later feature.
 
 ## Who you are trusting
 
-Records are trusted because the sign server wrote them after a login and CI
-rejects edits to existing records. The trusted party is whoever holds the sign
-server's push credential, normally the hosting institution. Name it.
+Records are trusted because the sign server wrote them after a login and
+`validate` rejects edits to existing records before they are pushed. The
+trusted party is whoever holds the sign server's push credential, normally the
+hosting institution. Name it.
 
 ## Cryptographic signatures
 

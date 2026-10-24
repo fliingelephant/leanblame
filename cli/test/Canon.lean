@@ -2,7 +2,7 @@
 Canonical printing is linear in the size of a term as a graph, and depends on the tree only.
 `test/run.sh` runs this with `lake env lean --run`.
 -/
-import LeanBlame.Cli.Canon
+import LeanBlame.Lean.Canon
 
 open Lean
 

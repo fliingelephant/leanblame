@@ -20,10 +20,15 @@ agent) is separate from who signed it (always a human).
 
 ### What goes into the hash
 
-Everything that changes meaning, nothing else. In: kind, name, universe
-parameters, type and body with proof subterms erased, safety, informal text of
+Everything that changes meaning, nothing else. In: kind, role, name, universe
+parameters, type and body with proof subterms erased, informal text of
 tagged declarations. Out: proofs (wherever they occur: proof irrelevance),
 binder names, implicitness, kernel hints, recursor rules. Cycles hashed as groups. `unsafe` cannot be tagged.
+Since 2026-10-24 the role (`assumed`, `defined`, `proved`) replaces safety:
+the rules read the role, so they hold for any proof assistant; `kind` is the
+assistant's own label, and a body the kernel does not see has no body hash.
+Rejected: Lean's kinds and safety as fixed lists in the hash
+([15-generic-core.md](15-generic-core.md)).
 
 ### `equiv` says why, and only for untagged causes
 

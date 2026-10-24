@@ -27,8 +27,7 @@ subDir = "cli"
 ```
 
 Then `lake update leanblame` and `lake exe leanblame init`. `init` writes
-`leanblame.toml`, an empty `records/`, a GitHub Actions job that validates
-records on pull requests, and adds `.leanblame/` to `.gitignore`.
+`leanblame.toml`, an empty `records/`, and adds `.leanblame/` to `.gitignore`.
 
 ## Quickstart
 
@@ -59,7 +58,7 @@ Run in the library root as `lake exe leanblame <command>`.
 
 | Command | Does |
 |---------|------|
-| `init` | Create `leanblame.toml`, `records/`, the CI job. |
+| `init` | Create `leanblame.toml`, `records/`. |
 | `export [--boundary FILE] [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `blame NAME` | Who signed `NAME`, when, at which hash. |
@@ -88,7 +87,8 @@ never edited. `leanblame.toml` sets the policy: `records` directories,
 `allowed_signers`. From the terminal, `sign` writes `local:` signer ids; a sign
 server with login-backed ids is not built yet.
 
-`.leanblame/` holds exports, proofs and caches. It is local and ignored by git.
+`.leanblame/` holds the object store (exports, boundary lists, graphs, proofs, manifests). It is
+local and ignored by git.
 
 ## Development
 
