@@ -1,0 +1,8 @@
+{
+  "entries": [
+    { "key": "def:energy--statement", "html": "<div class=\"theorem-body\"><p>The energy of a chain of <span class=\"math\">n</span> sites.</p></div>" },
+    { "key": "thm:even--statement", "html": "<div class=\"theorem-body\"><p>The energy of every chain is even.</p></div>" },
+    { "key": "rem:intro--statement", "html": "<p>Chains are finite.</p>" }
+  ],
+  "hoverDocs": []
+}

@@ -14,8 +14,9 @@ def usage : String :=
 
 commands:
   init                                   create leanblame.toml, records/ and the CI job
-  export [--boundary FILE] [--lib NAME]  build, export, write the boundary list
-                                         (FILE: leanblame.boundary.1 JSON; adapters not implemented)
+  export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
+                                         leanblame.boundary.1 JSON list, a verso-blueprint
+                                         blueprint-manifest.json or a leanblame.manual.1 TOML list)
   status [--base RECORD] [--json]        state of every tagged declaration
   blame NAME                             who signed NAME, when, at which claim hash
   equiv                                  (not implemented)
@@ -60,20 +61,9 @@ def notImplemented (cmd : String) : IO UInt32 := do
   IO.eprintln s!"leanblame {cmd}: not implemented"
   return 2
 
-/-- The adapters of docs/04 other than `@[trusted]` (roadmap item 9) are not in this slice:
-`--boundary` reads a `leanblame.boundary.1` JSON list only. -/
-def adapterStub (file : String) : Option String :=
-  let p := System.FilePath.mk file
-  if p.fileName == some "blueprint-manifest.json" then some "the blueprint adapter"
-  else if p.extension == some "toml" then some "the manual list adapter"
-  else none
-
 def cmdExport (args : List String) : IO UInt32 := do
   let a ← IO.ofExcept (parseArgs #["--boundary", "--lib"] #[] args)
   unless a.positional.isEmpty do throw (IO.userError "export takes no positional arguments")
-  if let some adapter := (a.get? "--boundary").bind adapterStub then
-    IO.eprintln s!"leanblame export: {adapter} is not implemented; --boundary takes a leanblame.boundary.1 JSON list"
-    return 2
   let root ← IO.currentDir
   let r ← Export.run root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"

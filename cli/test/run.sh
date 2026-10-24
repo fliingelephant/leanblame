@@ -7,7 +7,8 @@
 # and walks through: init -> export -> sign -> status (valid) -> release -> edit
 # a body -> status (outdated, own-body) -> edit a dependency body -> status
 # (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
-# (withdrawn) -> blame -> validate (and its append-only check).
+# (withdrawn) -> blame -> validate (and its append-only check) -> boundary lists
+# from a verso-blueprint manifest and from a manual TOML list.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -305,13 +306,75 @@ must_fail "Sample.undocumented: tagged declarations need a docstring" \
 git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
 
+echo "== adapters: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
+stored_boundary() { echo ".leanblame/store/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
+run export --boundary "$here/blueprint/blueprint-manifest.json"
+python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
+import json, sys
+d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
+assert set(d) == {"Sample.energy", "Sample.energy_even", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
+                  "Sample.Point.y", "Sample.Point.norm", "Sample.pointEnergy"}, sorted(d)
+src = {n: x["informal_source"] for n, x in d.items()}
+assert src == {"Sample.energy": "blueprint:def:energy", "Sample.energy_even": "blueprint:thm:even",
+               "Sample.Point": "blueprint:def:point", "Sample.Point.mk": "blueprint:def:point",
+               "Sample.Point.x": "docstring", "Sample.Point.y": "docstring",
+               "Sample.Point.norm": "blueprint:def:point", "Sample.pointEnergy": "blueprint:def:pointEnergy"}, src
+assert d["Sample.energy"]["informal"] == "The energy of a chain of $n$ sites is $2n$: two units per site."
+assert d["Sample.energy_even"]["informal"] == '<div class="theorem-body"><p>The energy of every chain is even.</p></div>'
+PY
+run status
+grep -q "^8 tagged: " <<<"$out" || fail "status on the blueprint boundary list: $out"
+ok "statement texts and blueprint:<label> sources from the manifest and its HTML cache; status works"
+mkdir "$work/bp"
+cp "$here/blueprint/blueprint-html-cache.json" "$work/bp/"
+python3 - "$here/blueprint/blueprint-manifest.json" "$work/bp/blueprint-manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+m["previews"] += [
+  {"label": "«def:energy2»", "key": "def:energy2--statement", "targetKind": "block", "facet": "statement",
+   "codeData": {"externalDecls": [{"canonical": "Sample.energy"}]},
+   "externalMarkup": [{"language": "tex", "slot": "statement", "raw": "The energy, again."}]},
+  {"label": "«thm:silent»", "key": "thm:silent--statement", "targetKind": "block", "facet": "statement",
+   "codeData": {"literateDeclarations": {"definedTheorems": [{"name": "Sample.second_site"}]}}}]
+json.dump(m, open(sys.argv[2], "w"))
+PY
+must_fail "Sample.energy is claimed by labels def:energy and def:energy2" "no statement text for label thm:silent" \
+  -- "$lb" export --boundary "$work/bp/blueprint-manifest.json"
+ok "a name claimed by two labels and a statement without text are errors"
+
+echo "== adapters: a manual list"
+cat > "$work/manual.toml" <<'EOF'
+schema = "leanblame.manual.1"
+
+[declarations]
+"Sample.energy" = "The energy of a chain of n sites: two units per site."
+"Sample.pointEnergy" = '''
+The energy of a point: the energy of a chain as long as the point's norm.
+'''
+EOF
+run export --boundary "$work/manual.toml"
+python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the manual list"
+import json, sys
+d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
+assert sorted(d) == ["Sample.energy", "Sample.pointEnergy"], sorted(d)
+assert all(x["informal_source"] == "manual" for x in d.values())
+assert d["Sample.pointEnergy"]["informal"] == "The energy of a point: the energy of a chain as long as the point's norm."
+PY
+run status
+grep -q "^2 tagged: " <<<"$out" || fail "status on the manual list: $out"
+printf 'schema = "leanblame.manual.1"\nnote = "x"\n[declarations]\n"Sample.energy" = " "\n' > "$work/bad.toml"
+must_fail "unknown key \`note\` in a manual list" "\`Sample.energy\`: the informal text is empty" \
+  -- "$lb" export --boundary "$work/bad.toml"
+printf '{"declarations": []}\n' > "$work/other.json"
+must_fail "leanblame.boundary.1 JSON list, a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list" \
+  -- "$lb" export --boundary "$work/other.json"
+ok "manual list: names and texts, strict keys, no empty text; other inputs are refused"
+
 echo "== stubs"
-for args in equiv "export --boundary blueprint-manifest.json" "export --boundary manual.toml"; do
-  set +e; "$lb" $args >/dev/null 2>"$work/stub.log"; code=$?; set -e
-  [[ "$code" == 2 ]] || fail "$args should exit 2, got $code"
-  grep -q "not implemented" "$work/stub.log" || fail "$args: $(cat "$work/stub.log")"
-  ok "$args says not implemented and exits 2"
-done
+set +e; "$lb" equiv >/dev/null 2>"$work/stub.log"; code=$?; set -e
+[[ "$code" == 2 ]] || fail "equiv should exit 2, got $code"
+grep -q "not implemented" "$work/stub.log" || fail "equiv: $(cat "$work/stub.log")"
+ok "equiv says not implemented and exits 2"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"

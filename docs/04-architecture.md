@@ -52,8 +52,12 @@ validator in `leanblame`. See [05-records.md](05-records.md).
 ## Adapters
 
 Input adapters produce a boundary list. Shipped: `@[trusted]`; a reader for
-verso-blueprint's `blueprint-manifest.json`; a hand-written TOML list
-(`informal_source = "manual"`).
+verso-blueprint's `blueprint-manifest.json` (statement entries: Lean names from
+`codeData`, text from the `statement` slot of `externalMarkup` or else the
+entry's fragment in `blueprint-html-cache.json`); a hand-written TOML list,
+`schema = "leanblame.manual.1"` with a `[declarations]` table of name = text
+(`informal_source = "manual"`). `export --boundary FILE` tells the file formats
+apart by content.
 
 ## Config: `leanblame.toml`
 

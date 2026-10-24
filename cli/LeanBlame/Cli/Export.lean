@@ -15,16 +15,12 @@ import Lake.Toml
 import Lake.Util.Git
 import LeanExport.Basic
 import LeanBlame.Attr
+import LeanBlame.Cli.Adapters
 import LeanBlame.Cli.Cache
-import LeanBlame.Cli.Schema
 
 namespace LeanBlame.Export
 
 open Lean
-
-/-- The informal text of a docstring. docs/03 asks for Unicode normalization, which Lean core
-does not have: ASCII whitespace is trimmed and line endings are normalized. -/
-def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
 /-- Library names: `--lib` flags, else the default `lean_lib` targets of `lakefile.toml`. -/
 def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array String) := do
@@ -88,12 +84,6 @@ def moduleOf (env : Environment) (n : Name) : Name :=
   | some idx => env.header.modules[idx.toNat]!.module
   | none => env.mainModule
 
-/-- A declaration put on the boundary, by `@[trusted]` or by a boundary-list file. -/
-structure Tag where
-  name : Name
-  informal : String
-  informalSource : String
-
 /-- The `@[trusted]` declarations, own and imported, with their docstrings; and the problems. -/
 def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
   let mut tags := #[]
@@ -113,8 +103,7 @@ def fileTags (env : Environment) (b : BoundaryList) : Array Tag × Array String 
   let mut tags := #[]
   let mut errors := #[]
   for d in b.declarations do
-    let some n := Syntax.decodeNameLit ("`" ++ d.name)
-      | errors := errors.push s!"{d.name}: not a constant name"; continue
+    let some n := constName? d.name | errors := errors.push s!"{d.name}: not a constant name"; continue
     let some ci := env.find? n | errors := errors.push s!"{d.name}: not in the environment"; continue
     if Walk.kindOf ci != d.kind then
       errors := errors.push s!"{d.name}: kind is {Walk.kindOf ci}, the list says {d.kind}"
@@ -123,6 +112,26 @@ def fileTags (env : Environment) (b : BoundaryList) : Array Tag × Array String 
     else
       tags := tags.push { name := n, informal := d.informal, informalSource := d.informalSource }
   return (tags, errors)
+
+/-- The tags of a `--boundary` file, by content: a `leanblame.boundary.1` JSON list, a
+verso-blueprint manifest (JSON with `previews`) or a `leanblame.manual.1` TOML list; and the
+problems. -/
+def boundaryFileTags (env : Environment) (f : System.FilePath) : IO (Array Tag × Array String) := do
+  let text ← IO.FS.readFile f
+  let accepted := "--boundary takes a leanblame.boundary.1 JSON list, a verso-blueprint \
+    blueprint-manifest.json or a leanblame.manual.1 TOML list"
+  match Json.parse text with
+  | .ok j =>
+    if j.getObjVal? "previews" matches .ok _ then return ← blueprintTags f j
+    unless (j.getObjValAs? String "schema").toOption == some BoundaryList.schemaId do
+      fail s!"{f}: {accepted}"
+    match BoundaryList.fromJson? j with
+    | .ok b => return fileTags env b
+    | .error e => fail s!"{f}: {e}"
+  | .error _ =>
+    match ← parseToml text f.toString decodeManual with
+    | .ok tags => return (tags, #[])
+    | .error es => fail s!"{f}: {accepted}; as a manual list:\n{"\n".intercalate (es.toList.map ("  " ++ ·))}"
 
 /-- The boundary list's declarations, sorted by name: the tagged ones, and the constructors and
 projections of tagged inductives and structures that are not tagged themselves, with their own
@@ -203,9 +212,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
   let (tags, errors) ← match boundaryFile? with
-    | some f => match BoundaryList.parse (← IO.FS.readFile f) with
-      | .ok b => pure (fileTags env b)
-      | .error e => fail s!"{f}: {e}"
+    | some f => boundaryFileTags env f
     | none => trustedTags env
   let (declarations, errors') ← expand env tags
   unless (errors ++ errors').isEmpty do
@@ -224,7 +231,7 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
   for d in boundaryList.declarations do
-    let some n := Syntax.decodeNameLit ("`" ++ d.name) | fail s!"{d.name}: not a constant name"
+    let some n := constName? d.name | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     unless roots.contains n do roots := roots.push n
   roots := roots.qsort (fun a b => a.cmp b == .lt)

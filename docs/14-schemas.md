@@ -8,7 +8,8 @@ strings in JSON.
 ## 1. Boundary list (input, JSON)
 
 Produced by `export` from `@[trusted]`, including tags found in imported
-libraries, or by an adapter.
+libraries, or from `--boundary FILE`: such a list, a verso-blueprint manifest or
+a manual TOML list ([04-architecture.md](04-architecture.md), Adapters).
 
 ```json
 {
