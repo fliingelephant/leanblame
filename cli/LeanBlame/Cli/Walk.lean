@@ -53,7 +53,6 @@ structure Node where
 /-- Every constant reached from the boundary list, hashed. -/
 structure Hashed where
   nodes : Std.HashMap Name Node
-  tagged : Std.HashSet Name
   /-- The axioms the type and value of each tagged declaration rest on, sorted
   (`Lean.collectAxioms`). A function of the export alone. -/
   axioms : Std.HashMap Name (Array Name)
@@ -62,7 +61,8 @@ structure Hashed where
   /-- The boundary list's declarations with their constants, in list order. -/
   declarations : Array (Name × BoundaryDecl)
 
-def Hashed.isTagged (h : Hashed) (n : Name) : Bool := h.tagged.contains n
+/-- Tagged nodes are the ones with informal text. -/
+def Hashed.isTagged (h : Hashed) (n : Name) : Bool := (h.nodes[n]?.bind (·.informal)).isSome
 
 def sortNames (xs : Array Name) : Array Name :=
   (xs.map fun n => (n.toString, n)).qsort (fun a b => a.1 < b.1) |>.map (·.2)
@@ -76,14 +76,13 @@ structure Context where
 
 structure State where
   worklist : Array Name
-  checked : Std.HashSet Name
   nodes : Std.HashMap Name Node := {}
 
 /-- One `Meta` state for the whole export, so its caches serve every constant. -/
 abbrev HashM := ReaderT Context <| StateRefT State MetaM
 
 def addWorklist (n : Name) : HashM Unit := do
-  if !(← get).checked.contains n then
+  if !(← get).nodes.contains n then
     modify fun s => { s with worklist := s.worklist.push n }
 
 /--
@@ -110,8 +109,7 @@ def mkNode (info : ConstantInfo) : HashM Node := do
       let body ← Erase.eraseProofs d.value
       bodyHash := some (Canon.exprHash ups body)
       deps := deps ++ body.getUsedConstants
-    | .partial => safety := "partial"
-    | .unsafe => safety := "unsafe"
+    | _ => safety := "partial"
   | .opaqueInfo _ => safety := "opaque"
   | .inductInfo iv =>
     bodyHash := some <| Canon.hashFields "leanblame.inductive.1"
@@ -134,7 +132,7 @@ partial def loop : HashM Unit := do
     return ()
 
   let target ← modifyGet fun s => (s.worklist.back!, { s with worklist := s.worklist.pop })
-  if (← get).checked.contains target then
+  if (← get).nodes.contains target then
     loop
   else
     let some info := (← read).exported.constMap[target]?
@@ -142,7 +140,7 @@ partial def loop : HashM Unit := do
     let node ← mkNode info
     for d in node.deps do
       unless (← read).tagged.contains d do addWorklist d
-    modify fun s => { s with checked := s.checked.insert target, nodes := s.nodes.insert target node }
+    modify fun s => { s with nodes := s.nodes.insert target node }
     loop
 
 end Hash
@@ -248,7 +246,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
   let order := declarations.map (·.1)
   let ctx : Hash.Context := { exported, tagged }
   let env ← Load.environmentOfExport exported
-  let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse, checked := {} }).toIO
+  let (((), st), _) ← ((Hash.loop.run ctx).run { worklist := order.reverse }).toIO
     { fileName := "", fileMap := default, maxHeartbeats := 0 } { env }
   let axioms := axiomsOf (exported.constMap[·]?) order
   let mut nodes := st.nodes
@@ -282,8 +280,7 @@ def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : I
       for m in members do
         let node := nodes[m]!
         nodes := nodes.insert m { node with claim := Canon.member g m }
-  let taggedSet : Std.HashSet Name := order.foldl (·.insert ·) {}
-  return { nodes, tagged := taggedSet, axioms, boundary, declarations }
+  return { nodes, axioms, boundary, declarations }
 
 /--
 The closure under `x`: the tagged declarations where the walk stops (the cut, sorted), and the

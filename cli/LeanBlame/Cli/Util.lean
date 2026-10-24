@@ -44,8 +44,6 @@ def mkHash (hex : String) : String := hashPrefix ++ hex
 def hashHex (s : String) : String :=
   if s.startsWith hashPrefix then strDrop s hashPrefix.length else s
 
-def sha256OfString (s : String) : String := mkHash (Sha256.hexOfString s)
-
 def sha256OfBytes (b : ByteArray) : String := mkHash (Sha256.hexOfBytes b)
 
 /-! JSON. Key order is not part of any schema. -/

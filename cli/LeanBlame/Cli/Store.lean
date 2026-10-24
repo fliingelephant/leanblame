@@ -71,8 +71,8 @@ def readCurrent (root : System.FilePath) : IO Current := do
   fail s!"{currentPath root} is malformed; run `leanblame export`"
 
 /-- Where `equiv` records that declaration `name` at claim hash `claim` means what its last live
-approval meant: `<sha256 of "name claim">.json`, naming the proof (`evidence`) and the exports it was
-judged on. -/
+approval meant: `<sha256 of "name claim">.json`, naming the proof (`evidence`) and the approve
+record it was compared with (`old_record`). -/
 def evidencePath (root : System.FilePath) (name claim : String) : System.FilePath :=
   dir root / "equiv" / "evidence" / s!"{Sha256.hexOfString s!"{name} {claim}"}.json"
 

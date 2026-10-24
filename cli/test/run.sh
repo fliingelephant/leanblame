@@ -9,9 +9,9 @@
 # (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
 # (withdrawn) -> blame -> validate (and its append-only check) -> boundary lists
 # from a verso-blueprint manifest and from a manual TOML list -> equiv, in a copy
-# made after the first signoff: a definitional change proven (equiv-proven, the
-# record carries the proof, valid), one that is not definitional, an own-body
-# change refused.
+# made after the first signoff: a definitional change proven (evidence shown by
+# status, the record carries the proof, valid), one that is not definitional, an
+# own-body change refused.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -110,15 +110,14 @@ import json, sys
 s = json.loads(sys.argv[1])
 assert s["schema"] == "leanblame.status.1"
 assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
-keys = {"module", "kind", "informal", "informal_source", "claim", "state", "flags", "change",
-        "signers", "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
+keys = {"module", "kind", "informal", "informal_source", "claim", "state", "change", "signers",
+        "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
     want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
             "Sample.one_site_pos": "proven"}.get(name, "n/a")
     assert d["proof"]["status"] == want, (name, d["proof"])
-    assert d["proof"]["export"] == (s["export"] if d["kind"] == "theorem" else None), name
     assert d["history"][0]["action"] == "approve" and d["history"][0]["claim"] == d["claim"], name
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
@@ -176,8 +175,6 @@ export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
 run status
 expect_line Sample.second_site "Sample.second_site valid"
-run status --base "$energy_record"
-expect_line Sample.second_site "Sample.second_site valid"
 ok "a proof inside a statement is not part of the hash"
 
 echo "== edit a body: pointEnergy"
@@ -187,11 +184,6 @@ export_lib
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"
-# --base compares with the export and boundary list an approve record names.
-run status --base "$energy_record"
-expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
-must_fail "no such record" -- "$lb" status --base "$(current_export)"
-ok "--base takes a record, not an export"
 
 echo "== edit a dependency body: energy"
 edit Sample/Basic.lean 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/'
@@ -216,10 +208,7 @@ commit "energy: new docstring"
 before="$(current_export)"
 export_lib
 [[ "$(current_export)" == "$before" ]] || fail "a docstring edit changed the export"
-run status --base "$basic_record"
-expect_line Sample.energy \
-  "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
-ok "a docstring edit keeps the export; --base RECORD compares with the record's boundary list"
+ok "a docstring edit keeps the export"
 run status
 expect_line Sample.energy \
   "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
@@ -236,8 +225,8 @@ run validate
 ok "validate: $out"
 commit "withdraw Sample.Basic"
 run status
-expect_line Sample.energy "Sample.energy unsigned flags=withdrawn"
-expect_line Sample.Point "Sample.Point unsigned flags=withdrawn blocked-by=Sample.Point.mk"
+expect_line Sample.energy "Sample.energy unsigned"
+expect_line Sample.Point "Sample.Point unsigned blocked-by=Sample.Point.mk"
 expect_line Sample.energy_even \
   "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
 
@@ -246,7 +235,7 @@ edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$withdraw_record\"]|"
 grep -q '^exclude = \["sha256:' leanblame.toml || fail "test setup: exclude not set"
 must_fail "withdrawals cannot be excluded" -- "$lb" validate
 run status
-expect_line Sample.energy "Sample.energy unsigned flags=withdrawn"
+expect_line Sample.energy "Sample.energy unsigned"
 git checkout -q -- leanblame.toml
 ok "excluding a withdraw record fails validate and does not revive the approval"
 
@@ -371,7 +360,7 @@ printf 'schema = "leanblame.manual.1"\nnote = "x"\n[declarations]\n"Sample.energ
 must_fail "unknown key \`note\` in a manual list" "\`Sample.energy\`: the informal text is empty" \
   -- "$lb" export --boundary "$work/bad.toml"
 printf '{"declarations": []}\n' > "$work/other.json"
-must_fail "leanblame.boundary.1 JSON list, a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list" \
+must_fail "a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list" \
   -- "$lb" export --boundary "$work/other.json"
 ok "manual list: names and texts, strict keys, no empty text; other inputs are refused"
 
@@ -394,17 +383,18 @@ export_lib
 run status
 expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
 expect_line Sample.double_zero "Sample.double_zero outdated change=untagged:Sample.double"
-: > "$work/stderr.log"
 run equiv
-proof="$(awk '/^Sample.energy equiv-proven /{print $3}' <<<"$out")"
+proof="$(awk '/^Sample.energy proven /{print $3}' <<<"$out")"
 [[ "$proof" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "equiv did not prove Sample.energy: $out"
-grep -qxF "Sample.double_zero equiv-proven $proof" <<<"$out" || fail "equiv did not prove Sample.double_zero: $out"
+grep -qxF "Sample.double_zero proven $proof" <<<"$out" || fail "equiv did not prove Sample.double_zero: $out"
 [[ -f ".leanblame/store/${proof#sha256:}" ]] || fail "the proof $proof is not in the object store"
-grep -qxF "Your solution is okay!" "$work/stderr.log" || fail "lake comparator did not accept: $(cat "$work/stderr.log")"
-ok "equiv: Old.Sample.double = Sample.double by the kernel, lake comparator accepts, proof $proof"
+# The proof is an export anyone can replay with the toolchain's checker.
+"$(lean --print-prefix)/bin/leanchecker" --silent --from-export ".leanblame/store/${proof#sha256:}" \
+  || fail "leanchecker rejects the proof export $proof"
+ok "equiv: Old.Sample.double = Sample.double by the kernel; leanchecker replays the proof export $proof"
 run status
-expect_line Sample.energy "Sample.energy outdated flags=equiv-proven change=untagged:Sample.double"
-expect_line Sample.double_zero "Sample.double_zero outdated flags=equiv-proven change=untagged:Sample.double"
+expect_line Sample.energy "Sample.energy outdated evidence=$proof change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated evidence=$proof change=untagged:Sample.double"
 run sign --signer local:alice Sample.energy Sample.double_zero
 record="$(awk '/^approve /{print $3}' <<<"$out")"
 grep -qxF "evidence = \"$proof\"" "$record" || fail "the approve record does not carry the proof: $(cat "$record")"
@@ -420,23 +410,21 @@ commit "double: 2 * n"
 export_lib
 must_fail "^Sample.double: not definitionally equal; a human reads$" "^  old: fun n => Nat.add n n$" \
   "^  new: fun n => HMul.hMul 2 n$" "^Sample.energy: not proven, because of Sample.double; a human reads$" \
-  "^Sample.double_zero equiv-proven sha256:" "^equiv: 1 proven, 1 left to a human$" -- "$lb" equiv
+  "^Sample.double_zero proven sha256:" "^equiv: 1 proven, 1 left to a human$" -- "$lb" equiv
+proof2="$(awk '/^Sample.double_zero proven /{print $3}' "$work/fail.log")"
 run status
 expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
-expect_line Sample.double_zero "Sample.double_zero outdated flags=equiv-proven change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated evidence=$proof2 change=untagged:Sample.double"
 ok "n + n and 2 * n are not definitionally equal: both bodies shown; double_zero still holds by evaluation"
 run sign --withdraw "$record" --signer local:alice --constants Sample.double_zero
 run status
-expect_line Sample.double_zero "Sample.double_zero outdated flags=withdrawn change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated change=untagged:Sample.double"
 ok "a proof against a withdrawn approval does not count"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
 export_lib
 must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
-set +e; "$lb" equiv --check Sample.energy Goal.lean >/dev/null 2>"$work/stub.log"; code=$?; set -e
-[[ "$code" == 2 ]] || fail "equiv --check should exit 2, got $code"
-grep -q "not implemented" "$work/stub.log" || fail "equiv --check: $(cat "$work/stub.log")"
-ok "equiv refuses an own-body change; equiv --check says not implemented and exits 2"
+ok "equiv refuses an own-body change"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"

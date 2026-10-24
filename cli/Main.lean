@@ -15,14 +15,13 @@ def usage : String :=
 commands:
   init                                   create leanblame.toml, records/ and the CI job
   export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
-                                         leanblame.boundary.1 JSON list, a verso-blueprint
-                                         blueprint-manifest.json or a leanblame.manual.1 TOML list)
-  status [--base RECORD] [--json]        state of every tagged declaration
+                                         verso-blueprint blueprint-manifest.json or a
+                                         leanblame.manual.1 TOML list)
+  status [--json]                        state of every tagged declaration
   blame NAME                             who signed NAME, when, at which claim hash
   equiv [NAME...]                        ask the kernel whether what changed under NAME (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
-  equiv --check NAME FILE                (not implemented)
   sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]
   sign --withdraw RECORD [--signer local:NAME] [--constants A,B] [--note TEXT]
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
@@ -60,10 +59,6 @@ where
       else
         go rest { acc with positional := acc.positional.push a }
 
-def notImplemented (cmd : String) : IO UInt32 := do
-  IO.eprintln s!"leanblame {cmd}: not implemented"
-  return 2
-
 def cmdExport (args : List String) : IO UInt32 := do
   let a ← IO.ofExcept (parseArgs #["--boundary", "--lib"] #[] args)
   unless a.positional.isEmpty do throw (IO.userError "export takes no positional arguments")
@@ -75,9 +70,9 @@ def cmdExport (args : List String) : IO UInt32 := do
   return 0
 
 def cmdStatus (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--base"] #["--json"] args)
+  let a ← IO.ofExcept (parseArgs #[] #["--json"] args)
   unless a.positional.isEmpty do throw (IO.userError "status takes no positional arguments")
-  Status.run (← IO.currentDir) (a.get? "--base") (a.has "--json")
+  Status.run (← IO.currentDir) (a.has "--json")
 
 def cmdBlame (args : List String) : IO UInt32 := do
   let a ← IO.ofExcept (parseArgs #[] #[] args)
@@ -109,9 +104,7 @@ def cmdSign (args : List String) : IO UInt32 := do
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
 def cmdEquiv (args : List String) : IO UInt32 := do
-  let a ← IO.ofExcept (parseArgs #["--check"] #[] args)
-  -- A hand-written proof, judged like a comparator solution: not in this slice.
-  if (a.get? "--check").isSome then return ← notImplemented "equiv --check"
+  let a ← IO.ofExcept (parseArgs #[] #[] args)
   Equiv.run (← IO.currentDir) a.positional
 
 def cmdRelease (args : List String) : IO UInt32 := do

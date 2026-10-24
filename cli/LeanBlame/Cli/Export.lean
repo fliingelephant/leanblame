@@ -97,37 +97,15 @@ def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
     tags := tags.push { name := n, informal, informalSource := "docstring" }
   return (tags, errors)
 
-/-- The declarations of a boundary-list file, whose `module` and `kind` must agree with `env`; and
-the problems. -/
-def fileTags (env : Environment) (b : BoundaryList) : Array Tag × Array String := Id.run do
-  let mut tags := #[]
-  let mut errors := #[]
-  for d in b.declarations do
-    let some n := constName? d.name | errors := errors.push s!"{d.name}: not a constant name"; continue
-    let some ci := env.find? n | errors := errors.push s!"{d.name}: not in the environment"; continue
-    if Walk.kindOf ci != d.kind then
-      errors := errors.push s!"{d.name}: kind is {Walk.kindOf ci}, the list says {d.kind}"
-    else if (moduleOf env n).toString != d.module then
-      errors := errors.push s!"{d.name}: module is {moduleOf env n}, the list says {d.module}"
-    else
-      tags := tags.push { name := n, informal := d.informal, informalSource := d.informalSource }
-  return (tags, errors)
-
-/-- The tags of a `--boundary` file, by content: a `leanblame.boundary.1` JSON list, a
-verso-blueprint manifest (JSON with `previews`) or a `leanblame.manual.1` TOML list; and the
-problems. -/
-def boundaryFileTags (env : Environment) (f : System.FilePath) : IO (Array Tag × Array String) := do
+/-- The tags of a `--boundary` file, by content: a verso-blueprint manifest (JSON with `previews`)
+or a `leanblame.manual.1` TOML list; and the problems. -/
+def boundaryFileTags (f : System.FilePath) : IO (Array Tag × Array String) := do
   let text ← IO.FS.readFile f
-  let accepted := "--boundary takes a leanblame.boundary.1 JSON list, a verso-blueprint \
-    blueprint-manifest.json or a leanblame.manual.1 TOML list"
+  let accepted := "--boundary takes a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list"
   match Json.parse text with
   | .ok j =>
-    if j.getObjVal? "previews" matches .ok _ then return ← blueprintTags f j
-    unless (j.getObjValAs? String "schema").toOption == some BoundaryList.schemaId do
-      fail s!"{f}: {accepted}"
-    match BoundaryList.fromJson? j with
-    | .ok b => return fileTags env b
-    | .error e => fail s!"{f}: {e}"
+    unless j.getObjVal? "previews" matches .ok _ do fail s!"{f}: {accepted}"
+    blueprintTags f j
   | .error _ =>
     match ← parseToml text f.toString decodeManual with
     | .ok tags => return (tags, #[])
@@ -180,17 +158,6 @@ are restricted to these names as when `leanexport` ran as a command, so exports 
 def roundTrips (n : Name) : Bool :=
   Syntax.decodeNameLit ("`" ++ n.toString) == some n
 
-/--
-The constants `lake comparator` needs in every export it judges: Lake's `primitiveTargets`
-(`Lake/CLI/Check.lean`, private there, so listed again here), the standard axioms, and `sorryAx` for
-challenges. `export` exports them too, so that `equiv` can build its exports from the export alone.
--/
-def comparatorRoots : Array Name := #[
-  ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow, ``Nat.gcd, ``Nat.div, ``Nat.mod, ``Nat.beq, ``Nat.ble,
-  ``Nat.land, ``Nat.lor, ``Nat.xor, ``Nat.shiftLeft, ``Nat.shiftRight, ``String.ofList, ``Char.ofNat,
-  ``List, ``eagerReduce, ``Nat, ``String, ``String.mk, ``Char, ``optParam, ``autoParam,
-  ``semiOutParam, ``outParam] ++ Walk.standardAxioms ++ #[``sorryAx]
-
 /-- Run the toolchain's exporter on `env` from `roots` into `path`; returns the SHA-256 (hex) of the
 bytes, computed as they are written. -/
 def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
@@ -232,15 +199,14 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
   let (tags, errors) ← match boundaryFile? with
-    | some f => boundaryFileTags env f
+    | some f => boundaryFileTags f
     | none => trustedTags env
   let (declarations, errors') ← expand env tags
   unless (errors ++ errors').isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
   let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations }
   let boundaryText := jsonText boundaryList
-  -- The constants to export: the library's own (non-internal) constants, the boundary list and
-  -- what `lake comparator` needs.
+  -- The constants to export: the library's own (non-internal) constants and the boundary list.
   let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
   for m in mods do
@@ -259,8 +225,6 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     let some n := constName? d.name | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     roots := roots.push n
-  for n in comparatorRoots do
-    if env.contains n then roots := roots.push n
   roots := (dedup roots).qsort (fun a b => a.cmp b == .lt)
   -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"

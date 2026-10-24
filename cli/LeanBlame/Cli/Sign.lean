@@ -89,12 +89,10 @@ def writeRecord (dir : System.FilePath) (r : Record) : IO (String × System.File
 /-- Approve: one record per module, at the claim hashes of the current export. -/
 def approve (root : System.FilePath) (signer? : Option String) (module? : Option String)
     (names : Array String) (note? : Option String) : IO UInt32 := do
-  let cfg ← Config.load root
+  let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
-  let memo : Status.Memo ← IO.mkRef {}
-  let some hashed ← Status.hashed root memo cur.exportHash cur.boundary | unreachable!
-  let ledger := Ledger.build cfg (← loadAllRecords root cfg).1
+  let hashed ← Status.hashed root cur.exportHash cur.boundary
   let boundary := hashed.boundary
   let claimOf : Std.HashMap String String :=
     hashed.declarations.foldl (init := {}) fun m (n, d) => m.insert d.name hashed.nodes[n]!.claim
@@ -112,7 +110,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
       pure <| boundary.declarations.filter (cur.modules.contains ·.module)
   if selected.isEmpty then fail "nothing to sign"
   let modules := dedup (selected.map (·.module))
-  let dir ← recordsDir root cfg
+  let dir ← recordsDir root ledger.cfg
   let date ← Std.Time.Timestamp.nowSeconds
   for m in modules.qsort (· < ·) do
     let constants := (selected.filter (·.module == m)).map (fun d => (d.name, claimOf[d.name]!))
@@ -132,15 +130,13 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
 /-- Withdraw some or all constants of one of your approve records. -/
 def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
     (constants? : Option (Array String)) (note? : Option String) : IO UInt32 := do
-  let cfg ← Config.load root
+  let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let refersTo ← recordId ref
-  let (all, _) ← loadAllRecords root cfg
-  let ledger := Ledger.build cfg all
   let w : WithdrawRecord := { signer, date := ← Std.Time.Timestamp.nowSeconds, refersTo, constants := constants?, note := note? }
   if let .error ps := withdrawCovers ledger.byId w then
     fail s!"cannot withdraw: {"; ".intercalate ps.toList}"
-  let (id, path) ← writeRecord (← recordsDir root cfg) (.withdraw w)
+  let (id, path) ← writeRecord (← recordsDir root ledger.cfg) (.withdraw w)
   IO.println s!"withdraw {id} {path} (refers to {refersTo})"
   return 0
 

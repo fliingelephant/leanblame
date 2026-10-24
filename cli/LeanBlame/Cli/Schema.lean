@@ -187,58 +187,26 @@ inductive Record where
 
 namespace Record
 
-def signer : Record → String
-  | .approve r => r.signer
-  | .withdraw r => r.signer
-
 def date : Record → Std.Time.Timestamp
   | .approve r => r.date
   | .withdraw r => r.date
 
-def note : Record → Option String
-  | .approve r => r.note
-  | .withdraw r => r.note
-
-def action : Record → String
-  | .approve _ => "approve"
-  | .withdraw _ => "withdraw"
-
-private def tomlStr (s : String) : String := Lake.Toml.ppString s
-
-private def tomlKey (k : String) : String := Lake.Toml.ppSimpleKey k
-
-/-- The record as TOML, in the field order of docs/05 and docs/14. -/
-def toToml : Record → String
-  | .approve r =>
-    let deps := ", ".intercalate (r.deps.toList.map fun (k, v) => s!"{tomlKey k} = {tomlStr v}")
-    let deps := if r.deps.isEmpty then "{}" else "{ " ++ deps ++ " }"
-    let lines := [
-      s!"schema = {tomlStr schemaId}",
-      "action = \"approve\"",
-      s!"signer = {tomlStr r.signer}",
-      s!"date = {r.date.toIso}",
-      s!"module = {tomlStr r.module}",
-      s!"commit = {tomlStr r.commit}",
-      s!"toolchain = {tomlStr r.toolchain}",
-      s!"deps = {deps}",
-      s!"export = {tomlStr r.exportHash}",
-      s!"boundary = {tomlStr r.boundary}"] ++
-      (r.evidence.toList.map fun e => s!"evidence = {tomlStr e}") ++
-      (r.note.toList.map fun n => s!"note = {tomlStr n}") ++
-      ["", "[constants]"] ++
-      (r.constants.toList.map fun (k, v) => s!"{tomlStr k} = {tomlStr v}")
-    "\n".intercalate lines ++ "\n"
-  | .withdraw r =>
-    let lines := [
-      s!"schema = {tomlStr schemaId}",
-      "action = \"withdraw\"",
-      s!"signer = {tomlStr r.signer}",
-      s!"date = {r.date.toIso}",
-      s!"refers_to = {tomlStr r.refersTo}"] ++
-      (r.constants.toList.map fun cs =>
-        s!"constants = [{", ".intercalate (cs.toList.map tomlStr)}]") ++
-      (r.note.toList.map fun n => s!"note = {tomlStr n}")
-    "\n".intercalate lines ++ "\n"
+open Lake.Toml (Value ppTable) in
+/-- The record as TOML, printed by Lake: the fields of docs/05 in order, tables last. -/
+def toToml (rec : Record) : String :=
+  let head (action signer : String) (date : Std.Time.Timestamp) : Table :=
+    Table.empty |>.insert `schema schemaId |>.insert `action action |>.insert `signer signer
+      |>.insert `date (Value.dateTime .missing (Lake.Toml.DateTime.ofString? date.toIso).get!)
+  let table (kvs : Array (String × String)) : Table :=
+    kvs.foldl (init := Table.empty) fun t (k, v) => t.insert (.mkSimple k) v
+  ppTable <| match rec with
+  | .approve r => head "approve" r.signer r.date |>.insert `module r.module
+      |>.insert `commit r.commit |>.insert `toolchain r.toolchain |>.insert `deps (table r.deps)
+      |>.insert `export r.exportHash |>.insert `boundary r.boundary
+      |>.insertSome `evidence r.evidence |>.insertSome `note r.note
+      |>.insert `constants (table r.constants)
+  | .withdraw r => head "withdraw" r.signer r.date |>.insert `refers_to r.refersTo
+      |>.insertSome `constants r.constants |>.insertSome `note r.note
 
 /-! Reading records. Strict: unknown keys and keys of the other action are errors. -/
 
@@ -284,12 +252,10 @@ def parse (contents : String) (fileName : String) : IO (Except (Array String) Re
 
 end Record
 
-/-- The axiom report of one theorem: `proven`, `open`, `unchecked` or `n/a`, with the axioms it
-rests on and the export they were computed on. -/
+/-- The axiom report of one theorem: `proven`, `open` or `n/a`, with the axioms it rests on. -/
 structure ProofReport where
   status : String
   axioms : Array String := #[]
-  exportHash : Option String := none
   deriving Inhabited, Repr
 
 /-! ## 3. Release manifest -/
@@ -345,7 +311,6 @@ structure StatusDecl where
   informalSource : String
   claim : String
   state : String
-  flags : Array String
   change : Array Change
   signers : Array String
   history : Array HistoryEntry
@@ -366,7 +331,7 @@ structure StatusReport where
 
 def StatusReport.schemaId : String := "leanblame.status.1"
 
-/-- `claim`, `evidence` and `proof.export` are `null` when absent; `note` is omitted. -/
+/-- `claim` and `evidence` are `null` when absent; `note` is omitted. -/
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj <| ([("record", h.record), ("action", h.action), ("signer", h.signer),
     ("date", h.date.toIso), ("claim", toJson h.claim)] : List (String × Json)) ++
@@ -375,10 +340,9 @@ instance : ToJson HistoryEntry where
 instance : ToJson StatusDecl where
   toJson d := Json.mkObj [("module", d.module), ("kind", d.kind), ("informal", d.informal),
     ("informal_source", d.informalSource), ("claim", d.claim), ("state", d.state),
-    ("flags", toJson d.flags), ("change", toJson d.change), ("signers", toJson d.signers),
+    ("change", toJson d.change), ("signers", toJson d.signers),
     ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
-    ("proof", Json.mkObj [("status", d.proof.status), ("axioms", toJson d.proof.axioms),
-      ("export", toJson d.proof.exportHash)]),
+    ("proof", Json.mkObj [("status", d.proof.status), ("axioms", toJson d.proof.axioms)]),
     ("evidence", toJson d.evidence), ("tagged_deps", toJson d.taggedDeps),
     ("closure_size", d.closureSize)]
 

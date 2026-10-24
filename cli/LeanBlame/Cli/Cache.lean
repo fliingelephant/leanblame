@@ -72,7 +72,6 @@ def load? (root : System.FilePath) (exportHash : String) (b : BoundaryList) :
     let axioms ← (← j.getObjValAs? (Array Json) "axioms").foldlM (init := {}) fun m j => do
       let #[n, axs] ← j.getArr? | throw "malformed axioms"
       return m.insert (← nameFromJson? n) (← (← axs.getArr?).mapM nameFromJson?)
-    return { nodes, tagged := names.foldl (·.insert ·) {}, axioms, boundary := b
-             declarations := names.zip b.declarations }
+    return { nodes, axioms, boundary := b, declarations := names.zip b.declarations }
 
 end LeanBlame.Cache

@@ -11,8 +11,6 @@ structure Config where
   records : Array String := #["records/"]
   /-- Approve records this library refuses to count. Withdrawals cannot be excluded. -/
   exclude : Array String := #[]
-  conventions : Option String := none
-  providers : Array String := #[]
   /-- Distinct live approvals a declaration needs. -/
   requiredSigners : Nat := 1
   /-- `none`: any signer. -/
@@ -28,15 +26,12 @@ records = [\"records/\"]   # records repositories (local directories)
 exclude = []              # approve records this library refuses to count
 required_signers = 1      # distinct live approvals a declaration needs
 allowed_signers = \"any\"   # or a list of provider:id
-# conventions = \"MyLib.Conventions\"
-# providers = [\"openreview\", \"orcid\", \"github\"]
 "
 
 open Lake.Toml (DecodeM Table logDecodeErrorAt) in
 /-- Decode a parsed `leanblame.toml`, logging every problem. -/
 def Config.decode (t : Table) : DecodeM Config := do
-  checkKeys t #["records", "exclude", "conventions", "providers", "required_signers",
-    "allowed_signers"] Config.fileName
+  checkKeys t #["records", "exclude", "required_signers", "allowed_signers"] Config.fileName
   let d : Config := {}
   let exclude : Array String ← t.tryDecodeD `exclude d.exclude
   for x in exclude do
@@ -55,7 +50,6 @@ def Config.decode (t : Table) : DecodeM Config := do
         unless isSignerId id do logDecodeErrorAt v.ref s!"`allowed_signers`: `{id}` is not provider:id"
       pure (some ids)
   return { records := ← t.tryDecodeD `records d.records, exclude
-           conventions := ← t.tryDecode? `conventions, providers := ← t.tryDecodeD `providers d.providers
            requiredSigners, allowedSigners }
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/

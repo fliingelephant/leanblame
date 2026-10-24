@@ -1,23 +1,20 @@
 /-
-`leanblame status [--base RECORD] [--json]` and `leanblame blame NAME`
+`leanblame status [--json]` and `leanblame blame NAME`
 (docs/03-trust-model.md "Validity", docs/06-versioning.md, docs/14-schemas.md §4).
 
 Per tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve
   records carrying X's current claim hash; else `outdated` if live records for X
   exist; else `unsigned`;
-* flags: `equiv-proven` if X is not valid and `equiv` proved its current claim means what its last
-  live approval meant (an evidence file, which also fills `evidence`); `withdrawn` if a counting
-  withdraw ever covered X;
 * change: for a declaration that is not valid, the causes of the move since the
   last live approval, found by hashing the export and boundary list that record
-  names (from the object store) and comparing hash parts; with `--base R`, the
-  causes since approve record R (the export and boundary list it names), for
-  every declaration whose claim differs from R's;
+  names (from the object store) and comparing hash parts;
+* evidence: the `equiv` proof that X's current claim means what its last live
+  approval meant, if `equiv` wrote one;
 * blocked_by: tagged dependencies, followed transitively, that are not valid;
 * proof: for a theorem, the axioms it rests on (computed by `export`): `proven` when each is
   standard or a tagged `axiom` that is valid, `open` otherwise (`sorryAx`, or an axiom that is
-  neither, which also gets a warning); `unchecked` without axiom data; `n/a` for the rest.
+  neither, which also gets a warning); `n/a` for the rest.
 -/
 import LeanBlame.Cli.Cache
 import LeanBlame.Cli.Records
@@ -36,26 +33,24 @@ def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.Export
   unless ← p.pathExists do fail s!"export {hash} is not in the store"
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk p .read))
 
-/-- Hashed exports of this run, by (export, boundary list). `none` remembers a failure, reported
-by whoever saw it happen. -/
-abbrev Memo := IO.Ref (Std.HashMap (String × String) (Option Walk.Hashed))
-
 /-- Export `exportHash` hashed against boundary list `boundary`, from the local cache or else from
-the object store; throws if that fails, and is `none` if it failed before. -/
-def hashed (root : System.FilePath) (memo : Memo) (exportHash boundary : String) :
-    IO (Option Walk.Hashed) := do
-  if let some h? := (← memo.get)[(exportHash, boundary)]? then return h?
-  memo.modify (·.insert (exportHash, boundary) none)
+the object store (and then cached). -/
+def hashed (root : System.FilePath) (exportHash boundary : String) : IO Walk.Hashed := do
   let b ← loadBoundary root boundary
-  let h ← match ← Cache.load? root exportHash b with
-    | some h => pure h
-    | none =>
-      let h ← try Walk.hashExport (← loadExported root exportHash) b
-        catch e => fail s!"cannot hash export {exportHash}: {e}"
-      Cache.save root exportHash h
-      pure h
-  memo.modify (·.insert (exportHash, boundary) (some h))
-  return some h
+  if let some h ← Cache.load? root exportHash b then return h
+  let h ← try Walk.hashExport (← loadExported root exportHash) b
+    catch e => fail s!"cannot hash export {exportHash}: {e}"
+  Cache.save root exportHash h
+  return h
+
+/-- Whether the toolchain's `leanchecker` replays the export file `path` without error: the
+kernel check `release` and `equiv` run on what they store. -/
+def kernelAccepts (path : System.FilePath) : IO Bool := do
+  unless ← path.pathExists do fail s!"{path} is not in the store"
+  let leanchecker := (← findSysroot) / "bin" / "leanchecker" |>.addExtension System.FilePath.exeExtension
+  let child ← IO.Process.spawn { cmd := leanchecker.toString, stdin := .null, stdout := .null
+                                 args := #["--silent", "--from-export", path.toString] }
+  return (← child.wait) == 0
 
 /-- The approve records listing `name` and the counting withdraws covering it, in (date, id)
 order. -/
@@ -64,9 +59,10 @@ def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
     | .approve r a claim =>
       { record := r.hash, action := "approve", signer := a.signer, date := a.date, claim
         note := a.note }
-    | .withdraw { loaded := r, withdraw := w, .. } =>
-      let claim := (ledger.approves[w.refersTo]?).bind fun (_, a) =>
-        (a.constants.find? (·.1 == name)).map (·.2)
+    | .withdraw r w =>
+      let claim := match ((ledger.byId[w.refersTo]?).map (·.record) : Option Record) with
+        | some (.approve a) => (a.constants.find? (·.1 == name)).map (·.2)
+        | _ => none
       { record := r.hash, action := "withdraw", signer := w.signer, date := w.date, claim
         note := w.note }
 
@@ -81,6 +77,9 @@ def evidenceFor (root : System.FilePath) (ledger : Ledger) (name claim : String)
 
 /-- Everything `status` computes. -/
 structure Result where
+  /-- The last `export`, hashed. -/
+  cur : Store.Current
+  new : Walk.Hashed
   report : StatusReport
   /-- Untagged declarations of this library used by tagged ones (docs/03), and theorems resting on
   axioms that are not permitted. -/
@@ -116,22 +115,13 @@ def untaggedWarnings (h : Walk.Hashed) (closures : Std.HashMap Name (Array Name 
 
 /-- The status report; `causes := false` leaves every `change` empty and hashes no other export, and
 `warn := false` skips the untagged-dependency warnings. -/
-def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : Option String)
-    (causes := true) (warn := true) (memo? : Option Memo := none) : IO Result := do
+def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn := true) :
+    IO Result := do
   let cur ← Store.readCurrent root
-  let memo ← memo?.getDM (IO.mkRef {})
-  let some new ← hashed root memo cur.exportHash cur.boundary | unreachable!
-  -- `--base`: the export and boundary list an approve record names.
-  let base ← match base? with
-    | some ref =>
-      let id ← recordId ref
-      let a ← match (ledger.byId[id]?.map (·.record) : Option Record) with
-        | some (.approve a) => pure a
-        | some (.withdraw _) => fail s!"{id} is a withdraw record; --base takes an approve record"
-        | none => fail s!"{id}: no such record (--base takes the id or file of an approve record)"
-      hashed root memo a.exportHash a.boundary
-    | none => pure none
-  -- Pass 1: state, flags, change, signers, history.
+  let new ← hashed root cur.exportHash cur.boundary
+  -- Exports of last live approvals, hashed; `none` remembers a failure, warned about once.
+  let mut olds : Std.HashMap (String × String) (Option Walk.Hashed) := {}
+  -- Pass 1: state, change, signers, history.
   let mut states : Std.HashMap Name String := {}
   let mut validRecords : Array String := #[]
   let mut entries : Array (Name × BoundaryDecl × StatusDecl) := #[]
@@ -145,33 +135,28 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
     let signers := (dedup (matching.map fun (_, a, _) => a.signer)).qsort (· < ·)
     validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
-      if signers.size ≥ cfg.requiredSigners then "valid"
+      if signers.size ≥ ledger.cfg.requiredSigners then "valid"
       else if live.isEmpty then "unsigned" else "outdated"
     let evidence ← evidenceFor root ledger d.name claim
-    let flags := (if state != "valid" && evidence.isSome then #["equiv-proven"] else #[]) ++
-      (if (ledger.withdrawalsOf d.name).isEmpty then #[] else #["withdrawn"])
     let closure := Walk.closureOf new n
-    -- Causes: against --base, or against the export of the last live approval.
+    -- Causes: against the export of the last live approval (the ledger is in (date, id) order).
     let mut change : Array Change := #[]
-    match base with
-    | some old =>
-      if (old.nodes[n]?.map (·.claim)) != some claim then change := Walk.changes old new n closure
-    | none =>
-      -- The last live approval: the ledger's records are in (date, id) order.
-      if let some (lastRec, last, lastClaim) := live.back? then
-        if causes && state != "valid" && lastClaim != claim then
-          -- A record from elsewhere may name objects this store lacks, or that do not hash.
-          try
-            if let some old ← hashed root memo last.exportHash last.boundary then
-              change := Walk.changes old new n closure
-          catch e =>
+    if let some (lastRec, last, lastClaim) := live.back? then
+      if causes && state != "valid" && lastClaim != claim then
+        -- A record from elsewhere may name objects this store lacks, or that do not hash.
+        let key := (last.exportHash, last.boundary)
+        unless olds.contains key do
+          let old? ← try some <$> hashed root last.exportHash last.boundary catch e => do
             IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
+            pure none
+          olds := olds.insert key old?
+        if let some (some old) := olds[key]? then change := Walk.changes old new n closure
     let (cut, untagged) := closure
     closures := closures.insert n closure
     states := states.insert n state
     entries := entries.push (n, d, {
       module := d.module, kind := d.kind, informal := d.informal, informalSource := d.informalSource
-      claim, state, flags, change, signers, history := historyOf ledger d.name
+      claim, state, change, signers, history := historyOf ledger d.name
       blockedBy := #[]
       proof := { status := "n/a" }
       evidence
@@ -180,21 +165,19 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
       closureSize := 1 + cut.size + untagged.size })
   -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
   let cutOf (n : Name) : Array Name := (closures[n]?.map (·.1)).getD #[]
-  let signed (a : Name) : Bool := new.isTagged a && states[a]? == some "valid" &&
-    (new.nodes[a]?.map (·.fields.kind)) == some "axiom"
+  let signed (a : Name) : Bool := states[a]? == some "valid" &&
+    match new.nodes[a]? with | some nd => nd.fields.kind == "axiom" | none => false
   let mut decls := #[]
   let mut warnings := #[]
   let mut unpermitted := #[]
   for (n, d, sd) in entries do
-    let proof : ProofReport ← if d.kind != "theorem" then pure sd.proof else
-      match new.axioms[n]? with
-      | none => pure { status := "unchecked" }
-      | some axioms =>
-        let (status, bad) := classifyAxioms axioms signed
-        for a in bad do
-          warnings := warnings.push s!"warning: theorem {n} rests on axiom {a}, which is neither standard nor tagged and signed"
-          unpermitted := unpermitted.push (n, a)
-        pure { status, axioms := axioms.map toString, exportHash := cur.exportHash }
+    let proof : ProofReport ← if d.kind != "theorem" then pure sd.proof else do
+      let some axioms := new.axioms[n]? | fail s!"internal: no axiom data for {n}"
+      let (status, bad) := classifyAxioms axioms signed
+      for a in bad do
+        warnings := warnings.push s!"warning: theorem {n} rests on axiom {a}, which is neither standard nor tagged and signed"
+        unpermitted := unpermitted.push (n, a)
+      pure { status, axioms := axioms.map toString }
     let mut seen : Std.HashSet Name := {}
     let mut blocked : Array Name := #[]
     let mut stack := cutOf n
@@ -213,25 +196,22 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
   let untagged ← if !warn then pure #[] else do
     let owned : Std.HashSet String := (strLines (← Store.readString root cur.owned)).foldl (·.insert ·) {}
     pure (untaggedWarnings new closures cur.modules owned)
-  return { report, warnings := untagged ++ warnings
+  return { cur, new, report, warnings := untagged ++ warnings
            validRecords := (dedup validRecords).qsort (· < ·), unpermitted }
 
-/-- One line per declaration: `NAME STATE [flags=..] [blocked-by=..] [change=cause:names;..]`. -/
+/-- One line per declaration: `NAME STATE [evidence=..] [blocked-by=..] [change=cause:names;..]`;
+the evidence is shown while there is something to sign. -/
 def textLine (name : String) (d : StatusDecl) : String :=
   let parts := #[name, d.state] ++
-    (if d.flags.isEmpty then #[] else #[s!"flags={",".intercalate d.flags.toList}"]) ++
+    (if d.state == "valid" then #[] else (d.evidence.toList.map fun e => s!"evidence={e}").toArray) ++
     (if d.blockedBy.isEmpty then #[] else #[s!"blocked-by={",".intercalate d.blockedBy.toList}"]) ++
     (if d.change.isEmpty then #[] else
       #["change=" ++ ";".intercalate (d.change.toList.map fun c =>
         c.cause ++ ":" ++ ",".intercalate c.names.toList)])
   " ".intercalate parts.toList
 
-def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt32 := do
-  let cfg ← Config.load root
-  let (all, bad) ← loadAllRecords root cfg
-  for (p, _) in bad do
-    IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
-  let r ← compute root cfg (Ledger.build cfg all) base?
+def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
+  let r ← compute root (← Ledger.load root)
   for w in r.warnings do IO.eprintln w
   let text := jsonText r.report
   -- Every run leaves a log in the object store.
@@ -249,11 +229,9 @@ def run (root : System.FilePath) (base? : Option String) (json : Bool) : IO UInt
 
 /-- `blame NAME`: who signed it, when, at which claim hash. -/
 def blame (root : System.FilePath) (name : String) : IO UInt32 := do
-  let cfg ← Config.load root
-  let (all, _) ← loadAllRecords root cfg
-  let ledger := Ledger.build cfg all
+  let ledger ← Ledger.load root
   let current? ← if (← (Store.currentPath root).pathExists) then
-      some <$> compute root cfg ledger none (causes := false) (warn := false)
+      some <$> compute root ledger (causes := false) (warn := false)
     else pure none
   let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let history := historyOf ledger name
@@ -272,7 +250,7 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
     let live := match h.action with
       | "approve" =>
         let withdrawn := ledger.withdrawn.contains (h.record, name)
-        if withdrawn then " withdrawn" else if cfg.allows h.signer then " live" else " signer-not-allowed"
+        if withdrawn then " withdrawn" else if ledger.cfg.allows h.signer then " live" else " signer-not-allowed"
       | _ => ""
     IO.println s!"  {h.date.toIso}  {h.action}  {h.signer}  claim {h.claim.getD "-"}{current}  record {h.record}{live}"
     if let some note := h.note then IO.println s!"      note: {note}"

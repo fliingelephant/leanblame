@@ -12,10 +12,10 @@ as the only cause (the named ones, else all), compared with X's last live approv
    call decides whether old and new are definitionally equal:
    `theorem LeanBlame.Equiv.C : Old.C = C := Eq.refl C`, or for a theorem X
    `<old statement> ↔ <new statement>`, proved by the identity both ways.
-3. `lake comparator` judges the accepted theorems: the solution export carries them, the challenge
-   export the same statements proved by `sorryAx`.
+3. The accepted theorems, with what they use, go to the object store as the solution export, which
+   `leanchecker` replays (the kernel check `release` runs): a file anyone can check again.
 4. For each X whose own theorem was accepted, an evidence file (`Store.evidencePath`) names the
-   solution export: `status` flags X `equiv-proven`, `sign` puts the hash in the record.
+   solution export: `status` shows it as X's `evidence`, `sign` puts the hash in the record.
 What is left is for a human to read: equiv prints the root causes, with the old and new values of
 each changed definition that is not definitionally equal.
 -/
@@ -102,18 +102,13 @@ structure Target where
   record : String
   claim : String
 
-/-- Whether `lake comparator` can sandbox here: Linux, with `bwrap` on PATH. -/
-def canSandbox : IO Bool := do
-  unless System.Platform.isLinux do return false
-  ((← IO.getEnv "PATH").getD "").splitOn ":" |>.anyM fun d => (System.FilePath.mk d / "bwrap").pathExists
-
 /--
 Prove the targets that share one old export and boundary list (`old`, `oldExp`); returns those
-proven, with the hashes of the challenge and solution exports.
+proven, with the hash of the solution export.
 -/
 def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : Walk.Hashed)
     (newExp oldExp : LeanExport.ExportedEnv) (targets : Array Target) :
-    IO (Array Target × String × String) := do
+    IO (Array Target × String) := do
   let oldCi (c : Name) := oldExp.constMap[c]?
   let isTarget (c : Name) := targets.any (·.name == c)
   -- What an old meaning uses: of a target theorem only its statement.
@@ -152,9 +147,8 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
   -- the failures at or below it that its goal may rest on.
   let mut env := base
   let mut broken : NameSet := {}
-  let mut rebuiltNames : NameSet := {}
   let mut taint : Std.HashMap Name (Array Name) := {}
-  let mut proved : Array (Name × List Name × Expr) := #[]
+  let mut proved : Array Name := #[]
   for comp in Walk.tarjan (dup.toArray ++ targets.map (·.name)) succ do
     let deps := (comp.flatMap succ).filter (!comp.contains ·)
     let below := dedup (deps.flatMap (taint.getD · #[]))
@@ -162,7 +156,6 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
     let rebuilt ← if deps.any broken.contains then pure false else
       try
         env ← Load.addConstants env consts names true
-        rebuiltNames := names.foldl (·.insert ·) rebuiltNames
         pure true
       catch e =>
         IO.eprintln s!"cannot rebuild {e}; a human reads"
@@ -185,7 +178,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
           match ← addChecked env decl with
           | .ok env' =>
             env := env'
-            proved := proved.push (thmName c, n.levelParams, stmt)
+            proved := proved.push (thmName c)
             taint := taint.insert c #[]
           | .error msg =>
             let why ← if oldNode.own != newNode.own then
@@ -194,54 +187,26 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
             taint := taint.insert c (← report why)
       -- Used only in proofs, or gone: nothing to state.
       | _, _, _, _ => taint := taint.insert c below
-  let proven := targets.filter fun t => proved.any (·.1 == thmName t.name)
+  let proven := targets.filter fun t => proved.contains (thmName t.name)
   for t in targets do
     let causes := (taint.getD t.name #[]).filter (· != t.name)
     unless proven.any (·.name == t.name) || causes.isEmpty do
       IO.eprintln s!"{t.name}: not proven, because of {", ".intercalate (causes.toList.map toString)}; a human reads"
-  if proven.isEmpty then return (#[], "", "")
-  -- The challenge states the accepted theorems with `sorryAx` as proofs.
-  unless newExp.constMap.contains ``sorryAx do
-    fail "the current export lacks what `lake comparator` needs; run `leanblame export` again"
-  let mut challenge ← Load.addConstants base consts rebuiltNames false
-  for (name, levelParams, type) in proved do
-    let value := mkApp2 (.const ``sorryAx [.zero]) type (.const ``Bool.false [])
-    match challenge.addDeclWithoutChecking (.thmDecl { name, levelParams, type, value }) with
-    | .ok e => challenge := e
-    | .error ex => fail s!"{name}: {← (ex.toMessageData {}).toString}"
-  let roots := proved.map (·.1) ++ Export.comparatorRoots.filter newExp.constMap.contains
-  let put (env : Kernel.Environment) (tag : String) : IO String := do
-    let tmp ← Store.tmpPath root tag
-    Store.putFile root tmp (← Export.dumpToFile (.ofKernelEnv env) roots tmp)
-  let solution ← put env "solution"
-  let challengeHash ← put challenge "challenge"
-  -- The generated proofs use no axiom: the statements' own axioms are permitted.
-  let axioms := (Walk.axiomsOf env.find? (proved.map (·.1))).fold
-    (init := Walk.standardAxioms) fun acc _ as => acc ++ as
-  let config := Json.mkObj [
-    ("challenge_module", "Challenge"), ("solution_module", "Solution"),
-    ("theorem_names", toJson (proved.map (·.1.toString))),
-    ("permitted_axioms", toJson ((dedup axioms).map toString))]
-  let configHash ← Store.putString root (jsonText config)
-  let sandbox ← canSandbox
-  unless sandbox do
-    IO.eprintln "warning: no bwrap sandbox here: lake comparator runs with --inadvisably-no-sandbox (nothing is built; it reads two exports equiv wrote)"
-  let path (h : String) := (Store.objectPath root h).toString
-  runToStderr "lake" (#["comparator", "--config", path configHash, "--challenge-from-export",
-      path challengeHash, "--solution-from-export", path solution] ++
-      (if sandbox then #[] else #["--inadvisably-no-sandbox"])) root "`lake comparator`"
-  return (proven, challengeHash, solution)
+  if proven.isEmpty then return (#[], "")
+  -- The solution export: the accepted theorems and what they use, replayed by `leanchecker`.
+  let tmp ← Store.tmpPath root "solution"
+  let solution ← Store.putFile root tmp (← Export.dumpToFile (.ofKernelEnv env) proved tmp)
+  unless ← Status.kernelAccepts (Store.objectPath root solution) do
+    fail s!"leanchecker rejected the solution export {solution}"
+  return (proven, solution)
 
 def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
-  let cfg ← Config.load root
-  let (all, _) ← loadAllRecords root cfg
-  let ledger := Ledger.build cfg all
-  let memo : Status.Memo ← IO.mkRef {}
-  let decls := (← Status.compute root cfg ledger none (warn := false) (memo? := some memo)).report.declarations
+  let ledger ← Ledger.load root
+  let r ← Status.compute root ledger (warn := false)
+  let decls := r.report.declarations
   for n in names do
     unless decls.any (·.1 == n) do fail s!"{n} is not on the boundary list"
-  let cur ← Store.readCurrent root
-  let some new ← Status.hashed root memo cur.exportHash cur.boundary | unreachable!
+  let new := r.new
   let nameOf : Std.HashMap String Name := new.declarations.foldl (init := {}) fun m (x, _) => m.insert x.toString x
   -- Eligible: outdated, and `untagged` the only cause.
   let mut targets : Array (Target × ApproveRecord) := #[]
@@ -258,21 +223,21 @@ def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
   if targets.isEmpty then
     if left == 0 then IO.println "equiv: no outdated declaration whose only cause is untagged"
     return if left == 0 then 0 else 1
-  let newExp ← Status.loadExported root cur.exportHash
+  let newExp ← Status.loadExported root r.cur.exportHash
   let base := (← Load.environmentOfExport newExp).toKernelEnv
   -- One group per old export and boundary list.
   let groups := dedup (targets.map fun (_, a) => (a.exportHash, a.boundary))
   let mut proven := 0
   for (e, b) in groups do
-    let some old ← Status.hashed root memo e b | unreachable!
+    let old ← Status.hashed root e b
     let group := (targets.filter fun (_, a) => a.exportHash == e && a.boundary == b).map (·.1)
-    let (ok, challenge, solution) ← proveGroup root base (new := new) (newExp := newExp) (old := old)
+    let (ok, solution) ← proveGroup root base (new := new) (newExp := newExp) (old := old)
       (oldExp := ← Status.loadExported root e) group
     for t in ok do
-      let evidence := Json.mkObj [("name", t.name.toString), ("claim", t.claim), ("old_record", t.record),
-        ("evidence", solution), ("challenge", challenge), ("solution", solution)]
+      let evidence := Json.mkObj [("name", t.name.toString), ("claim", t.claim),
+        ("old_record", t.record), ("evidence", solution)]
       writeFileMkdirs (Store.evidencePath root t.name.toString t.claim) (jsonText evidence)
-      IO.println s!"{t.name} equiv-proven {solution}"
+      IO.println s!"{t.name} proven {solution}"
     proven := proven + ok.size
     left := left + group.size - ok.size
   IO.println s!"equiv: {proven} proven, {left} left to a human"

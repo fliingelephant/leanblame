@@ -95,25 +95,18 @@ def withdrawCovers (byId : Std.HashMap String LoadedRecord) (w : WithdrawRecord)
   unless problems.isEmpty do throw problems
   return w.constants.getD names
 
-/-- A withdraw that counts, with the constants it covers. -/
-structure CountingWithdraw where
-  loaded : LoadedRecord
-  withdraw : WithdrawRecord
-  constants : Array String
-
 /-- A record in the history of one constant. -/
 inductive Ledger.Entry where
   /-- An approve record listing the constant, with the claim hash it carries for it. -/
   | approve (r : LoadedRecord) (a : ApproveRecord) (claim : String)
   /-- A counting withdraw covering the constant. -/
-  | withdraw (w : CountingWithdraw)
+  | withdraw (r : LoadedRecord) (w : WithdrawRecord)
 
 /-- Records after `exclude`, with withdrawals resolved. -/
 structure Ledger where
   cfg : Config
   /-- Every record loaded, excluded or not, by id. -/
   byId : Std.HashMap String LoadedRecord
-  approves : Std.HashMap String (LoadedRecord × ApproveRecord)
   /-- (approve record id, constant) pairs that a counting withdraw covers. -/
   withdrawn : Std.HashSet (String × String)
   /-- Per constant: the approve records listing it and the counting withdraws covering it, in
@@ -127,7 +120,6 @@ def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
   let all := all.qsort fun a b =>
     ((compare a.record.date b.record.date).then (compare a.hash b.hash)) == .lt
   let byId : Std.HashMap String LoadedRecord := all.foldl (fun m r => m.insert r.hash r) {}
-  let mut approves := {}
   let mut withdrawn := {}
   let mut entries : Std.HashMap String (Array Entry) := {}
   let mut problems := #[]
@@ -135,31 +127,34 @@ def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
     match r.record with
     | .approve a =>
       if cfg.exclude.contains r.hash then continue
-      approves := approves.insert r.hash (r, a)
       for (c, claim) in a.constants do
         entries := entries.alter c fun es => (es.getD #[]).push (.approve r a claim)
     | .withdraw w =>
       match withdrawCovers byId w with
       | .error ps => problems := problems.push (r, ps)
       | .ok covered =>
-        let cw : CountingWithdraw := { loaded := r, withdraw := w, constants := covered }
         for c in covered do
           withdrawn := withdrawn.insert (w.refersTo, c)
-          entries := entries.alter c fun es => (es.getD #[]).push (.withdraw cw)
-  return { cfg, byId, approves, withdrawn, entries, problems }
+          entries := entries.alter c fun es => (es.getD #[]).push (.withdraw r w)
+  return { cfg, byId, withdrawn, entries, problems }
+
+/-- `leanblame.toml` and its records, warning about every entry of a records directory that is not
+a record. -/
+def Ledger.load (root : System.FilePath) : IO Ledger := do
+  let cfg ← Config.load root
+  let (all, bad) ← loadAllRecords root cfg
+  for (p, _) in bad do
+    IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
+  return Ledger.build cfg all
 
 def Ledger.entriesOf (l : Ledger) (name : String) : Array Ledger.Entry :=
   l.entries.getD name #[]
 
 /-- Approve records listing `name`, with the claim hash they carry for it. -/
 def Ledger.approvalsOf (l : Ledger) (name : String) : Array (LoadedRecord × ApproveRecord × String) :=
-  (l.entriesOf name).filterMap fun | .approve r a claim => some (r, a, claim) | .withdraw _ => none
+  (l.entriesOf name).filterMap fun | .approve r a claim => some (r, a, claim) | .withdraw .. => none
 
 def Ledger.isLive (l : Ledger) (recordHash : String) (signer : String) (name : String) : Bool :=
   l.cfg.allows signer && !l.withdrawn.contains (recordHash, name)
-
-/-- Counting withdraws that cover `name`. -/
-def Ledger.withdrawalsOf (l : Ledger) (name : String) : Array CountingWithdraw :=
-  (l.entriesOf name).filterMap fun | .withdraw w => some w | .approve .. => none
 
 end LeanBlame
