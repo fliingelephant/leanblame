@@ -20,6 +20,8 @@ ok() { pass=$((pass + 1)); echo "  ok: $*"; }
 echo "== build leanblame"
 (cd "$cli" && lake build) >/dev/null
 lb="$cli/.lake/build/bin/leanblame"
+(cd "$cli" && lake env lean --run test/Canon.lean) || fail "canonical printing (test/Canon.lean)"
+ok "canonical printing is linear in the term as a graph"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/leanblame-test.XXXXXX")"
 cp -R "$here/Sample/Sample" "$here/Sample/Sample.lean" "$here/Sample/lean-toolchain" "$work/"

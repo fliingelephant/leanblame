@@ -5,13 +5,17 @@ precisely"), and the per-constant hashes built from it.
 Terms are printed from the parsed export with de Bruijn indices, constants by
 name (never by export index), universe parameters by position. Binder names,
 binder info (implicitness) and metadata are not printed. An erased proof
-prints as one marker. The encoding is prefix-free:
+prints as one marker. A compound subterm is printed in full once; where it
+occurs again it prints as a reference to that first occurrence, so a term
+prints in time linear in its size as a graph, not as a tree. The encoding is
+prefix-free:
 
   name     n <component>* .     component: s<len>:<utf8>  |  i<number>;
   level    0 | S l | M l l | I l l | P<position>;
   expr     b<index>; | s level | c name <count>; level* | a f x | l type body
            | p type body | z type value body | N<number>; | T<len>:<utf8>
            | j name <index>; expr | e (erased proof)
+           | r<index>; (the compound subterm printed in full as the index-th one)
 
 Hashes are SHA-256 over fields encoded as `<len>:<bytes>`, each list prefixed
 with a domain tag.
@@ -46,24 +50,36 @@ partial def level (ups : List Name) (acc : String) : Level → String
     | none => name (acc ++ "Q") p
   | .mvar _ => acc ++ "?"
 
-partial def expr (ups : List Name) (acc : String) : Expr → String
-  | .bvar i => acc ++ "b" ++ toString i ++ ";"
-  | .sort l => level ups (acc ++ "s") l
-  | .const c us => us.foldl (level ups) (name (acc ++ "c") c ++ toString us.length ++ ";")
-  | .app f a => expr ups (expr ups (acc ++ "a") f) a
-  | .lam _ d b _ => expr ups (expr ups (acc ++ "l") d) b
-  | .forallE _ d b _ => expr ups (expr ups (acc ++ "p") d) b
-  | .letE _ t v b _ => expr ups (expr ups (expr ups (acc ++ "z") t) v) b
-  | .lit (.natVal n) => acc ++ "N" ++ toString n ++ ";"
-  | .lit (.strVal s) => netstr (acc ++ "T") s
+/-- The compound subterms printed in full so far, numbered in order of first occurrence. -/
+abbrev PrintM := StateM (Std.HashMap Expr Nat)
+
+partial def expr (ups : List Name) (acc : String) (e : Expr) : PrintM String := do
+  match e with
+  | .bvar i => return acc ++ "b" ++ toString i ++ ";"
+  | .sort l => return level ups (acc ++ "s") l
+  | .const c us => return us.foldl (level ups) (name (acc ++ "c") c ++ toString us.length ++ ";")
+  | .lit (.natVal n) => return acc ++ "N" ++ toString n ++ ";"
+  | .lit (.strVal s) => return netstr (acc ++ "T") s
   | .mdata _ e => expr ups acc e
-  | .proj s i e => expr ups (name (acc ++ "j") s ++ toString i ++ ";") e
-  | e@(.mvar _) => if Erase.isProofMarker e then acc ++ "e" else acc ++ "?"
-  | .fvar _ => acc ++ "?"
+  | .mvar _ => return if Erase.isProofMarker e then acc ++ "e" else acc ++ "?"
+  | .fvar _ => return acc ++ "?"
+  | _ =>
+    if let some i := (← get)[e]? then return acc ++ "r" ++ toString i ++ ";"
+    modify fun seen => seen.insert e seen.size
+    match e with
+    | .app f a => expr ups (← expr ups (acc ++ "a") f) a
+    | .lam _ d b _ => expr ups (← expr ups (acc ++ "l") d) b
+    | .forallE _ d b _ => expr ups (← expr ups (acc ++ "p") d) b
+    | .letE _ t v b _ => expr ups (← expr ups (← expr ups (acc ++ "z") t) v) b
+    | .proj s i e => expr ups (name (acc ++ "j") s ++ toString i ++ ";") e
+    | _ => unreachable!
+
+/-- The canonical printing of a closed term. -/
+def print (ups : List Name) (e : Expr) : String := (expr ups "" e).run' {}
 
 /-- Hex SHA-256 of the canonical printing of a term. -/
 def exprHash (ups : List Name) (e : Expr) : String :=
-  Sha256.hexOfString (expr ups "" e)
+  Sha256.hexOfString (print ups e)
 
 /-- SHA-256 over a domain tag and a list of fields, each as `<len>:<bytes>`. -/
 def hashFields (tag : String) (fields : List String) : String :=

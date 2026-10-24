@@ -126,8 +126,10 @@ claim(c) = H(own(c), sorted over direct dependencies d of c:
 ```
 
 Terms are printed canonically from the parsed export with de Bruijn indices;
-constants by name, never by export index; universe parameters by position.
-Dependencies of a theorem are those of its type only.
+constants by name, never by export index; universe parameters by position. A
+repeated subterm is printed once and referred to afterwards, so printing is
+linear in the size of the term as a graph (a term can be exponentially larger
+as a tree). Dependencies of a theorem are those of its type only.
 
 Cycles: an inductive type and its constructors reference each other, and
 mutual definitions do too. Such a group is hashed as one unit; each member's
