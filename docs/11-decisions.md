@@ -40,9 +40,9 @@ resource.
 
 ### Agents inform, never decide
 
-`equiv` marks a declaration equiv-proven. The reviewer clicks. Any other agent
-check (vacuity, triviality, back-translation) may be shown as information,
-never as a decision. Infrastructure for the signer is therefore plain: good
+The kernel's answer from `equiv` is shown as evidence. The reviewer clicks.
+Any agent check (vacuity, triviality, back-translation) may be shown as
+information, never as a decision. Infrastructure for the signer is therefore plain: good
 pretty-printing, hover to unfold, signer of each dependency, informal text next
 to Lean.
 
@@ -106,10 +106,12 @@ TOML for records and config, JSON for machine output. Eight commands: `init`,
 
 ### No forks
 
-Copy one Apache-2.0 file (comparator's closure walk) and lean-eval's attribute
-code. Use `leanexport`, `lake check`, `lake comparator`, doc-gen4 as is.
-Rejected: forking the archived comparator (it lacks `--from-export`),
-comparator-live (no role in the data flow), verso-blueprint (see above).
+Copy one Apache-2.0 file (comparator's closure walk). Use `leanexport`,
+`leanchecker`, Lake's TOML reader, doc-gen4 as is. Rejected: forking the
+archived comparator (it lacks `--from-export`), running `lake comparator` on
+`equiv`'s proofs (the kernel has already checked them in-process; `leanchecker`
+replays the stored export), comparator-live (no role in the data flow),
+verso-blueprint (see above).
 
 ### Lean CLI, TypeScript web
 

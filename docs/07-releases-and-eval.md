@@ -29,8 +29,8 @@ informal text, which its signer signed.
 
 Manifest fields in [14-schemas.md](14-schemas.md). The axiom report is bound
 to the export hash it was computed on; `export` computes it, `release` replays
-the kernel. `status` shows it per theorem, `unchecked` for an export without
-one, and warns about an axiom that is neither standard nor tagged and signed.
+the kernel. `status` shows it per theorem and warns about an axiom that is
+neither standard nor tagged and signed.
 
 **Patch releases**: fixes to existing declarations, dependency bumps whose
 changes were re-approved. A withdrawal makes a release impossible until the

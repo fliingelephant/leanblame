@@ -19,8 +19,8 @@ Per tagged declaration X:
 
 - **Hash matches a live record:** valid.
 - **Hash differs:** outdated, with causes (`own-text`, `own-body`,
-  `dep-spec`, `cut-moved`, `untagged`; see [03-trust-model.md](03-trust-model.md)).
-  `status --base R` names the constants that changed under X since approve record R.
+  `dep-spec`, `cut-moved`, `untagged`; see [03-trust-model.md](03-trust-model.md)),
+  each naming the constants that changed under X since its last live approval.
 - **A tagged dependency is not valid:** blocked by it.
 
 Every `status` run writes a log to the object store, so a wrong "still valid"
@@ -51,22 +51,19 @@ needs a human to read.
    change, each changed definition C gets `Old.C = C`, and the kernel is asked
    whether the two are definitionally equal: one kernel call per changed
    definition. Everything above follows by congruence; X's own goal is one more
-   call. `lake comparator` checks the accepted proofs. The proof goes to the
-   object store. Not definitionally equal: a human reads, shown the old and
-   new definitions.
-5. X gets the `equiv-proven` flag. The reviewer approves the new hash with one
-   click; the record carries the proof hash as `evidence`.
+   call. The accepted proofs go to the object store as an export, which
+   `leanchecker` replays. Not definitionally equal: a human reads, shown the
+   old and new definitions.
+5. `status` shows the proof as X's `evidence`. The reviewer approves the new
+   hash with one click; the record carries the proof hash as `evidence`.
 
 Mechanism: `equiv` reads the old and the new export. It adds the duplicated
 constants to the new export's environment, the kernel checking each, then the
-goals with their proofs (`Eq.refl`; for `↔`, the identity both ways). From
-there it writes a solution export, and a challenge export with the same
-statements proved by `sorry`, and runs `lake comparator
---challenge-from-export --solution-from-export` on the two. Nothing is built or
-elaborated and no `.olean` is written; without `bwrap`, comparator runs with
-`--inadvisably-no-sandbox`, since it only reads two exports `equiv` wrote. A
-proof written by hand for a goal that is not definitional (`equiv --check NAME
-FILE`, judged the same way) is not implemented yet.
+goals with their proofs (`Eq.refl`; for `↔`, the identity both ways). The
+accepted theorems and what they use are written as an export, which
+`leanchecker --from-export` replays, as `release` replays the library: the
+evidence is a file anyone can check again. Nothing is built or elaborated and
+no `.olean` is written.
 
 Never copy old *source* into the new build. It would elaborate against the new
 mathlib, make `old = new` true by `rfl`, and prove nothing.

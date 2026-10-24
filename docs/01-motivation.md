@@ -35,12 +35,12 @@ signs an opinion, and a Linux kernel patch carries `Reviewed-by:`.
 
 Lean's `comparator` (Lean FRO, 2025; in core as `lake comparator` since
 v4.35.0) already separates the trusted statement file from the untrusted proof
-file. It hands us the exact object a human must read. LeanBlame adds the human
+file. It names the exact object a human must read. LeanBlame adds the human
 record on top: who read it, when, at which hash.
 
 ## What LeanBlame is not
 
-- **Not a prover.** Agents and humans prove. Comparator checks.
+- **Not a prover.** Agents and humans prove. The kernel checks.
 - **Not a judge of value.** Whether a result is interesting is out of scope.
 - **Not AI review.** Agents can run endless checks on a statement. None of
   them replaces a human reading the boundary. LeanBlame records the human

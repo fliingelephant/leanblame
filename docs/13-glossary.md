@@ -21,12 +21,12 @@
 | **cause** | Why a hash moved: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`. |
 | **group hash** | Hash of a cycle (an inductive with its constructors, or mutual definitions) as one unit. |
 | **exclude** | A maintainer's decision in `leanblame.toml` to stop counting an approve record. The dispute mechanism. Withdrawals cannot be excluded. |
-| **comparator** | Lean FRO's checker for untrusted proofs against a trusted statement file. |
+| **comparator** | Lean FRO's checker for untrusted proofs against a trusted statement file. Source of the closure walk. |
 | **nanoda, con-ron, con-leche** | Independent re-implementations of the Lean kernel, used as extra checkers. |
 | **AXLE, Kimina, Pantograph** | Fast proof-check services that trust the elaborator. Filters, not gates. |
 | **doc-gen4** | Lean's documentation generator. Our page base. |
 | **verso-blueprint, LeanArchitect** | Blueprint tools: prose, Lean declarations and dependency graph in one document. Possible boundary-list sources and `status --json` consumers. |
-| **lean-eval** | Lean FRO's comparator-based benchmark. Source of the attribute pattern. |
+| **lean-eval** | Lean FRO's comparator-based benchmark. Its per-problem TOML files are the model for records. |
 | **OpenID Connect / OAuth 2.0** | Login protocols. OpenReview and ORCID speak the first; GitHub only the second. |
 | **ORCID / ROR** | Persistent ids for researchers / institutions. |
 | **Sigstore** | Keyless cryptographic signing with an email login. Parked. |

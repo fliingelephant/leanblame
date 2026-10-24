@@ -78,8 +78,8 @@ parts of the hash:
 | `cut-moved` | a dependency gained or lost its tag | none, read it |
 | `untagged` | something untagged underneath changed | `equiv` may prove meaning unchanged |
 
-The `equiv-proven` flag is set only when `untagged` is the sole cause and the
-proof succeeded.
+`equiv` runs only when `untagged` is the sole cause; a successful proof shows
+as X's `evidence`.
 
 ## Validity
 
@@ -87,9 +87,9 @@ Per tagged declaration X, `status` computes:
 
 - **state**: `valid` if a live approve record carries X's current hash;
   `outdated` if live records exist but none match; `unsigned` if none exist.
-- **flags**: `equiv-proven`, `withdrawn` (a record for X was withdrawn),
-  `blocked-by [Y…]` (tagged dependencies whose state is not `valid`,
-  recursively).
+- **blocked_by**: tagged dependencies whose state is not `valid`, recursively.
+- **evidence**: the `equiv` proof that X's current hash means what its last
+  live approval meant, if there is one.
 
 A record is live if no withdraw record by the same signer points at it. See
 [05-records.md](05-records.md) for who may do what.

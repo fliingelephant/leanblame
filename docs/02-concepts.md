@@ -17,31 +17,20 @@ informal text (usually the docstring). The `@[trusted]` attribute generates it.
 A blueprint adapter can generate it from a blueprint's node-to-declaration
 mapping. Everything on the list is "tagged."
 
-## Comparator
+## Export, checker, comparator
 
-`lake comparator` (Lean FRO, in core since v4.35.0) takes a trusted
-**Challenge** module (statements, usually ending in `sorry`) and an untrusted
-**Solution** module. It:
+Lean's toolchain ships `leanexport`, which writes every constant of an
+environment (types, values, universe levels) to one text file, and
+`leanchecker`, which replays such a file through the Lean kernel. LeanBlame
+hashes from the export and gates releases and `equiv` proofs with the checker.
 
-1. builds both inside a Linux sandbox;
-2. exports both with the toolchain's `leanexport`;
-3. checks each target theorem's statement is identical in Challenge and
-   Solution;
-4. walks the full dependency closure of those statements and requires every
-   constant to match, type and value, stopping at the first mismatch;
-5. checks the proofs use only the permitted axioms;
-6. replays the proofs in the Lean kernel and, optionally, external checkers.
-
-Config file `comparator.json`: `theorem_names`, `definition_names`,
-`permitted_axioms`. Definition "holes" are compared by type only. Core also
-accepts `--challenge-from-export` and `--solution-from-export`.
-
-What comparator cannot check: that the Challenge means what you intended. The
-Lean reference manual says this explicitly.
-
-LeanBlame uses comparator for one job: checking the `old = new` proofs
-produced by `equiv`. The library's own proofs are replayed by `leanchecker`.
-Hashing is LeanBlame's own walk.
+`lake comparator` (Lean FRO, in core since v4.35.0) builds on the same two
+tools: it compares an untrusted solution against a trusted statement file,
+walking the dependency closure of each target theorem. LeanBlame copies its
+closure walk and changes it (cut at tagged declarations, skip proofs, collect
+every mismatch). Comparator itself is not run: what it cannot check, the Lean
+reference manual says explicitly, is that the trusted file means what you
+intended, and that is the one thing LeanBlame records.
 
 ## Claim hash
 

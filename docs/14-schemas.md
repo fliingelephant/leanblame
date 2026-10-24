@@ -5,11 +5,12 @@ The four interfaces LeanBlame commits to. TOML for what humans read in git
 plus 64 lowercase hex digits. Dates are UTC: native datetimes in TOML, ISO 8601
 strings in JSON.
 
-## 1. Boundary list (input, JSON)
+## 1. Boundary list (JSON)
 
 Produced by `export` from `@[trusted]`, including tags found in imported
-libraries, or from `--boundary FILE`: such a list, a verso-blueprint manifest or
-a manual TOML list ([04-architecture.md](04-architecture.md), Adapters).
+libraries, or from `--boundary FILE`, a verso-blueprint manifest or a manual
+TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
+`status`, from the object store.
 
 ```json
 {
@@ -109,14 +110,13 @@ never need another source.
       "informal_source": "docstring",
       "claim": "sha256:77c0…",
       "state": "outdated",
-      "flags": ["equiv-proven"],
       "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
       "signers": [],
       "history": [
         { "record": "sha256:…", "action": "approve", "signer": "openreview:~Jane_Doe1", "date": "2026-10-23T14:02:11Z", "claim": "sha256:3b1f…", "note": "…" }
       ],
       "blocked_by": [],
-      "proof": { "status": "proven", "axioms": ["propext"], "export": "sha256:…" },
+      "proof": { "status": "proven", "axioms": ["propext"] },
       "evidence": "sha256:…",
       "tagged_deps": ["OpenPhysics.Ising.Hamiltonian"],
       "closure_size": 3412
@@ -128,11 +128,10 @@ never need another source.
 | Field | Values |
 |-------|--------|
 | `state` | `valid`, `outdated`, `unsigned` |
-| `flags` | any of `equiv-proven`, `withdrawn` |
 | `change` | causes since the last live approval: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`, each with the names involved; empty when valid |
 | `signers` | live approve records matching `claim` |
 | `history` | every record that ever touched this declaration |
 | `blocked_by` | tagged dependencies whose state is not `valid`, recursively |
-| `proof` | theorems: `proven` (every axiom standard or tagged and valid), `open` (`sorryAx` or another axiom), `unchecked` (no report for this export); `n/a` otherwise; with all axioms and the export it was computed on |
-| `evidence` | hash of an `equiv` proof for the current hash, if any |
+| `proof` | theorems: `proven` (every axiom standard or tagged and valid), `open` (`sorryAx` or another axiom); `n/a` otherwise; with all axioms |
+| `evidence` | hash of an `equiv` proof that the current hash means what the last live approval meant, if any; `history` shows withdrawals |
 | `closure_size` | constants hashed into `claim`, proofs excluded |

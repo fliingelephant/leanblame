@@ -28,9 +28,9 @@ Eight commands:
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`, and the CI job that runs `validate`. |
 | `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list. `--boundary` takes a list from an adapter instead of `@[trusted]`. |
-| `status [--base A] [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; flags `equiv-proven`, `withdrawn`, `blocked-by`; the cause of any hash move. `--base A`: compare with approve record `A`, that is with the export and boundary list it names. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
+| `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
 | `blame X` | Who signed `X`, when, at which claim hash. |
-| `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), check that with `lake comparator`, store the proof. Never writes a record. See [06-versioning.md](06-versioning.md). |
+| `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path; `local:` ids unless a provider token is given. |
 | `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Runs in CI on every pull request. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
@@ -62,12 +62,10 @@ apart by content.
 ## Config: `leanblame.toml`
 
 ```toml
-records = ["records/", "https://github.com/some-institute/records"]
+records = ["records/"]          # records directories (local, for now)
 exclude = ["sha256:…"]          # approve records this library refuses to count
-conventions = "OpenPhysics.Conventions"
-providers = ["openreview", "orcid", "github"]
 required_signers = 1            # distinct live approvals a declaration needs
-allowed_signers = "any"         # or a list of provider:id, or a records repo
+allowed_signers = "any"         # or a list of provider:id
 ```
 
 Validity is a rule over records. The two signer knobs are the whole policy;
@@ -92,7 +90,7 @@ signed `axiom` in the library or its tagged dependencies.
 
 | Used as is | Copied and changed | New |
 |------------|--------------------|-----|
-| `leanexport` and its parser, `leanchecker`, `lake comparator`, mathlib cache, doc-gen4, OIDC/OAuth libraries, git | comparator's closure walk; lean-eval's attribute code | claim hash, cause analysis, records and validator, `status`/`blame`/`release`, sign server, `Old.` reconstruction, page overlay |
+| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, doc-gen4, OIDC/OAuth libraries, git | comparator's closure walk | claim hash, cause analysis, records and validator, `status`/`blame`/`release`, sign server, `Old.` reconstruction, page overlay |
 
 No forks.
 
@@ -116,7 +114,7 @@ cli export
        -> tagged dependency not valid: blocked, wait for its signer
        -> hash changed: outdated, with causes
             -> cause is only `untagged`: cli equiv
-                 -> proven: equiv-proven; reviewer approves with one click
+                 -> proven: evidence shown; reviewer approves with one click
                  -> not proven: reviewer reads the change
             -> any other cause: reviewer reads the shown diff
 ```
