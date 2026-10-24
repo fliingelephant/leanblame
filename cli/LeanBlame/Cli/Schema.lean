@@ -62,6 +62,10 @@ def decodeStr (t : Table) (k : Lean.Name) (ok : String → Bool := fun _ => true
 def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
   Lake.Toml.tryDecodeD .empty do (← t.decodeValue k).decodeTable
 
+/-- A constant name as the boundary list and records write it (`Lean.Name.toString`), read back.
+`export` lists only names that read back. -/
+def constName? (s : String) : Option Lean.Name := Lean.Syntax.decodeNameLit ("`" ++ s)
+
 /-! ## 1. Boundary list -/
 
 /-- Kinds a boundary-list entry may have: the export kinds of docs/design/14. -/

@@ -110,7 +110,8 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : W
     (newExp oldExp : LeanExport.ExportedEnv) (targets : Array Target) :
     IO (Array Target × String) := do
   let oldCi (c : Name) := oldExp.constMap[c]?
-  let isTarget (c : Name) := targets.any (·.name == c)
+  let targetSet : NameSet := targets.foldl (·.insert ·.name) {}
+  let isTarget := targetSet.contains
   -- What an old meaning uses: of a target theorem only its statement.
   let uses (c : Name) : Array Name := match oldCi c with
     | some ci => if isTarget c && ci matches .thmInfo _ then ci.type.getUsedConstants

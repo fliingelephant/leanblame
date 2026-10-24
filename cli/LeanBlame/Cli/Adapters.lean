@@ -29,9 +29,6 @@ structure Tag where
 line endings normalized, no Unicode normalization (Lean core has none). -/
 def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
-/-- A constant name as boundary lists write it. -/
-def constName? (s : String) : Option Name := Syntax.decodeNameLit ("`" ++ s)
-
 def manualSchemaId : String := "leanblame.manual.1"
 
 open Lake.Toml (DecodeM Table logDecodeErrorAt) in

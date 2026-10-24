@@ -233,13 +233,10 @@ def axiomsOf (find? : Name → Option ConstantInfo) (roots : Array Name) :
 
 /-- Hash every constant reachable from the boundary list of `exported`. -/
 def hashExport (exported : LeanExport.ExportedEnv) (boundary : BoundaryList) : IO Hashed := do
-  -- Boundary names are strings; map them to the export's constants.
-  let byString : Std.HashMap String Name :=
-    exported.constMap.fold (init := {}) fun m n _ => m.insert n.toString n
   let mut tagged : Std.HashMap Name String := {}
   let mut declarations : Array (Name × BoundaryDecl) := #[]
   for d in boundary.declarations do
-    let some n := byString[d.name]?
+    let some n := (constName? d.name).filter exported.constMap.contains
       | fail s!"'{d.name}' is on the boundary list but not in the export"
     tagged := tagged.insert n (strTrim d.informal)
     declarations := declarations.push (n, d)
