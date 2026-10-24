@@ -1,7 +1,7 @@
 /-
 `leanblame`: command-line entry point (docs/04-architecture.md, eight commands).
 -/
-import LeanBlame.Cli.Export
+import LeanBlame.Cli.Equiv
 import LeanBlame.Cli.Release
 import LeanBlame.Cli.Status
 import LeanBlame.Cli.Validate
@@ -19,7 +19,10 @@ commands:
                                          blueprint-manifest.json or a leanblame.manual.1 TOML list)
   status [--base RECORD] [--json]        state of every tagged declaration
   blame NAME                             who signed NAME, when, at which claim hash
-  equiv                                  (not implemented)
+  equiv [NAME...]                        ask the kernel whether what changed under NAME (default:
+                                         every declaration outdated by an untagged change only)
+                                         is definitionally equal to what was approved
+  equiv --check NAME FILE                (not implemented)
   sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]
   sign --withdraw RECORD [--signer local:NAME] [--constants A,B] [--note TEXT]
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
@@ -105,6 +108,12 @@ def cmdSign (args : List String) : IO UInt32 := do
       throw (IO.userError "--constants goes with --withdraw; to approve, list the names")
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
+def cmdEquiv (args : List String) : IO UInt32 := do
+  let a ← IO.ofExcept (parseArgs #["--check"] #[] args)
+  -- A hand-written proof, judged like a comparator solution: not in this slice.
+  if (a.get? "--check").isSome then return ← notImplemented "equiv --check"
+  Equiv.run (← IO.currentDir) a.positional
+
 def cmdRelease (args : List String) : IO UInt32 := do
   let a ← IO.ofExcept (parseArgs #["--tag", "--out"] #[] args)
   unless a.positional.isEmpty do throw (IO.userError "release takes no positional arguments")
@@ -120,12 +129,10 @@ def dispatch : List String → IO UInt32
   | "sign" :: args => cmdSign args
   | "validate" :: args => cmdValidate args
   | "release" :: args => cmdRelease args
-  | cmd :: _ =>
-    if cmd == "equiv" then
-      notImplemented cmd
-    else do
-      IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
-      return 2
+  | "equiv" :: args => cmdEquiv args
+  | cmd :: _ => do
+    IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
+    return 2
 
 def main (args : List String) : IO UInt32 := do
   try

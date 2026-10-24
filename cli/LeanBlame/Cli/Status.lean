@@ -6,8 +6,9 @@ Per tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve
   records carrying X's current claim hash; else `outdated` if live records for X
   exist; else `unsigned`;
-* flags: `withdrawn` if a counting withdraw ever covered X (`equiv-proven` needs
-  `equiv`, not in this slice);
+* flags: `equiv-proven` if X is not valid and `equiv` proved its current claim means what its last
+  live approval meant (an evidence file, which also fills `evidence`); `withdrawn` if a counting
+  withdraw ever covered X;
 * change: for a declaration that is not valid, the causes of the move since the
   last live approval, found by hashing the export and boundary list that record
   names (from the object store) and comparing hash parts; with `--base R`, the
@@ -69,6 +70,10 @@ def historyOf (ledger : Ledger) (name : String) : Array HistoryEntry :=
       { record := r.hash, action := "withdraw", signer := w.signer, date := w.date, claim
         note := w.note }
 
+/-- The live approve records listing `name`, in (date, id) order, with the claim each carries. -/
+def liveApprovals (ledger : Ledger) (name : String) : Array (LoadedRecord × ApproveRecord × String) :=
+  (ledger.approvalsOf name).filter fun (r, a, _) => ledger.isLive r.hash a.signer name
+
 /-- Everything `status` computes. -/
 structure Result where
   report : StatusReport
@@ -129,15 +134,16 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
   for (n, d) in new.declarations do
     let node := new.nodes[n]!
     let claim := node.claim
-    let approvals := ledger.approvalsOf d.name
-    let live := approvals.filter fun (r, a, _) => ledger.isLive r.hash a.signer d.name
+    let live := liveApprovals ledger d.name
     let matching := live.filter fun (_, _, c) => c == claim
     let signers := (dedup (matching.map fun (_, a, _) => a.signer)).qsort (· < ·)
     validRecords := validRecords ++ matching.map (·.1.hash)
     let state :=
       if signers.size ≥ cfg.requiredSigners then "valid"
       else if live.isEmpty then "unsigned" else "outdated"
-    let flags := if (ledger.withdrawalsOf d.name).isEmpty then #[] else #["withdrawn"]
+    let evidence ← Store.evidence? root d.name claim
+    let flags := (if state != "valid" && evidence.isSome then #["equiv-proven"] else #[]) ++
+      (if (ledger.withdrawalsOf d.name).isEmpty then #[] else #["withdrawn"])
     -- Causes: against --base, or against the export of the last live approval.
     let mut change : Array Change := #[]
     match base with
@@ -161,7 +167,7 @@ def compute (root : System.FilePath) (cfg : Config) (ledger : Ledger) (base? : O
       claim, state, flags, change, signers, history := historyOf ledger d.name
       blockedBy := #[]
       proof := { status := "n/a" }
-      evidence := none
+      evidence
       taggedDeps := cut.map (·.toString)
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size })

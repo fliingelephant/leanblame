@@ -15,7 +15,7 @@
 | **record** | One signoff file: approve or withdraw. |
 | **live record** | An approve record no withdraw points at. |
 | **blocked** | Your hash is fine but a tagged dependency isn't valid. Wait for its signer. |
-| **`equiv`** | Command that rebuilds an old meaning and asks an agent to prove it equal to the new one. |
+| **`equiv`** | Command that rebuilds an old meaning from the old export and asks the kernel whether it is definitionally equal to the new one. |
 | **kernel gate** | `leanchecker --from-export` replaying the whole export inside `release`. |
 | **axiom report** | Per theorem, the axioms it rests on: proven, open (`sorryAx`), or relative to a signed axiom. |
 | **cause** | Why a hash moved: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`. |

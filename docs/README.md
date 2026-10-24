@@ -26,7 +26,7 @@ One-paragraph summary:
 > people like `git blame`: you sign your own declaration fully, you sign only
 > the name, type and informal text of signed declarations you use, and you sign
 > everything of unsigned ones. When upstream changes, `status` says what moved
-> and why. If only unsigned code underneath changed, `equiv` has an agent try
-> to prove the meaning is the same, and a human approves the new hash with one
+> and why. If only unsigned code underneath changed, `equiv` asks the kernel
+> whether the meaning is the same, and a human approves the new hash with one
 > click. Records are never deleted. Three parts: a Lean CLI, signoff records
 > in git, a web sign server and page.

@@ -42,17 +42,31 @@ needs a human to read.
 2. Compare old and new closures by hash. Constants with equal hash are
    **shared**: they are the same kernel term. Changed constants and everything
    between them and X are **duplicated** under `Old.`, with references renamed.
+   Constants used only in proofs are not hashed; they are shared when the new
+   export states them the same way.
 3. State the goal by kind. Def with unchanged type: `Old.X = X`. Theorem:
    `type(Old.X) ↔ type(X)`. Def whose type itself changed, or a structure:
    no goal; a human reads.
-4. An agent proves it. `lake comparator` checks the proof. The proof goes to
-   the object store.
+4. The kernel decides, mechanically: no build, no tactics. At the frontier of
+   change, each changed definition C gets `Old.C = C`, and the kernel is asked
+   whether the two are definitionally equal: one kernel call per changed
+   definition. Everything above follows by congruence; X's own goal is one more
+   call. `lake comparator` checks the accepted proofs. The proof goes to the
+   object store. Not definitionally equal: a human reads, shown the old and
+   new definitions.
 5. X gets the `equiv-proven` flag. The reviewer approves the new hash with one
    click; the record carries the proof hash as `evidence`.
 
-Mechanism for step 2: a small Lean program reads the export, adds the
-duplicated constants to an environment with `addDecl`, and writes an `.olean`
-the comparator sandbox imports.
+Mechanism: `equiv` reads the old and the new export. It adds the duplicated
+constants to the new export's environment, the kernel checking each, then the
+goals with their proofs (`Eq.refl`; for `↔`, the identity both ways). From
+there it writes a solution export, and a challenge export with the same
+statements proved by `sorry`, and runs `lake comparator
+--challenge-from-export --solution-from-export` on the two. Nothing is built or
+elaborated and no `.olean` is written; without `bwrap`, comparator runs with
+`--inadvisably-no-sandbox`, since it only reads two exports `equiv` wrote. A
+proof written by hand for a goal that is not definitional (`equiv --check NAME
+FILE`, judged the same way) is not implemented yet.
 
 Never copy old *source* into the new build. It would elaborate against the new
 mathlib, make `old = new` true by `rfl`, and prove nothing.

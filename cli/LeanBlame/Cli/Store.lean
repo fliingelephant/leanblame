@@ -4,7 +4,8 @@ status logs, each in `.leanblame/store/<hex>` where `<hex>` is the SHA-256 of
 the file's bytes.
 
 One small local file points into it: `.leanblame/current` (JSON), the export
-and boundary list of the last `export` run.
+and boundary list of the last `export` run. `equiv` writes evidence files next to
+it, in `.leanblame/equiv/evidence/`.
 -/
 import LeanBlame.Cli.Util
 
@@ -68,5 +69,18 @@ def readCurrent (root : System.FilePath) : IO Current := do
   | .ok (c : Current) => if isHash c.exportHash && isHash c.boundary then return c
   | .error _ => pure ()
   fail s!"{currentPath root} is malformed; run `leanblame export`"
+
+/-- Where `equiv` records that declaration `name` at claim hash `claim` means what its last live
+approval meant: `<sha256 of "name claim">.json`, naming the proof (`evidence`) and the exports it was
+judged on. -/
+def evidencePath (root : System.FilePath) (name claim : String) : System.FilePath :=
+  dir root / "equiv" / "evidence" / s!"{Sha256.hexOfString s!"{name} {claim}"}.json"
+
+/-- The proof hash of the evidence for `name` at `claim`, if `equiv` wrote one. -/
+def evidence? (root : System.FilePath) (name claim : String) : IO (Option String) := do
+  let some text ← readFileIfExists (evidencePath root name claim) | return none
+  match Lean.Json.parse text >>= (·.getObjValAs? String "evidence") with
+  | .ok h => return if isHash h then some h else none
+  | .error _ => return none
 
 end LeanBlame.Store

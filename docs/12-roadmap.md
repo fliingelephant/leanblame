@@ -21,7 +21,7 @@ comparator's closure walk (`Compare.lean`, Apache-2.0). lean-eval's
 | 5 | `release`: `leanchecker` replay, axiom report, manifest | small |
 | 6 | Web page: doc-gen4 plus overlay | small |
 | 7 | Sign server: `local`, then `openreview`, `orcid`, `github`; `sign --withdraw` | medium |
-| 8 | `equiv`: shared/duplicated `Old.` reconstruction, goal by kind, agent prompt, comparator check, object store | medium |
+| 8 | `equiv`: shared/duplicated `Old.` reconstruction, goal by kind, comparator check, object store | medium |
 | 9 | Blueprint adapter and manual list adapter → boundary list | small |
 | 10 | OpenPhysics: first tagged modules, conventions module, memo text | content |
 

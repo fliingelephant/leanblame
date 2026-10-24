@@ -8,7 +8,10 @@
 # a body -> status (outdated, own-body) -> edit a dependency body -> status
 # (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
 # (withdrawn) -> blame -> validate (and its append-only check) -> boundary lists
-# from a verso-blueprint manifest and from a manual TOML list.
+# from a verso-blueprint manifest and from a manual TOML list -> equiv, in a copy
+# made after the first signoff: a definitional change proven (equiv-proven, the
+# record carries the proof, valid), one that is not definitional, an own-body
+# change refused.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,6 +90,8 @@ ok "two approve records, Sample.Basic is $basic_record"
 run validate
 ok "validate: $out"
 commit "first signoff"
+work_equiv="$work-equiv"
+cp -R "$work" "$work_equiv"
 
 echo "== status: everything valid"
 out="$("$lb" status 2>"$work/status.err")"
@@ -370,11 +375,64 @@ must_fail "leanblame.boundary.1 JSON list, a verso-blueprint blueprint-manifest.
   -- "$lb" export --boundary "$work/other.json"
 ok "manual list: names and texts, strict keys, no empty text; other inputs are refused"
 
-echo "== stubs"
-set +e; "$lb" equiv >/dev/null 2>"$work/stub.log"; code=$?; set -e
-[[ "$code" == 2 ]] || fail "equiv should exit 2, got $code"
-grep -q "not implemented" "$work/stub.log" || fail "equiv: $(cat "$work/stub.log")"
-ok "equiv says not implemented and exits 2"
+echo "== equiv: a definitional change under two tagged declarations"
+rm -rf "$work"
+work="$work_equiv"
+cd "$work"
+cat >> Sample/Basic.lean <<'EOF'
+
+/-- Twice zero is zero. -/
+@[trusted] theorem Sample.double_zero : Sample.double 0 = 0 := rfl
+EOF
+commit "double_zero"
+export_lib
+run sign --signer local:alice Sample.energy Sample.double_zero
+commit "sign energy and double_zero at one export"
+edit Sample/Basic.lean 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := Nat.add n n/'
+commit "double: Nat.add"
+export_lib
+run status
+expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated change=untagged:Sample.double"
+: > "$work/stderr.log"
+run equiv
+proof="$(awk '/^Sample.energy equiv-proven /{print $3}' <<<"$out")"
+[[ "$proof" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "equiv did not prove Sample.energy: $out"
+grep -qxF "Sample.double_zero equiv-proven $proof" <<<"$out" || fail "equiv did not prove Sample.double_zero: $out"
+[[ -f ".leanblame/store/${proof#sha256:}" ]] || fail "the proof $proof is not in the object store"
+grep -qxF "Your solution is okay!" "$work/stderr.log" || fail "lake comparator did not accept: $(cat "$work/stderr.log")"
+ok "equiv: Old.Sample.double = Sample.double by the kernel, lake comparator accepts, proof $proof"
+run status
+expect_line Sample.energy "Sample.energy outdated flags=equiv-proven change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated flags=equiv-proven change=untagged:Sample.double"
+run sign --signer local:alice Sample.energy Sample.double_zero
+record="$(awk '/^approve /{print $3}' <<<"$out")"
+grep -qxF "evidence = \"$proof\"" "$record" || fail "the approve record does not carry the proof: $(cat "$record")"
+run status
+expect_line Sample.energy "Sample.energy valid"
+expect_line Sample.double_zero "Sample.double_zero valid"
+ok "sign puts the proof in the record as evidence; both are valid again"
+commit "sign after equiv"
+
+echo "== equiv: a change that is not definitional"
+edit Sample/Basic.lean 's/def double (n : Nat) : Nat := Nat.add n n/def double (n : Nat) : Nat := 2 * n/'
+commit "double: 2 * n"
+export_lib
+must_fail "^Sample.double: not definitionally equal; a human reads$" "^  old: fun n => Nat.add n n$" \
+  "^  new: fun n => HMul.hMul 2 n$" "^Sample.energy: not proven, because of Sample.double; a human reads$" \
+  "^Sample.double_zero equiv-proven sha256:" "^equiv: 1 proven, 1 left to a human$" -- "$lb" equiv
+run status
+expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
+expect_line Sample.double_zero "Sample.double_zero outdated flags=equiv-proven change=untagged:Sample.double"
+ok "n + n and 2 * n are not definitionally equal: both bodies shown; double_zero still holds by evaluation"
+edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
+commit "pointEnergy: new body"
+export_lib
+must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
+set +e; "$lb" equiv --check Sample.energy Goal.lean >/dev/null 2>"$work/stub.log"; code=$?; set -e
+[[ "$code" == 2 ]] || fail "equiv --check should exit 2, got $code"
+grep -q "not implemented" "$work/stub.log" || fail "equiv --check: $(cat "$work/stub.log")"
+ok "equiv refuses an own-body change; equiv --check says not implemented and exits 2"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"

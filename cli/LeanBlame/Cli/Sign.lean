@@ -116,10 +116,14 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   for m in modules.qsort (· < ·) do
     let constants := (selected.filter (·.module == m)).map (fun d => (d.name, claimOf[d.name]!))
       |>.qsort (fun a b => a.1 < b.1)
+    -- An `equiv` proof the signer relies on, if the record's constants name exactly one.
+    let proofs := dedup (← constants.filterMapM fun (n, c) => Store.evidence? root n c)
+    if proofs.size > 1 then
+      IO.eprintln s!"note: the constants of {m} have {proofs.size} different equiv proofs; the record names none"
     let r : Record := .approve {
       signer, date, module := m, commit := boundary.commit, toolchain := boundary.toolchain
       deps := boundary.deps, exportHash := cur.exportHash, boundary := cur.boundary
-      constants, note := note? }
+      constants, evidence := if proofs.size == 1 then proofs[0]? else none, note := note? }
     let (id, path) ← writeRecord dir r
     IO.println s!"approve {id} {path} ({constants.size} constants of {m})"
   return 0
