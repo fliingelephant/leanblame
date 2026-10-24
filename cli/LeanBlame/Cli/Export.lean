@@ -180,6 +180,27 @@ are restricted to these names as when `leanexport` ran as a command, so exports 
 def roundTrips (n : Name) : Bool :=
   Syntax.decodeNameLit ("`" ++ n.toString) == some n
 
+/--
+The constants `lake comparator` needs in every export it judges: Lake's `primitiveTargets`
+(`Lake/CLI/Check.lean`, private there, so listed again here), the standard axioms, and `sorryAx` for
+challenges. `export` exports them too, so that `equiv` can build its exports from the export alone.
+-/
+def comparatorRoots : Array Name := #[
+  ``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.pow, ``Nat.gcd, ``Nat.div, ``Nat.mod, ``Nat.beq, ``Nat.ble,
+  ``Nat.land, ``Nat.lor, ``Nat.xor, ``Nat.shiftLeft, ``Nat.shiftRight, ``String.ofList, ``Char.ofNat,
+  ``List, ``eagerReduce, ``Nat, ``String, ``String.mk, ``Char, ``optParam, ``autoParam,
+  ``semiOutParam, ``outParam] ++ Walk.standardAxioms ++ #[``sorryAx]
+
+/-- Run the toolchain's exporter on `env` from `roots` into `path`; returns the SHA-256 (hex) of the
+bytes, computed as they are written. -/
+def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
+  let sha ← IO.mkRef ({} : Sha256.State)
+  IO.FS.withFile path .write fun h =>
+    let write (b : ByteArray) : IO Unit := do h.write b; sha.modify (·.update b)
+    IO.withStdout { IO.FS.Stream.ofHandle h with write, putStr := (write ·.toUTF8) }
+      (LeanExport.dumpEnv env (some roots.toList))
+  return Sha256.toHex (← sha.get).finish
+
 structure Result where
   exportHash : String
   boundary : String
@@ -219,7 +240,8 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
   let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations }
   let boundaryText := jsonText boundaryList
-  -- The constants to export: the library's own (non-internal) constants and the boundary list.
+  -- The constants to export: the library's own (non-internal) constants, the boundary list and
+  -- what `lake comparator` needs.
   let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
   for (n, ci) in env.constants.map₁.toList do
@@ -234,20 +256,18 @@ def run (root : System.FilePath) (boundaryFile? : Option System.FilePath) (libsG
     let some n := constName? d.name | fail s!"{d.name}: not a constant name"
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     unless roots.contains n do roots := roots.push n
+  for n in comparatorRoots do
+    if env.contains n && !roots.contains n then roots := roots.push n
   roots := roots.qsort (fun a b => a.cmp b == .lt)
   -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
-  let sha ← IO.mkRef ({} : Sha256.State)
-  IO.FS.withFile tmp .write fun h =>
-    let write (b : ByteArray) : IO Unit := do h.write b; sha.modify (·.update b)
-    IO.withStdout { IO.FS.Stream.ofHandle h with write, putStr := (write ·.toUTF8) }
-      (LeanExport.dumpEnv env (some roots.toList))
+  let hex ← dumpToFile env roots tmp
   -- Compute every claim hash now, so that problems surface at export time.
   let exported ← LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk tmp .read))
   let hashed ← try Walk.hashExport exported boundaryList
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
-  let exportHash ← Store.putFile root tmp (Sha256.toHex (← sha.get).finish)
+  let exportHash ← Store.putFile root tmp hex
   let boundary ← Store.putString root boundaryText
   Cache.save root exportHash boundary hashed
   let ownedHash ← Store.putString root ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")

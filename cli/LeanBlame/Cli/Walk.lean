@@ -194,6 +194,9 @@ def tarjan (roots : Array Name) (succ : Name → Array Name) : Array (Array Name
           st := { st with low := st.low.insert u (min st.low[u]! st.low[v]!) }
   return st.sccs
 
+/-- The axioms every Lean library may rest on (docs/07). -/
+def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
+
 /--
 The axioms each of `roots` rests on, sorted: exactly what `Lean.collectAxioms` returns in the
 environment `Load` builds (constants in types and values, and the constructors of inductives;

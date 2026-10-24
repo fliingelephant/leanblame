@@ -80,13 +80,10 @@ structure Result where
   /-- (theorem, axiom) pairs where the axiom is neither standard nor a valid tagged axiom. -/
   unpermitted : Array (Name × Name) := #[]
 
-/-- The axioms every Lean library may rest on (docs/07). -/
-def standardAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
-
 /-- A theorem's axioms against the permitted ones (docs/07): `proven` when each is standard or
 `signed`, `open` otherwise; and the axioms that are neither `sorryAx` nor permitted. -/
 def classifyAxioms (axioms : Array Name) (signed : Name → Bool) : String × Array Name :=
-  let permitted (a : Name) := standardAxioms.contains a || signed a
+  let permitted (a : Name) := Walk.standardAxioms.contains a || signed a
   (if axioms.all permitted then "proven" else "open",
    axioms.filter fun a => a != ``sorryAx && !permitted a)
 
