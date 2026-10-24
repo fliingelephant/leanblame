@@ -22,7 +22,7 @@ In `lakefile.toml`:
 [[require]]
 name = "leanblame"
 git = "https://github.com/fliingelephant/leanblame"
-rev = "main"
+rev = "v0.1.0"
 subDir = "cli"
 ```
 
