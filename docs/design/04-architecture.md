@@ -38,19 +38,19 @@ Nine commands:
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml` and `records/`. |
-| `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list of the `@[trusted "id"]` declarations, or of a blueprint's (see Blueprints). Outside a git repository with commits: an error. With uncommitted changes under the library root, the boundary list names no commit, and `sign` and `release` refuse it. |
+| `export [--boundary FILE] [--lib NAME]` | Build the libraries (`--lib`, else the default `lean_lib` targets) at the current commit, using the mathlib cache, run `leanexport`, write the export and the boundary list of the `@[trusted "id"]` declarations, or of a blueprint's (see Blueprints). Outside a git repository with commits: an error. With uncommitted changes under the library root, the export names no commit, and `sign` and `release` refuse it. |
 | `id` | Write a new random id into each `@[trusted]` of the library that has none: `@[trusted "id"]`. Commit the change. |
-| `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). A graph the store should have and does not is an error. |
-| `blame X` | Who signed `X` (a name or an id), when, at which claim hash. |
-| `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
+| `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write everything, records included, and nothing on stderr ([14-schemas.md](14-schemas.md)). A graph the store should have and does not is an error. |
+| `blame X` | Who signed `X` (a name or an id), when, at which claim hash, and what each approval is worth now. |
+| `equiv [X...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
-| `validate` | Check record files against the schema and the authority rules (the other commands stop on a file in a records directory that is not a record). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
+| `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
 
-One TOML file per signoff in the library's `records/` folder. Schema and
-validator in `leanblame`. See [05-records.md](05-records.md).
+One TOML file per signoff in the library's records directories (`records/` by
+default). Schema and validator in `leanblame`. See [05-records.md](05-records.md).
 
 ### 3. `web` (TypeScript)
 
@@ -67,9 +67,10 @@ validator in `leanblame`. See [05-records.md](05-records.md).
 instead of `@[trusted]`: statement entries name their Lean declarations in
 `codeData`, the text comes from the `statement` slot of `externalMarkup` or else
 the entry's fragment in `blueprint-html-cache.json`. A label is the id of the
-first declaration it names; its other declarations name that one as `parent`.
-A name claimed by two labels, or a statement entry without label or text, is
-an error.
+first declaration it names; its other declarations name that one as `parent`,
+and their ids are the label and their names (`def:point/norm`). A name claimed
+by two labels, a statement entry without label or text, and a value of an
+unexpected type are errors.
 
 ## Config: `leanblame.toml`
 
@@ -80,8 +81,8 @@ required_signers = 1            # distinct live approvals a declaration needs
 allowed_signers = "any"         # or a list of provider:id
 ```
 
-Validity is a rule over records. The two signer knobs are the whole policy;
-`status` reads them. Who gets *asked* to review is a queue in the web, not
+Every key is required; `init` writes them all. Validity is a rule over records.
+The two signer knobs are the whole policy; `status` reads them. Who gets *asked* to review is a queue in the web, not
 part of validity.
 
 No axiom list. Permitted axioms are the three standard ones plus any tagged,
@@ -96,12 +97,15 @@ signed `axiom` in the library or its tagged dependencies.
   list: every claim hash, with the parts `status` compares and the axiom
   report. `export` writes it; the other commands read it and never hash. It is
   the one kind keyed by what it was computed from instead of its own bytes:
-  `graphs/<export>-<boundary list>.json`. `export` deletes what nothing names
+  `graphs/<export>-<boundary list>.json`, both by their hashes; a graph that is
+  not complete is an error. `.leanblame/current` points at the last export, with
+  the commit, toolchain and dependencies it was made from. `export` deletes what nothing names
   any more: exports and boundary lists named by no record and not current, the
   graphs of deleted exports, evidence whose claim is no longer current, proofs
   named by no evidence and no record.
-- `equiv` evidence: `.leanblame/equiv/evidence/`, one file per declaration and
-  claim hash, naming the proof and the record it was compared with.
+- `equiv` evidence: `.leanblame/equiv/evidence/<claim>.json`, one file per claim
+  hash, naming the declaration's id, the proof and the record it was compared
+  with. Every JSON file here has a schema id and is read strictly.
 
 ## Platform
 

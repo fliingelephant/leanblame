@@ -153,7 +153,7 @@ nothing).
 ### Who may sign, and how many
 
 Per library, in `leanblame.toml`: `allowed_signers` (any, a list, or a repo)
-and `required_signers` (default 1). Pure rule over records, no Lean in it.
+and `required_signers` (`init` writes 1). Pure rule over records, no Lean in it.
 Reviewer assignment is a web queue and never affects validity.
 
 ### Declaration ids (owner, 2026-10-26)
@@ -164,8 +164,11 @@ new one each time). It survives renames and edits; the name is a label. It is
 not hashed, so writing it changes no claim. A cite is `id@record`: the record
 fixes the commit, the Lean version and the dependency commits. Not the commit
 alone (it moves when anything changes) and not the claim (it stops at signed
-dependencies). `export` refuses a tag of the library without an id, and two
-declarations with one id.
+dependencies). `export` refuses a tag without an id, and two declarations with
+one id. A structure's field has no id of its own; its id is the structure's id
+and its name, `3f2b…/x` (owner: "Structure id + field name"), so a rename of the
+structure keeps the field's history. A blueprint label's other declarations get
+the label and their names the same way.
 
 ### Fail out loud (owner, 2026-10-26)
 
@@ -177,6 +180,25 @@ not read, `export` outside a git repository with commits, `sign` without
 `leanblame.toml`, a file in a records directory that is not a record. An export
 of uncommitted changes names no commit (`null`), so `sign` and `release` refuse
 it: a record names the commit it signs. A record made in another store, whose
-objects this store lacks, is expected: `status` warns that its causes are
-unknown. Development stage: no backward compatibility; after a format change,
+objects this store lacks, is expected: its causes are unknown, `change` is
+`null`. Development stage: no backward compatibility; after a format change,
 data is made again.
+
+### Root causes (owner, 2026-10-26: "Fix the three in root causes")
+
+Three root causes behind most review findings, fixed at the root:
+
+1. **The viewers computed again what LeanBlame knows** (record files, the
+   standing of approvals, the toolchain, the standard axioms). Now
+   `status --json` carries all of it; a viewer only displays it.
+2. **Defaults on errors.** Every JSON file has a schema id and is read strictly:
+   a missing or an unknown key is an error. Every `leanblame.toml` key is
+   required. No fallback on a failure: proof erasure, the statement printer,
+   the mathlib cache, Lake's output. A withdraw that breaks the rules, an
+   `exclude` entry that names no approve record, and a record in two
+   directories stop every command but `validate`, which lists them. `export`
+   builds exactly the libraries it exports.
+3. **Records stored names.** Records name declarations by id
+   (`leanblame.record.2`), so an approval follows a rename: the declaration is
+   `outdated`, not `unsigned`. A new id is a new declaration: the old approvals
+   stay with the old id.

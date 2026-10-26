@@ -5,9 +5,9 @@ and every declaration reached from a boundary list, hashed (`Node`, `Hashed`). D
 keyed by their printed name; the core never sees a term.
 
 `export` stores each graph in the object store, `.leanblame/store/graphs/<hex>-<hex>.json`, keyed by
-the export and the boundary list's declarations, with what the commands need from the proof
-assistant (`Backend.standard`, `incomplete`, `checker`); the other commands read it and never hash.
-A file that does not read back counts as missing.
+the export and the boundary list, with what the commands need from the proof assistant
+(`Backend.standard`, `incomplete`, `checker`); the other commands read it and never hash. A graph
+file that does not read back, or that is not complete, is an error.
 -/
 import LeanBlame.Core.Schema
 import LeanBlame.Core.Store
@@ -18,8 +18,10 @@ namespace Core
 
 /-- The raw facts about one declaration, as a frontend reports them. -/
 structure Decl where
-  /-- The printed name; the key everywhere. -/
+  /-- The printed name; the key within one export. -/
   name : String
+  /-- Where it is defined (Lean: its module); never hashed. -/
+  module : String
   /-- The assistant's own label. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`,
   `quot`, `rec`. Never interpreted by the core. -/
   kind : String
@@ -50,10 +52,8 @@ structure Source where
   /-- Whether a constant is an assumption. `false` for unknown constants. -/
   isAssumed : String → Bool
 
-/-- What a proof assistant contributes to the tool. -/
+/-- What a proof assistant contributes to the tool besides the `Source` of each export. -/
 structure Backend where
-  /-- The source of the export object stored at a path. -/
-  source : System.FilePath → IO Source
   /-- Whether the assistant's own checker replays the export at a path. -/
   kernelAccepts : System.FilePath → IO Bool
   /-- The name of that checker, for the release manifest. Lean: `leanchecker`. -/
@@ -83,6 +83,9 @@ structure Hashed where
   axioms : Std.HashMap String (Array String)
   /-- The boundary list it was hashed with. -/
   boundary : BoundaryList
+  /-- The store hashes of the export and the boundary list: the graph's key. -/
+  exportHash : String
+  boundaryHash : String
   /-- `Backend.standard` of the proof assistant that hashed it. -/
   standard : Array String
   /-- `Backend.incomplete` of the proof assistant that hashed it. -/
@@ -102,14 +105,14 @@ namespace Graph
 
 open Lean (Json ToJson toJson FromJson)
 
-def schema : String := "leanblame.graph.1"
+def schema : String := "leanblame.graph.2"
 
 def dir (root : System.FilePath) : System.FilePath := Store.kindDir root .graphs
 
 /-- Keyed by what the hashing reads: the export (first, so `sweep` can tell an export's graphs by
-name) and the boundary list's declarations (not its `commit`, `toolchain` or `deps`). -/
-def path (root : System.FilePath) (exportHash : String) (b : BoundaryList) : System.FilePath :=
-  dir root / s!"{hashHex exportHash}-{Sha256.hexOfString (toJson b.declarations).compress}.json"
+name) and the boundary list. -/
+def path (root : System.FilePath) (exportHash boundaryHash : String) : System.FilePath :=
+  dir root / s!"{hashHex exportHash}-{hashHex boundaryHash}.json"
 
 /-- Delete the graphs of every export whose hex digest is not in `keep`. -/
 def sweep (root : System.FilePath) (keep : Std.HashSet String) : IO Unit := do
@@ -119,54 +122,75 @@ def sweep (root : System.FilePath) (keep : Std.HashSet String) : IO Unit := do
 
 def nodeToJson (n : Core.Node) : Json :=
   let d := n.decl
-  Json.mkObj [("name", d.name), ("kind", d.kind), ("role", toJson d.role), ("uparams", d.uparams),
-    ("type", d.typeHash), ("body", toJson d.bodyHash), ("informal", toJson n.informal),
-    ("deps", toJson d.deps), ("own", n.own), ("spec", toJson n.spec), ("claim", n.claim)]
+  Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind), ("role", toJson d.role),
+    ("uparams", d.uparams), ("type", d.typeHash), ("body", toJson d.bodyHash),
+    ("informal", toJson n.informal), ("deps", toJson d.deps), ("own", n.own), ("spec", toJson n.spec),
+    ("claim", n.claim)]
 
 def nodeFromJson? (j : Json) : Except String Core.Node := do
-  let get (α) [FromJson α] (k : String) := j.getObjValAs? α k
-  let some role := ofString? Role.all (← get String "role") | throw "unknown role"
+  let o ← JsonObj.read j "graph node" ["name", "module", "kind", "role", "uparams", "type", "body",
+    "informal", "deps", "own", "spec", "claim"]
+  let name ← o.get String "name"
+  let o := { o with what := s!"graph node {name}" }
   return {
     decl := {
-      name := ← get String "name", kind := ← get String "kind", role
-      uparams := ← get Nat "uparams", typeHash := ← get String "type"
-      bodyHash := ← get (Option String) "body", deps := ← get (Array String) "deps" }
-    informal := ← get (Option String) "informal"
-    own := ← get String "own", spec := ← get (Option String) "spec", claim := ← get String "claim" }
+      name, module := ← o.get String "module", kind := ← o.get String "kind", role := ← o.get Role "role"
+      uparams := ← o.get Nat "uparams", typeHash := ← o.get String "type"
+      bodyHash := ← o.get (Option String) "body", deps := ← o.get (Array String) "deps" }
+    informal := ← o.get (Option String) "informal"
+    own := ← o.get String "own", spec := ← o.get (Option String) "spec", claim := ← o.get String "claim" }
 
-/-- Store `h`, the graph of export `exportHash` against its boundary list. -/
-def save (root : System.FilePath) (exportHash : String) (h : Core.Hashed) : IO Unit :=
-  writeFileMkdirs (path root exportHash h.boundary) <| Json.compress <| Json.mkObj [
-    ("schema", schema),
-    ("declarations", toJson (h.boundary.declarations.map (·.name))),
+/-- Store graph `h`. -/
+def save (root : System.FilePath) (h : Core.Hashed) : IO Unit :=
+  writeFileMkdirs (path root h.exportHash h.boundaryHash) <| Json.compress <| Json.mkObj [
+    ("schema", schema), ("export", h.exportHash), ("boundary", h.boundaryHash),
     ("nodes", .arr (h.nodes.fold (init := #[]) fun acc _ n => acc.push (nodeToJson n))),
-    ("axioms", .arr (h.axioms.fold (init := #[]) fun acc n axs => acc.push (.arr #[toJson n, toJson axs]))),
+    ("axioms", Json.mkObj (h.axioms.toList.map fun (n, axs) => (n, toJson axs))),
     ("standard", toJson h.standard), ("incomplete", toJson h.incomplete), ("checker", h.checker)]
 
-/-- The graph of export `exportHash` against boundary list `b`: `none` when the store has no file for
-them, an error when the file does not read as their graph. -/
-def load? (root : System.FilePath) (exportHash : String) (b : BoundaryList) :
+/-- A graph is complete: its tagged nodes are exactly the declarations of its boundary list, with
+their informal text and their axioms, and every dependency of a node is a node. -/
+def check (h : Core.Hashed) : Except String Unit := do
+  for d in h.boundary.declarations do
+    let some n := h.nodes[d.name]? | throw s!"no node for {d.name}"
+    unless n.informal == some d.informal do throw s!"the node of {d.name} lacks its informal text"
+    unless h.axioms.contains d.name do throw s!"no axioms for {d.name}"
+  let tagged := h.nodes.fold (init := 0) fun k _ n => if n.informal.isSome then k + 1 else k
+  unless tagged == h.boundary.declarations.size do throw "a node with informal text is not on the boundary list"
+  unless h.axioms.size == h.boundary.declarations.size do throw "axioms of a declaration not on the boundary list"
+  for (_, n) in h.nodes do
+    for d in n.decl.deps do
+      unless h.nodes.contains d do throw s!"{n.decl.name} depends on {d}, which has no node"
+
+/-- The graph of export `exportHash` against boundary list `b`, stored as `boundaryHash`: `none` when
+the store has no file for them, an error when the file does not read as their complete graph. -/
+def load? (root : System.FilePath) (exportHash boundaryHash : String) (b : BoundaryList) :
     IO (Option Core.Hashed) := do
-  let p := path root exportHash b
+  let p := path root exportHash boundaryHash
   let some text ← readFileIfExists p | return none
   let parsed : Except String Core.Hashed := do
-    let j ← Json.parse text
-    unless (← j.getObjValAs? String "schema") == schema do throw "another schema"
-    unless (← j.getObjValAs? (Array String) "declarations") == b.declarations.map (·.name) do
-      throw "another boundary list"
-    let nodes ← (← j.getObjValAs? (Array Json) "nodes").foldlM (init := {}) fun m j => do
+    let o ← JsonObj.read (← Json.parse text) "graph"
+      ["schema", "export", "boundary", "nodes", "axioms", "standard", "incomplete", "checker"]
+    o.schema schema
+    unless (← o.get String "export") == exportHash && (← o.get String "boundary") == boundaryHash do
+      throw "the graph of another export or boundary list"
+    let mut nodes : Std.HashMap String Core.Node := {}
+    for j in ← o.get (Array Json) "nodes" do
       let n ← nodeFromJson? j
-      return m.insert n.decl.name n
-    let axioms ← (← j.getObjValAs? (Array Json) "axioms").foldlM (init := {}) fun m j => do
-      let #[n, axs] ← j.getArr? | throw "malformed axioms"
-      return m.insert (← n.getStr?) (← (← axs.getArr?).mapM (·.getStr?))
-    return {
-      nodes, axioms, boundary := b, standard := ← j.getObjValAs? (Array String) "standard"
-      incomplete := ← j.getObjValAs? (Array String) "incomplete"
-      checker := ← j.getObjValAs? String "checker" }
+      if nodes.contains n.decl.name then throw s!"two nodes for {n.decl.name}"
+      nodes := nodes.insert n.decl.name n
+    let mut axioms : Std.HashMap String (Array String) := {}
+    for (n, axs) in ← (← o.get Json "axioms").getObj? do
+      axioms := axioms.insert n (← (Lean.fromJson? axs : Except String (Array String)))
+    let h : Core.Hashed := {
+      nodes, axioms, boundary := b, exportHash, boundaryHash
+      standard := ← o.get (Array String) "standard", incomplete := ← o.get (Array String) "incomplete"
+      checker := ← o.get String "checker" }
+    check h
+    return h
   match parsed with
   | .ok h => return some h
-  | .error e => fail s!"{p}: not the graph of export {exportHash} and its boundary list: {e}"
+  | .error e => fail s!"{p}: not the graph of export {exportHash} and boundary list {boundaryHash}: {e}"
 
 end Graph
 

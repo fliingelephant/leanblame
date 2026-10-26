@@ -43,10 +43,44 @@ def hashHex (s : String) : String := (s.dropPrefix hashPrefix).copy
 
 def sha256OfBytes (b : ByteArray) : String := mkHash (Sha256.hexOfBytes b)
 
-/-! JSON. Key order is not part of any schema. -/
+/-! JSON. Key order is not part of any schema. Every key is written, `null` for none, and read
+strictly: a missing or an unknown key is an error. -/
 
 /-- The text the commands write: pretty-printed JSON and a final newline. -/
 def jsonText [Lean.ToJson α] (a : α) : String := (Lean.toJson a).pretty ++ "\n"
+
+/-- A JSON object whose keys are exactly the expected ones; `what` names it in errors. -/
+structure JsonObj where
+  what : String
+  fields : Std.TreeMap.Raw String Lean.Json
+
+/-- `j` as an object with exactly the keys `keys`: a missing or an unknown key is an error. -/
+def JsonObj.read (j : Lean.Json) (what : String) (keys : List String) : Except String JsonObj := do
+  let .obj fields := j | throw s!"{what}: not a JSON object"
+  for (k, _) in fields do
+    unless keys.contains k do throw s!"{what}: unknown key `{k}`"
+  for k in keys do
+    unless fields.contains k do throw s!"{what}: missing key `{k}`"
+  return { what, fields }
+
+/-- Key `k`, decoded; `null` is a value only for an `Option`. -/
+def JsonObj.get (o : JsonObj) (α : Type) [Lean.FromJson α] (k : String) : Except String α := do
+  let some v := o.fields.get? k | throw s!"{o.what}: missing key `{k}`"
+  (Lean.fromJson? v).mapError (s!"{o.what}.{k}: " ++ ·)
+
+/-- Key `k`, an object of strings, as pairs in key order. -/
+def JsonObj.getStrings (o : JsonObj) (k : String) : Except String (Array (String × String)) := do
+  let kvs ← ((← o.get Lean.Json k).getObj?).mapError (s!"{o.what}.{k}: " ++ ·)
+  kvs.toList.toArray.mapM fun (k', v) => return (k', ← v.getStr?.mapError (s!"{o.what}.{k}.{k'}: " ++ ·))
+
+/-- Fail unless key `schema` is `id`. -/
+def JsonObj.schema (o : JsonObj) (id : String) : Except String Unit := do
+  let s ← o.get String "schema"
+  unless s == id do throw s!"{o.what}: schema is `{s}`, expected `{id}`"
+
+/-- The JSON object of `kvs`, a string to string map. -/
+def stringsJson (kvs : Array (String × String)) : Lean.Json :=
+  Lean.Json.mkObj (kvs.toList.map fun (k, v) => (k, Lean.Json.str v))
 
 /-! Errors. -/
 

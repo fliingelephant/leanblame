@@ -76,7 +76,7 @@ constants in the type and the value, plus constructors for inductives and the in
 constructors; unlike it, a theorem's value, the value of an `opaque` or `partial` definition, proof
 subterms of types and definition bodies, and recursor rules are skipped.
 -/
-def declOf (ci : ConstantInfo) : MetaM Core.Decl := do
+def declOf (ci : ConstantInfo) (module : String) : MetaM Core.Decl := do
   if ci.isUnsafe then
     throwError s!"'{ci.name}' is unsafe: unsafe declarations cannot be tagged or hashed"
   let ups := ci.levelParams
@@ -97,7 +97,7 @@ def declOf (ci : ConstantInfo) : MetaM Core.Decl := do
   | .ctorInfo cv => deps := deps.push cv.induct
   | _ => pure ()
   return {
-    name := ci.name.toString, kind := kindOf ci, role := roleOf ci, uparams := ups.length
+    name := ci.name.toString, module, kind := kindOf ci, role := roleOf ci, uparams := ups.length
     typeHash := Canon.exprHash ups type, bodyHash
     deps := (Core.sortNames ((deps.filter (· != ci.name)).map toString)).eraseReps }
 
@@ -109,10 +109,10 @@ def usesOf : ConstantInfo → Array Name
   | ci => ci.type.getUsedConstants ++
     ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
 
-/-- A parsed export as the core sees it. `decl` erases proofs in the environment `Load` builds;
-`uses` and `isAssumed` follow what `Lean.collectAxioms` follows in that environment, which leaves out
-unsafe and partial constants. -/
-def ofExport (exported : LeanExport.ExportedEnv) : IO Core.Source := do
+/-- A parsed export as the core sees it; `moduleOf` names the module of a constant. `decl` erases
+proofs in the environment `Load` builds; `uses` and `isAssumed` follow what `Lean.collectAxioms`
+follows in that environment, which leaves out unsafe and partial constants. -/
+def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) : IO Core.Source := do
   let names ← nameMap exported
   let find? (s : String) : Option ConstantInfo := names[s]? >>= (exported.constMap[·]?)
   let inEnv? (s : String) := (find? s).filter fun ci => !ci.isUnsafe && !ci.isPartial
@@ -120,17 +120,13 @@ def ofExport (exported : LeanExport.ExportedEnv) : IO Core.Source := do
   return {
     decl := fun s => do
       let some ci := find? s | fail s!"Const not found in export '{s}'"
-      runner.run (declOf ci)
+      runner.run (declOf ci (← moduleOf ci.name).toString)
     uses := fun s => (((inEnv? s).map usesOf).getD #[]).map toString
     isAssumed := fun s => inEnv? s matches some (.axiomInfo _) }
 
 /-- The export file at `path`, parsed. -/
 def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk path .read))
-
-/-- The source of the export file at `path`. -/
-def ofFile (path : System.FilePath) : IO Core.Source := do
-  ofExport (← parseFile path)
 
 /-- Export `hash` from the object store, parsed. -/
 def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.ExportedEnv := do
@@ -150,7 +146,6 @@ def kernelAccepts (path : System.FilePath) : IO Bool := do
 /-- Lean as the core's backend. The standard axioms are the three every Lean library may rest on
 (docs/design/07). -/
 def backend : Core.Backend where
-  source := ofFile
   kernelAccepts := kernelAccepts
   checker := "leanchecker"
   standard := #[``propext, ``Classical.choice, ``Quot.sound].map (·.toString)

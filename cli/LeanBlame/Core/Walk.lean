@@ -96,14 +96,14 @@ def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Ar
     for n in comp do axioms := axioms.insert n sorted
   return roots.foldl (init := {}) fun m n => m.insert n (axioms.getD n #[])
 
-/-- Hash every declaration reachable from the boundary list in the export at `path`, which `backend`
-reads. The graph keeps what the other commands need from `backend`. -/
-def hashExport (backend : Core.Backend) (path : System.FilePath) (boundary : BoundaryList) :
-    IO Core.Hashed := do
-  let src ← backend.source path
+/-- Hash every declaration reachable from the boundary list in the export `src` serves; the export
+and the boundary list are stored as `exportHash` and `boundaryHash`. The graph keeps what the other
+commands need from `backend`. -/
+def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : BoundaryList)
+    (exportHash boundaryHash : String) : IO Core.Hashed := do
   -- Tagged declarations with their informal text.
   let tagged : Std.HashMap String String :=
-    boundary.declarations.foldl (init := {}) fun m d => m.insert d.name (strTrim d.informal)
+    boundary.declarations.foldl (init := {}) fun m d => m.insert d.name d.informal
   let isTagged := tagged.contains
   let order := boundary.declarations.map (·.name)
   -- comparator's worklist loop, cut at tagged declarations (each is a seed of its own).
@@ -151,8 +151,8 @@ def hashExport (backend : Core.Backend) (path : System.FilePath) (boundary : Bou
       for m in members do
         let node := nodes[m]!
         nodes := nodes.insert m { node with claim := Hash.member g m }
-  return { nodes, axioms, boundary, standard := backend.standard, incomplete := backend.incomplete
-           checker := backend.checker }
+  return { nodes, axioms, boundary, exportHash, boundaryHash, standard := backend.standard
+           incomplete := backend.incomplete, checker := backend.checker }
 
 /--
 The closure under `x`: the tagged declarations where the walk stops (the cut, sorted), and the
@@ -176,25 +176,26 @@ def closureOf (h : Core.Hashed) (x : String) : Array String × Array String := I
   return (Core.sortNames cut.toArray, untagged.toArray)
 
 /--
-Why `claim(x)` differs between `old` and `new` (docs/design/03, "Why a hash moved"). Collects every
-mismatch instead of stopping at the first:
+Why the claim of declaration `x` of `new`, named `oldName` in `old`, differs between them
+(docs/design/03, "Why a hash moved"). Collects every mismatch instead of stopping at the first:
 * `own-text`: the informal text of `x`;
 * `own-body`: kind, role, name, universe parameters, type or body of `x`;
 * `dep-spec`: tagged dependencies at the cut, in both closures, whose spec differs;
 * `cut-moved`: dependencies in both closures that gained or lost their tag;
 * `untagged`: untagged declarations in both closures whose own hash differs.
-Dependencies that appear or disappear are explained by the change of whatever references them.
+Dependencies that appear or disappear are explained by the change of whatever references them. An
+error when either graph lacks `x`.
 -/
-def changes (old new : Core.Hashed) (x : String)
-    (closure : Array String × Array String := closureOf new x) : Array Change := Id.run do
-  let some n := new.nodes[x]? | return #[]
-  let some o := old.nodes[x]? | return #[{ cause := .ownBody, names := #[x] }]
+def changes (old new : Core.Hashed) (oldName x : String)
+    (closure : Array String × Array String := closureOf new x) : Except String (Array Change) := do
+  let some n := new.nodes[x]? | throw s!"{x} is not in the graph of export {new.exportHash}"
+  let some o := old.nodes[oldName]? | throw s!"{oldName} is not in the graph of export {old.exportHash}"
   let mut out : Array Change := #[]
   if o.informal != n.informal then out := out.push { cause := .ownText, names := #[x] }
   -- What enters `own` besides the informal text.
   let fields (d : Core.Decl) := (d.kind, d.role, d.name, d.uparams, d.typeHash, d.bodyHash)
   if fields o.decl != fields n.decl then out := out.push { cause := .ownBody, names := #[x] }
-  let (cut0, unt0) := closureOf old x
+  let (cut0, unt0) := closureOf old oldName
   let (cut1, unt1) := closure
   let cut0s : Std.HashSet String := cut0.foldl (·.insert ·) {}
   let unt0s : Std.HashSet String := unt0.foldl (·.insert ·) {}

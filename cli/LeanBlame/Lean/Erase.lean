@@ -4,9 +4,8 @@ a type or a definition body whose type is a proposition is replaced by a marker
 before hashing.
 
 "Is this subterm a proof?" is `Lean.Meta.isProof`, asked in the environment
-`Load` builds from the export. The answer errs on one side only: when inference
-fails, the subterm is kept and hashed. Keeping a proof costs a spurious hash
-change; erasing a non-proof would hide a change of meaning.
+`Load` builds from the export. The terms come from the kernel, so type inference
+does not fail on them; if it does, hashing stops with the error.
 -/
 import Lean.Meta.InferType
 
@@ -19,9 +18,9 @@ def proofMarker : Expr := .mvar ⟨`_leanblame_erased_proof⟩
 
 def isProofMarker (e : Expr) : Bool := e == proofMarker
 
-/-- Whether `e` (closed but for locals) is a proof. Failures answer `false`: keep it. -/
+/-- Whether `e` (closed but for locals) is a proof. -/
 def isProof (e : Expr) : MetaM Bool :=
-  tryCatchRuntimeEx (withTransparency .all (Meta.isProof e)) fun _ => pure false
+  withTransparency .all (Meta.isProof e)
 
 /--
 Replace every proof subterm by `proofMarker`, outermost first. Locals are declared with the

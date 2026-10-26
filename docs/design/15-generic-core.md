@@ -92,8 +92,10 @@ inductive Role where
 
 /-- The raw facts about one declaration, as a frontend reports them. -/
 structure Decl where
-  /-- The printed name; the key everywhere. -/
+  /-- The printed name; the key within one export. -/
   name : String
+  /-- Where it is defined (Lean: its module); never hashed. -/
+  module : String
   /-- The assistant's own label. Lean: `def`, `theorem`, `axiom`, `inductive`,
   `ctor`, `opaque`, `quot`, `rec`. Never interpreted by the core. -/
   kind : String
@@ -132,10 +134,9 @@ structure Source where
   /-- Whether a constant is an assumption. `false` for unknown constants. -/
   isAssumed : String → Bool
 
-/-- What a proof assistant contributes to the tool. -/
+/-- What a proof assistant contributes to the tool besides the `Source` of each
+export, which `export` builds (§10). -/
 structure Backend where
-  /-- The source of the export object stored at a path. -/
-  source : System.FilePath → IO Source
   /-- Whether the assistant's own checker replays the export at a path. -/
   kernelAccepts : System.FilePath → IO Bool
   /-- The name of that checker, for the release manifest. Lean: `leanchecker`. -/
@@ -356,3 +357,29 @@ objects, the cache paragraph goes), "Platform" (`status`, `blame`, `sign`,
 table: `Status`, `Sign`, `Validate` take no `Backend`; `Release` takes it for the
 kernel gate; `Cache` becomes the `graphs` part of `Store` (or a `Graph` store
 module), schema `leanblame.graph.1`.
+
+## 10. Amendment (2026-10-26): ids, strict files, a complete status
+
+Decided with the owner; it supersedes §1–§9 where they differ.
+
+- Records name declarations by id (`leanblame.record.2`, [05-records.md](05-records.md)).
+  The ledger, `history`, `status` and `blame` go by id, so an approval follows a
+  rename; `changes` finds the old node by the name the record gives. A
+  declaration without an id of its own (a structure's field, a blueprint label's
+  other declarations) has its parent's id and its name under the parent.
+- Every JSON file LeanBlame writes has a schema id and is read strictly: a
+  missing or an unknown key is an error. A graph is checked for completeness when
+  it is read. A failure of proof erasure or of the statement printer stops
+  `export`; nothing falls back to a default.
+- `Decl` has `module`, never hashed. `export` builds the `Source`, since only it
+  has the environment that knows modules; `Backend` has no `source`.
+- The boundary list holds the declarations only (`leanblame.boundary.4`);
+  `.leanblame/current` holds the commit, toolchain and dependencies. A graph is
+  keyed by the store hashes of its export and boundary list (`leanblame.graph.2`).
+- `status --json` (`leanblame.status.4`, [14-schemas.md](14-schemas.md)) carries
+  everything a viewer needs, so no viewer computes it again: toolchain,
+  dependencies, modules, standard axioms, every record, each approval's
+  standing, each declaration's untagged dependencies with their modules, the
+  untagged declarations of the library that tagged ones use, and the unpermitted
+  axioms. `change` is `null` when the graph of the last live approval is not in
+  this store; there is no warning. With `--json`, nothing goes to stderr.

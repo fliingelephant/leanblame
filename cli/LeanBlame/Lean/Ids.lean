@@ -85,7 +85,8 @@ def insertAll (cs : Array Char) (offsets : Array Nat) (texts : Array String) : S
 def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
   let l ← Export.load root libsGiven
   let own : NameSet := l.mods.foldl (·.insert ·) {}
-  let missing := (trustedDecls l.env).filter fun (n, id) => id.isNone && own.contains (Export.moduleOf l.env n)
+  let missing ← (trustedDecls l.env).filterM fun (n, id) => do
+    return id.isNone && own.contains (← IO.ofExcept (Export.moduleOf l.env n))
   if missing.isEmpty then
     IO.eprintln "leanblame: every tagged declaration of this library has an id"
     return 0
@@ -96,7 +97,7 @@ def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
   let mut problems := #[]
   for (n, _) in missing.qsort (·.1.cmp ·.1 == .lt) do
     let id ← newId
-    let mod := Export.moduleOf l.env n
+    let mod ← IO.ofExcept (Export.moduleOf l.env n)
     let some file ← Lean.SearchPath.findWithExt l.srcPath "lean" mod
       | problems := problems.push s!"{n}: cannot find the source of {mod}; write @[trusted \"{id}\"] by hand"
     let some r := declRangeExt.find? (level := .exported) l.env n <|> declRangeExt.find? (level := .server) l.env n

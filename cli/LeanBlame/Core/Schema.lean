@@ -1,12 +1,13 @@
 /-
-The interfaces of docs/design/14-schemas.md: boundary list (JSON), record (TOML),
-release manifest (JSON) and status (JSON), each a Lean structure with an
-emitter; the boundary list and the record have a strict reader. Records keep the
-field order of docs/design/05; JSON key order is not part of the schema.
+The interfaces of docs/design/14-schemas.md: boundary list (JSON), record (TOML), release manifest
+(JSON) and status (JSON), each a Lean structure with an emitter; the boundary list and the record
+have a strict reader: a missing or an unknown key is an error. Records keep the field order of
+docs/design/05; JSON key order is not part of the schema.
 
 Declaration names are kept as strings, exactly as the frontend prints them (Lean:
 `Lean.Name.toString`); only the frontend maps them back to its constants
-(docs/design/15-generic-core.md).
+(docs/design/15-generic-core.md). A name identifies a declaration within one export; its id
+identifies it across exports.
 -/
 import Lake.Toml
 import Lean.Data.Json
@@ -15,7 +16,7 @@ import LeanBlame.Core.Util
 
 namespace LeanBlame
 
-open Lean (Json ToJson toJson)
+open Lean (Json ToJson toJson FromJson)
 
 /-! TOML -/
 
@@ -94,6 +95,14 @@ inductive Action where
   | approve | withdraw
   deriving Inhabited, Repr, BEq, Hashable
 
+/-- What an approval of a declaration is worth now (docs/design/05): `current`, it is live and
+carries the declaration's current claim; `superseded`, it is live and carries an older claim;
+`withdrawn`, its signer withdrew it; `excluded`, `leanblame.toml` excludes its record;
+`not-allowed`, its signer is not among `allowed_signers`. -/
+inductive Standing where
+  | current | superseded | withdrawn | excluded | notAllowed
+  deriving Inhabited, Repr, BEq, Hashable
+
 instance : ToString Role where
   toString
     | .assumed => "assumed"
@@ -125,19 +134,39 @@ instance : ToString Action where
     | .approve => "approve"
     | .withdraw => "withdraw"
 
+instance : ToString Standing where
+  toString
+    | .current => "current"
+    | .superseded => "superseded"
+    | .withdrawn => "withdrawn"
+    | .excluded => "excluded"
+    | .notAllowed => "not-allowed"
+
 def Role.all : List Role := [.assumed, .defined, .proved]
 def Action.all : List Action := [.approve, .withdraw]
 
 /-- The value among `all` that prints as `s`. -/
 def ofString? [ToString α] (all : List α) (s : String) : Option α := all.find? (toString · == s)
 
+/-- The value among `all` that the JSON string `j` names. -/
+def ofJsonString? [ToString α] (all : List α) (j : Json) : Except String α := do
+  let s ← j.getStr?
+  let some a := ofString? all s | throw s!"`{s}` is not one of {", ".intercalate (all.map toString)}"
+  return a
+
 instance : ToJson Role := ⟨(Json.str <| toString ·)⟩
 instance : ToJson State := ⟨(Json.str <| toString ·)⟩
 instance : ToJson Cause := ⟨(Json.str <| toString ·)⟩
 instance : ToJson ProofStatus := ⟨(Json.str <| toString ·)⟩
 instance : ToJson Action := ⟨(Json.str <| toString ·)⟩
+instance : ToJson Standing := ⟨(Json.str <| toString ·)⟩
+instance : FromJson Role := ⟨ofJsonString? Role.all⟩
 
 /-! ## 1. Boundary list -/
+
+/-- The informal text as docs/design/03 hashes it: ASCII whitespace trimmed, line endings
+normalized, no Unicode normalization (Lean core has none). -/
+def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
 /-- One piece of a printed statement: text, and the constant it refers to when it is a reference. -/
 structure Segment where
@@ -155,112 +184,99 @@ structure Statement where
   deriving Inhabited, Repr
 
 instance : ToJson Segment where
-  toJson s := Json.mkObj <| (s.const.toList.map fun c => ("const", Json.str c)) ++ [("text", Json.str s.text)]
+  toJson s := Json.mkObj [("text", s.text), ("const", toJson s.const)]
 
-def Segment.fromJson? (j : Json) : Except String Segment := do
-  return { text := ← j.getObjValAs? String "text", const := ← j.getObjValAs? (Option String) "const" }
+instance : FromJson Segment where
+  fromJson? j := do
+    let o ← JsonObj.read j "segment" ["text", "const"]
+    return { text := ← o.get String "text", const := ← o.get (Option String) "const" }
 
 instance : ToJson Statement where
   toJson s := Json.mkObj [("pretty", toJson s.pretty), ("plain", toJson s.plain)]
 
-def Statement.fromJson? (j : Json) : Except String Statement := do
-  let segments (k : String) : Except String (Array Segment) := do
-    (← (j.getObjVal? k >>= (·.getArr?)).mapError (s!"statement.{k}: " ++ ·)).mapM Segment.fromJson?
-  return { pretty := ← segments "pretty", plain := ← segments "plain" }
+instance : FromJson Statement where
+  fromJson? j := do
+    let o ← JsonObj.read j "statement" ["pretty", "plain"]
+    return { pretty := ← o.get (Array Segment) "pretty", plain := ← o.get (Array Segment) "plain" }
 
 structure BoundaryDecl where
   name : String
-  /-- The declaration's id (Lean: written in `@[trusted "id"]`): stays when it is renamed or edited;
-  never hashed. `none` when it has none. -/
-  id : Option String := none
-  /-- For a constructor or projection of a tagged inductive or structure, tagged or not: that
-  declaration's name. -/
+  /-- Stays when the declaration is renamed or edited; never hashed. Its own (Lean: written in
+  `@[trusted "id"]`; a blueprint label), or else `<parent's id>/<name relative to the parent>`. -/
+  id : String
+  /-- The declaration whose id stands for this one: for a constructor or projection of a tagged
+  inductive or structure, that declaration; for the other declarations of a blueprint label, the
+  first. -/
   parent : Option String := none
   module : String
   /-- The proof assistant's own label (Lean: `def`, `theorem`, …); never interpreted. -/
   kind : String
   role : Role
-  /-- The docstring (a member without one: its parent's). -/
+  /-- The docstring (a member without one: its parent's), as `normalizeInformal` leaves it. -/
   informal : String
   statement : Statement
   deriving Inhabited, Repr
 
+/-- The declarations of the trusted boundary, sorted by name. Commit, toolchain and dependencies
+are not part of it: they change while the declarations stay (`Store.Current` holds them). -/
 structure BoundaryList where
   library : String
-  /-- The library's commit; `none` when the library had uncommitted changes: such an export cannot be
-  signed or released. -/
-  commit : Option String
-  toolchain : String
-  deps : Array (String × String)
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.3"
+def BoundaryList.schemaId : String := "leanblame.boundary.4"
 
 instance : ToJson BoundaryDecl where
-  toJson d := Json.mkObj [("name", d.name), ("id", toJson d.id), ("parent", toJson d.parent),
+  toJson d := Json.mkObj [("name", d.name), ("id", d.id), ("parent", toJson d.parent),
     ("module", d.module), ("kind", d.kind), ("role", toJson d.role), ("informal", d.informal),
     ("statement", toJson d.statement)]
 
 instance : ToJson BoundaryList where
   toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
-    ("commit", toJson b.commit), ("toolchain", b.toolchain),
-    ("deps", Json.mkObj (b.deps.toList.map fun (k, v) => (k, v))),
     ("declarations", toJson b.declarations)]
 
-/-- Field `k` of the object `j` as a string; errors name the field. -/
-def getStrField (j : Json) (what k : String) : Except String String :=
-  (j.getObjValAs? String k).mapError (s!"{what}.{k}: " ++ ·)
-
 def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
-  let name ← getStrField j "declaration" "name"
-  let what := s!"declaration {name}"
-  let kind ← getStrField j what "kind"
-  if kind.isEmpty then throw s!"{what}: kind is required"
-  let role ← getStrField j what "role"
-  let some role := ofString? Role.all role
-    | throw s!"{what}: role `{role}` is not one of {", ".intercalate (Role.all.map toString)}"
+  let o ← JsonObj.read j "declaration"
+    ["name", "id", "parent", "module", "kind", "role", "informal", "statement"]
+  let name ← o.get String "name"
+  let o := { o with what := s!"declaration {name}" }
   let d : BoundaryDecl := {
-    name, kind, role
-    id := ← (j.getObjValAs? (Option String) "id").mapError (s!"{what}.id: " ++ ·)
-    parent := ← (j.getObjValAs? (Option String) "parent").mapError (s!"{what}.parent: " ++ ·)
-    module := ← getStrField j what "module"
-    informal := ← getStrField j what "informal"
-    statement := ← (Statement.fromJson? (j.getObjValD "statement")).mapError (s!"{what}: " ++ ·) }
-  if strTrim d.informal == "" then
-    throw s!"{what}: informal text is required"
+    name, id := ← o.get String "id", parent := ← o.get (Option String) "parent"
+    module := ← o.get String "module", kind := ← o.get String "kind", role := ← o.get Role "role"
+    informal := ← o.get String "informal", statement := ← o.get Statement "statement" }
+  for (k, v) in [("id", d.id), ("kind", d.kind), ("informal", d.informal)] do
+    if v.isEmpty then throw s!"{o.what}: `{k}` is empty"
+  unless normalizeInformal d.informal == d.informal do
+    throw s!"{o.what}: the informal text has surrounding whitespace or CRLF line endings"
   return d
 
 def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
-  let w := "boundary list"
-  let schema ← getStrField j w "schema"
-  unless schema == BoundaryList.schemaId do
-    throw s!"boundary list: schema is `{schema}`, expected `{BoundaryList.schemaId}`"
-  let decls ← (j.getObjVal? "declarations" >>= (·.getArr?)).mapError (s!"{w}.declarations: " ++ ·)
-  let decls ← decls.mapM BoundaryDecl.fromJson?
-  let mut seen : Std.HashSet String := {}
+  let o ← JsonObj.read j "boundary list" ["schema", "library", "declarations"]
+  o.schema BoundaryList.schemaId
+  let decls ← (← o.get (Array Json) "declarations").mapM BoundaryDecl.fromJson?
+  let names : Std.HashSet String := decls.foldl (·.insert ·.name) {}
+  unless names.size == decls.size do throw "boundary list: a name is listed twice"
   let mut ids : Std.HashMap String String := {}
   for d in decls do
-    if seen.contains d.name then throw s!"boundary list: `{d.name}` listed twice"
-    seen := seen.insert d.name
-    if let some id := d.id then
-      if let some other := ids[id]? then throw s!"boundary list: `{other}` and `{d.name}` have the same id {id}"
-      ids := ids.insert id d.name
-  let deps ← (j.getObjVal? "deps" >>= (·.getObj?)).mapError (s!"{w}.deps: " ++ ·)
-  return {
-    library := ← getStrField j w "library"
-    commit := ← (j.getObjValAs? (Option String) "commit").mapError (s!"{w}.commit: " ++ ·)
-    toolchain := ← getStrField j w "toolchain"
-    deps := ← deps.toList.toArray.mapM fun (k, v) => do
-      return (k, ← v.getStr?.mapError (s!"{w}.deps.{k}: " ++ ·))
-    declarations := decls }
+    if let some other := ids[d.id]? then throw s!"boundary list: `{other}` and `{d.name}` have the same id {d.id}"
+    ids := ids.insert d.id d.name
+    if let some p := d.parent then
+      unless names.contains p do throw s!"boundary list: the parent {p} of {d.name} is not listed"
+  return { library := ← o.get String "library", declarations := decls }
+
+/-- The declaration `key` names, by its name or its id. -/
+def BoundaryList.find? (b : BoundaryList) (key : String) : Except String (Option BoundaryDecl) :=
+  match b.declarations.filter fun d => d.name == key || d.id == key with
+  | #[] => .ok none
+  | #[d] => .ok (some d)
+  | ds => .error s!"{key} is the name of one declaration and the id of another: {", ".intercalate (ds.toList.map (·.name))}"
 
 def BoundaryList.parse (contents : String) : Except String BoundaryList := do
   BoundaryList.fromJson? (← Json.parse contents)
 
 /-! ## 2. Record -/
 
-def Record.schemaId : String := "leanblame.record.1"
+def Record.schemaId : String := "leanblame.record.2"
 
 /-- `provider:id` with a non-empty lowercase provider and a non-empty id. -/
 def isSignerId (s : String) : Bool :=
@@ -271,6 +287,17 @@ def isSignerId (s : String) : Bool :=
       !rest.isEmpty
   | [] => false
 
+/-- One declaration an approve record approves. -/
+structure ApprovedConstant where
+  /-- The declaration's id: the key in the record's `constants` table. -/
+  id : String
+  /-- Its name in the export the record names. -/
+  name : String
+  claim : String
+  /-- The `equiv` proof the signer relied on for it. -/
+  evidence : Option String := none
+  deriving Inhabited, Repr
+
 structure ApproveRecord where
   signer : String
   date : Std.Time.Timestamp
@@ -280,9 +307,7 @@ structure ApproveRecord where
   deps : Array (String × String)
   exportHash : String
   boundary : String
-  /-- Constant name → claim hash. -/
-  constants : Array (String × String)
-  evidence : Option String := none
+  constants : Array ApprovedConstant
   note : Option String := none
   deriving Inhabited, Repr
 
@@ -290,7 +315,7 @@ structure WithdrawRecord where
   signer : String
   date : Std.Time.Timestamp
   refersTo : String
-  /-- `none`: every constant of the withdrawn record. -/
+  /-- Ids of declarations of the withdrawn record; `none`: all of them. -/
   constants : Option (Array String) := none
   note : Option String := none
   deriving Inhabited, Repr
@@ -306,20 +331,35 @@ def date : Record → Std.Time.Timestamp
   | .approve r => r.date
   | .withdraw r => r.date
 
+def signer : Record → String
+  | .approve r => r.signer
+  | .withdraw r => r.signer
+
+def note : Record → Option String
+  | .approve r => r.note
+  | .withdraw r => r.note
+
+def action : Record → Action
+  | .approve _ => .approve
+  | .withdraw _ => .withdraw
+
 open Lake.Toml (Value ppTable) in
-/-- The record as TOML, printed by Lake: the fields of docs/design/05 in order, tables last. -/
+/-- The record as TOML, printed by Lake: the fields of docs/design/05 in order, tables last; each
+declaration of an approve record is a line `"id" = { name = …, claim = …, evidence = … }`. -/
 def toToml (rec : Record) : String :=
   let head (action : Action) (signer : String) (date : Std.Time.Timestamp) : Table :=
     Table.empty |>.insert `schema schemaId |>.insert `action (toString action) |>.insert `signer signer
       |>.insert `date (Value.dateTime .missing (Lake.Toml.DateTime.ofString? date.toIso).get!)
   let table (kvs : Array (String × String)) : Table :=
     kvs.foldl (init := Table.empty) fun t (k, v) => t.insert (.mkSimple k) v
+  let constant (c : ApprovedConstant) : Table :=
+    Table.empty |>.insert `name c.name |>.insert `claim c.claim |>.insertSome `evidence c.evidence
   ppTable <| match rec with
   | .approve r => head .approve r.signer r.date |>.insert `module r.module
       |>.insert `commit r.commit |>.insert `toolchain r.toolchain |>.insert `deps (table r.deps)
-      |>.insert `export r.exportHash |>.insert `boundary r.boundary
-      |>.insertSome `evidence r.evidence |>.insertSome `note r.note
-      |>.insert `constants (table r.constants)
+      |>.insert `export r.exportHash |>.insert `boundary r.boundary |>.insertSome `note r.note
+      |>.insert `constants (r.constants.foldl (init := Table.empty) fun t c =>
+          t.insert (.mkSimple c.id) (constant c))
   | .withdraw r => head .withdraw r.signer r.date |>.insert `refers_to r.refersTo
       |>.insertSome `constants r.constants |>.insertSome `note r.note
 
@@ -328,7 +368,7 @@ def toToml (rec : Record) : String :=
 def hashMsg (s : String) : String := s!"`{s}` is not sha256: plus 64 lowercase hex digits"
 
 /-- Decode a parsed TOML table as a record. Missing or bad fields log an error and decode to a
-default, so every problem is reported. -/
+default, so every problem is reported; a record with a logged error does not parse. -/
 def decode (t : Table) : DecodeM Record := do
   discard <| decodeStr t `schema (· == schemaId) (s!"is `{·}`, expected `{schemaId}`")
   let signer ← decodeStr t `signer isSignerId (s!"`{·}` is not provider:id")
@@ -340,26 +380,31 @@ def decode (t : Table) : DecodeM Record := do
   let action ← decodeStr t `action (ofString? Action.all · |>.isSome) (s!"is `{·}`, not approve or withdraw")
   match ofString? Action.all action with
   | some .approve =>
-    checkKeys t #["schema", "action", "signer", "date", "constants", "module", "commit", "toolchain",
-      "deps", "export", "boundary", "evidence", "note"] "an approve record"
+    checkKeys t #["schema", "action", "signer", "date", "module", "commit", "toolchain", "deps",
+      "export", "boundary", "note", "constants"] "an approve record"
     let deps ← decodeTable t `deps
     let ct ← decodeTable t `constants
-    if ct.items.isEmpty then logDecodeErrorAt .missing "`constants` must list at least one constant"
+    if ct.items.isEmpty then logDecodeErrorAt (refOf t `constants) "`constants` must list at least one declaration"
     return .approve {
       signer, date, note, module := ← decodeStr t `module, commit := ← decodeStr t `commit
       toolchain := ← decodeStr t `toolchain
       deps := ← deps.items.mapM fun (k, _) => return (keyString k, ← decodeStr deps k)
       exportHash := ← decodeStr t `export isHash hashMsg
       boundary := ← decodeStr t `boundary isHash hashMsg
-      constants := ← ct.items.mapM fun (k, _) => return (keyString k, ← decodeStr ct k isHash hashMsg)
-      evidence := ← if t.contains `evidence then some <$> decodeStr t `evidence isHash hashMsg
-        else pure none }
+      constants := ← ct.items.mapM fun (k, v) => do
+        let id := keyString k
+        let c ← Lake.Toml.tryDecodeD .empty v.decodeTable
+        checkKeys c #["name", "claim", "evidence"] s!"constants.{id}"
+        return { id, name := ← decodeStr c `name, claim := ← decodeStr c `claim isHash hashMsg
+                 evidence := ← if c.contains `evidence then some <$> decodeStr c `evidence isHash hashMsg
+                   else pure none } }
   | some .withdraw =>
-    checkKeys t #["schema", "action", "signer", "date", "constants", "refers_to", "note"]
+    checkKeys t #["schema", "action", "signer", "date", "refers_to", "constants", "note"]
       "a withdraw record"
-    return .withdraw {
-      signer, date, note, refersTo := ← decodeStr t `refers_to isHash hashMsg
-      constants := ← t.tryDecode? `constants }
+    let constants : Option (Array String) ← t.tryDecode? `constants
+    if constants.any (·.isEmpty) then
+      logDecodeErrorAt (refOf t `constants) "`constants` lists no declaration; leave it out to withdraw all"
+    return .withdraw { signer, date, note, refersTo := ← decodeStr t `refers_to isHash hashMsg, constants }
   | none => return default
 
 /-- Parse record text. -/
@@ -368,10 +413,35 @@ def parse (contents : String) (fileName : String) : IO (Except (Array String) Re
 
 end Record
 
-/-- The axiom report of one theorem: `proven`, `open` or `n/a`, with the axioms it rests on. -/
+/-- A record as loaded from a records directory. -/
+structure LoadedRecord where
+  /-- `sha256:` of the file bytes: the record's id. -/
+  hash : String
+  /-- Relative to the library root. -/
+  path : System.FilePath
+  record : Record
+  deriving Inhabited
+
+/-- Every field of the record, with its id and path. -/
+instance : ToJson LoadedRecord where
+  toJson r :=
+    let rec_ := r.record
+    let common : List (String × Json) := [("record", r.hash), ("path", r.path.toString),
+      ("action", toJson rec_.action), ("signer", rec_.signer), ("date", rec_.date.toIso),
+      ("note", toJson rec_.note)]
+    Json.mkObj <| common ++ match rec_ with
+    | .approve a => [("module", a.module), ("commit", a.commit), ("toolchain", a.toolchain),
+        ("deps", stringsJson a.deps), ("export", a.exportHash), ("boundary", a.boundary),
+        ("constants", Json.arr (a.constants.map fun c => Json.mkObj [("id", c.id),
+          ("name", c.name), ("claim", c.claim), ("evidence", toJson c.evidence)]))]
+    | .withdraw w => [("refers_to", w.refersTo), ("constants", toJson w.constants)]
+
+/-- The axiom report of one theorem: `proven`, `open` or `n/a`; the axioms it rests on; and among
+them those that are neither standard, nor a valid tagged axiom, nor a missing proof. -/
 structure ProofReport where
   status : ProofStatus
   axioms : Array String := #[]
+  unpermitted : Array String := #[]
   deriving Inhabited, Repr
 
 /-! ## 3. Release manifest -/
@@ -398,9 +468,8 @@ instance : ToJson ReleaseManifest where
   toJson m :=
     let count (s : ProofStatus) := (m.theorems.filter (·.2.status == s)).size
     Json.mkObj [("schema", ReleaseManifest.schemaId), ("library", m.library), ("tag", m.tag),
-      ("commit", m.commit), ("toolchain", m.toolchain),
-      ("deps", Json.mkObj (m.deps.toList.map fun (k, v) => (k, v))), ("export", m.exportHash),
-      ("boundary", m.boundary), ("records", toJson m.records),
+      ("commit", m.commit), ("toolchain", m.toolchain), ("deps", stringsJson m.deps),
+      ("export", m.exportHash), ("boundary", m.boundary), ("records", toJson m.records),
       ("kernel", Json.mkObj [("checker", m.checker), ("version", m.toolchain), ("passed", true)]),
       ("theorems", Json.mkObj (m.theorems.toList.map fun (n, p) =>
         (n, Json.mkObj [("status", toJson p.status), ("axioms", toJson p.axioms)]))),
@@ -413,64 +482,94 @@ structure Change where
   names : Array String
   deriving Inhabited, Repr, BEq, ToJson
 
+/-- A record about one declaration. -/
 structure HistoryEntry where
   record : String
   action : Action
   signer : String
   date : Std.Time.Timestamp
-  claim : Option String
+  /-- The declaration's name in the approve record. -/
+  name : String
+  /-- The claim the approval carries; for a withdraw, the claim of the approval it withdraws. -/
+  claim : String
   note : Option String
+  /-- What the approval is worth now; `none` for a withdraw. -/
+  standing : Option Standing
+  deriving Inhabited, Repr
+
+/-- An untagged declaration a tagged one uses directly, and its module. -/
+structure UntaggedDep where
+  name : String
+  module : String
   deriving Inhabited, Repr
 
 structure StatusDecl where
-  id : Option String
-  parent : Option String
-  module : String
-  kind : String
-  role : Role
-  informal : String
-  statement : Statement
+  /-- The declaration as the boundary list has it. -/
+  decl : BoundaryDecl
   claim : String
   state : State
-  change : Array Change
+  /-- Why the claim moved since the last live approval: empty when it did not move or there is
+  none; `none` when that is unknown, as the export that approval names is not in this store. -/
+  change : Option (Array Change)
   signers : Array String
   history : Array HistoryEntry
   blockedBy : Array String
   proof : ProofReport
   evidence : Option String
   taggedDeps : Array String
+  untaggedDeps : Array UntaggedDep
   closureSize : Nat
   deriving Inhabited, Repr
 
 structure StatusReport where
   library : String
+  /-- `none` when the export has uncommitted changes. -/
   commit : Option String
+  toolchain : String
+  deps : Array (String × String)
   exportHash : String
+  boundary : String
   generated : Std.Time.Timestamp
-  declarations : Array (String × StatusDecl)
-  deriving Inhabited, Repr
+  /-- The library's own modules. -/
+  modules : Array String
+  /-- The assumptions every proof may rest on (`Core.Backend.standard`). -/
+  standard : Array String
+  /-- Sorted by name. -/
+  declarations : Array StatusDecl
+  /-- Every record of the records directories. -/
+  records : Array LoadedRecord
+  /-- Untagged declarations of this library that tagged ones use, each with those users. -/
+  untaggedInLibrary : Array (String × Array String)
+  deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.3"
+def StatusReport.schemaId : String := "leanblame.status.4"
 
-/-- `claim` and `evidence` are `null` when absent; `note` is omitted. -/
 instance : ToJson HistoryEntry where
-  toJson h := Json.mkObj <| ([("record", h.record), ("action", toJson h.action), ("signer", h.signer),
-    ("date", h.date.toIso), ("claim", toJson h.claim)] : List (String × Json)) ++
-    Json.opt "note" h.note
+  toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
+    ("date", h.date.toIso), ("name", h.name), ("claim", h.claim), ("note", toJson h.note),
+    ("standing", toJson h.standing)]
 
+/-- Keyed by name in the report, so the name is not repeated. -/
 instance : ToJson StatusDecl where
-  toJson d := Json.mkObj [("id", toJson d.id), ("parent", toJson d.parent), ("module", d.module),
-    ("kind", d.kind), ("role", toJson d.role), ("informal", d.informal),
-    ("statement", toJson d.statement), ("claim", d.claim),
+  toJson d := Json.mkObj [("id", d.decl.id), ("parent", toJson d.decl.parent), ("module", d.decl.module),
+    ("kind", d.decl.kind), ("role", toJson d.decl.role), ("informal", d.decl.informal),
+    ("statement", toJson d.decl.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
     ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
-    ("proof", Json.mkObj [("status", toJson d.proof.status), ("axioms", toJson d.proof.axioms)]),
+    ("proof", Json.mkObj [("status", toJson d.proof.status), ("axioms", toJson d.proof.axioms),
+      ("unpermitted", toJson d.proof.unpermitted)]),
     ("evidence", toJson d.evidence), ("tagged_deps", toJson d.taggedDeps),
+    ("untagged_deps", Json.arr (d.untaggedDeps.map fun u => Json.mkObj [("name", u.name), ("module", u.module)])),
     ("closure_size", d.closureSize)]
 
 instance : ToJson StatusReport where
   toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
-    ("commit", toJson s.commit), ("export", s.exportHash), ("generated", s.generated.toIso),
-    ("declarations", Json.mkObj (s.declarations.toList.map fun (n, d) => (n, toJson d)))]
+    ("commit", toJson s.commit), ("toolchain", s.toolchain), ("deps", stringsJson s.deps),
+    ("export", s.exportHash), ("boundary", s.boundary), ("generated", s.generated.toIso),
+    ("modules", toJson s.modules), ("standard_axioms", toJson s.standard),
+    ("declarations", Json.mkObj (s.declarations.toList.map fun d => (d.decl.name, toJson d))),
+    ("records", toJson s.records),
+    ("untagged_in_library", Json.arr (s.untaggedInLibrary.map fun (n, users) =>
+      Json.mkObj [("name", n), ("used_by", toJson users)]))]
 
 end LeanBlame

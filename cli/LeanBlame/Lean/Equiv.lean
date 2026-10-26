@@ -15,7 +15,8 @@ as the only cause (the named ones, else all), compared with X's last live approv
 3. The accepted theorems, with what they use, go to the object store as the solution export, which
    `leanchecker` replays (the kernel check `release` runs): a file anyone can check again.
 4. For each X whose own theorem was accepted, an evidence file (`Store.evidencePath`) names the
-   solution export: `status` shows it as X's `evidence`, `sign` puts the hash in the record.
+   solution export: `status` shows it as X's `evidence`, `sign` puts the hash in X's entry of the
+   record.
 What is left is for a human to read: equiv prints the root causes, with the old and new values of
 each changed definition that is not definitionally equal.
 
@@ -76,7 +77,7 @@ def runMeta (env : Kernel.Environment) (x : MetaM α) : IO α := do
 
 /-- `e` printed with notation (field notation too) off, as the sign server shows types (docs/design/06). -/
 def pp (env : Kernel.Environment) (e : Expr) : IO String := do
-  try return toString (← runMeta env (PrettyPrinter.ppExpr e)) catch _ => return toString e
+  return toString (← runMeta env (PrettyPrinter.ppExpr e))
 
 /-- The statement that old and current `c` mean the same, with its proof: `Old.c = c` for a safe
 definition whose type text and universe parameters are unchanged, `<old type> ↔ <type>` for a
@@ -99,9 +100,10 @@ def goal (env : Kernel.Environment) (dup : NameSet) (c : Name) (o n : ConstantIn
                 mkApp4 (.const ``Iff.intro []) a b (.lam `h a (.bvar 0) .default) (.lam `h b (.bvar 0) .default))
   | _, _ => return .error s!"no goal for a changed {Source.kindOf n}"
 
-/-- One eligible declaration: the approve record it is compared with and its current claim. -/
+/-- One eligible declaration: its id, the approve record it is compared with and its current claim. -/
 structure Target where
   name : Name
+  id : String
   record : String
   claim : String
 
@@ -207,32 +209,39 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : C
     fail s!"leanchecker rejected the solution export {solution}"
   return (proven, solution)
 
-def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
+def run (root : System.FilePath) (keys : Array String) : IO UInt32 := do
   let ledger ← Ledger.load root
-  let r ← Status.compute root ledger (warn := false)
+  let r ← Status.compute root ledger
   let decls := r.report.declarations
-  for n in names do
-    unless decls.any (·.1 == n) do fail s!"{n} is not on the boundary list"
   let new := r.new
+  let names ← keys.mapM fun k => do
+    let some d ← IO.ofExcept (new.boundary.find? k) | fail s!"{k} is not on the boundary list"
+    pure d.name
   -- Eligible: outdated, and `untagged` the only cause; with the approve record compared with.
-  let mut eligible : Array (String × String × String × ApproveRecord) := #[]
+  let mut eligible : Array (String × StatusDecl × LoadedRecord × ApproveRecord) := #[]
   let mut left := 0
-  for (n, d) in decls do
+  for d in decls do
+    let n := d.decl.name
     unless names.isEmpty || names.contains n do continue
-    if d.state == .outdated && d.change.size == 1 && d.change[0]!.cause == .untagged then
-      let some (r, a, _) := (Status.liveApprovals ledger n).back? | continue
-      eligible := eligible.push (n, r.hash, d.claim, a)
+    let untaggedOnly := match d.change with
+      | some #[c] => c.cause == .untagged
+      | _ => false
+    if d.state == .outdated && untaggedOnly then
+      let some (lastRec, a, _) := (Status.liveApprovals ledger d.decl.id).back?
+        | fail s!"{n} is outdated but has no live approval"
+      eligible := eligible.push (n, d, lastRec, a)
     else if !names.isEmpty && d.state != .valid then
       left := left + 1
       IO.eprintln (if d.state == .unsigned then s!"{n}: unsigned: no approved meaning to compare with"
-        else s!"{Status.textLine n d}\n{n}: no goal: a cause other than `untagged`; a human reads")
+        else s!"{Status.textLine d}\n{n}: no goal: a cause other than `untagged`; a human reads")
   if eligible.isEmpty then
     if left == 0 then IO.println "equiv: no outdated declaration whose only cause is untagged"
     return if left == 0 then 0 else 1
   let newExp ← Source.loadExported root r.cur.exportHash
   let constOf ← Source.nameMap newExp
-  let targets : Array (Target × ApproveRecord) := eligible.map fun (n, record, claim, a) =>
-    ({ name := constOf[n]!, record, claim }, a)
+  let targets : Array (Target × ApproveRecord) ← eligible.mapM fun (n, d, lastRec, a) => do
+    let some c := constOf[n]? | fail s!"{n} is not in the current export"
+    pure ({ name := c, id := d.decl.id, record := lastRec.hash, claim := d.claim }, a)
   let base := (← Load.environmentOfExport newExp).toKernelEnv
   -- One group per old export and boundary list.
   let groups := dedup (targets.map fun (_, a) => (a.exportHash, a.boundary))
@@ -243,9 +252,8 @@ def run (root : System.FilePath) (names : Array String) : IO UInt32 := do
     let (ok, solution) ← proveGroup root base (new := new) (newExp := newExp) (old := old)
       (oldExp := ← Source.loadExported root e) group
     for t in ok do
-      let evidence := Json.mkObj [("name", t.name.toString), ("claim", t.claim),
-        ("old_record", t.record), ("evidence", solution)]
-      writeFileMkdirs (Store.evidencePath root t.name.toString t.claim) (jsonText evidence)
+      let evidence : Store.Evidence := { id := t.id, claim := t.claim, oldRecord := t.record, proof := solution }
+      writeFileMkdirs (Store.evidencePath root t.claim) (jsonText evidence)
       IO.println s!"{t.name} proven {solution}"
     proven := proven + ok.size
     left := left + group.size - ok.size

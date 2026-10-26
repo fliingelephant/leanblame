@@ -12,12 +12,13 @@
 | **closure** | A declaration plus everything it uses, recursively. |
 | **boundary list** | The declarations a human must read, with their informal text. Input to LeanBlame. |
 | **tagged** | On the boundary list. `@[trusted]` is the usual way. |
-| **id** | A declaration's random UUID, `@[trusted "id"]`, written by `leanblame id`. Survives renames; never hashed. Cite as `id@record`. |
+| **id** | A declaration's random UUID, `@[trusted "id"]`, written by `leanblame id`; a structure's field has the structure's id and its name. Survives renames; never hashed. Records name declarations by it. Cite as `id@record`. |
 | **informal text** | The docstring, or the blueprint's statement text. The spec a signer relies on. |
 | **spec** | Name, type, informal text of a declaration. What its users sign. |
 | **claim hash** | Hash of what one signoff covers. See [03-trust-model.md](03-trust-model.md). |
 | **record** | One signoff file: approve or withdraw. |
-| **live record** | An approve record that counts for a constant: no counting withdraw covers it, signer allowed. Defined in [05-records.md](05-records.md). |
+| **live record** | An approve record that counts for a declaration: no counting withdraw covers it, not excluded, signer allowed. Defined in [05-records.md](05-records.md). |
+| **standing** | What an approval is worth now: `current`, `superseded`, `withdrawn`, `excluded` or `not-allowed`. |
 | **blocked** | Your hash is fine but a tagged dependency isn't valid. Wait for its signer. |
 | **`equiv`** | Command that rebuilds an old meaning from the old export and asks the kernel whether it is definitionally equal to the new one. |
 | **kernel gate** | `leanchecker --from-export` replaying the whole export inside `release`. |

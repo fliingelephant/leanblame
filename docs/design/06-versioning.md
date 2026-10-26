@@ -48,7 +48,8 @@ needs a human to read.
    `leanchecker` replays. Not definitionally equal: a human reads, shown the
    old and new definitions.
 5. `status` shows the proof as X's `evidence`. The reviewer approves the new
-   hash with one click; the record carries the proof hash as `evidence`.
+   hash with one click; X's entry in the record carries the proof hash as
+   `evidence`.
 
 Mechanism: `equiv` reads the old and the new export. It adds the duplicated
 constants to the new export's environment, the kernel checking each, then the

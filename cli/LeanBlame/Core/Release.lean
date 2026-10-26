@@ -16,12 +16,12 @@ namespace LeanBlame.Release
 
 def run (backend : Core.Backend) (root : System.FilePath) (tag : String)
     (out? : Option System.FilePath) : IO UInt32 := do
-  let r ← Status.compute root (← Ledger.load root) (causes := false) (warn := false)
+  let r ← Status.compute root (← Ledger.load root)
   let decls := r.report.declarations
   -- 1. Signoff gate.
-  let invalid := decls.filter (·.2.state != .valid)
+  let invalid := decls.filter (·.state != .valid)
   unless invalid.isEmpty do
-    for (n, d) in invalid do IO.eprintln (Status.textLine n d)
+    for d in invalid do IO.eprintln (Status.textLine d)
     IO.eprintln s!"release: {invalid.size} of {decls.size} tagged declarations are not valid"
     return 1
   -- 2. Kernel gate.
@@ -29,19 +29,20 @@ def run (backend : Core.Backend) (root : System.FilePath) (tag : String)
     IO.eprintln "release: kernel rejected the export"
     return 1
   -- 3. Axiom gate.
-  unless r.unpermitted.isEmpty do
-    for (t, a) in r.unpermitted do
+  let unpermitted := decls.flatMap fun d => d.proof.unpermitted.map (d.decl.name, ·)
+  unless unpermitted.isEmpty do
+    for (t, a) in unpermitted do
       IO.eprintln s!"release: theorem {t} rests on axiom {a}, which is neither standard nor tagged and signed"
     return 1
   -- 4. The manifest, which names the commit.
-  let b := r.new.boundary
-  let some commit := b.commit
+  let cur := r.cur
+  let some commit := cur.commit
     | fail "release: the current export has uncommitted changes; commit them and export again"
   let manifest : ReleaseManifest := {
-    library := b.library, tag, commit, toolchain := b.toolchain, deps := b.deps
-    exportHash := r.cur.exportHash, boundary := r.cur.boundary, records := r.validRecords
+    library := r.new.boundary.library, tag, commit, toolchain := cur.toolchain, deps := cur.deps
+    exportHash := cur.exportHash, boundary := cur.boundary, records := r.validRecords
     checker := r.new.checker
-    theorems := (decls.filter (·.2.role == .proved)).map fun (n, d) => (n, d.proof) }
+    theorems := (decls.filter (·.decl.role == .proved)).map fun d => (d.decl.name, d.proof) }
   let text := jsonText manifest
   let hash ← Store.putString root .manifests text
   if let some out := out? then writeFileMkdirs out text

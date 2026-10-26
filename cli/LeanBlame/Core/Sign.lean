@@ -34,38 +34,37 @@ def resolveSigner (given? : Option String) : IO String := do
     fail s!"{s}: the terminal writes local: records only; provider logins go through the sign server"
   return s
 
-/-- The first local records directory: where new records go. -/
-def recordsDir (root : System.FilePath) (cfg : Config) : IO System.FilePath := do
-  let some d := (recordDirs root cfg)[0]? | fail "leanblame.toml lists no records directory"
+/-- The first records directory, relative to the library root: where new records go. -/
+def recordsDir (cfg : Config) : IO System.FilePath := do
+  let some d := (recordDirs cfg)[0]? | fail "leanblame.toml lists no records directory"
   return d
 
-/-- Write a record under its hash; returns the record id and the path. -/
-def writeRecord (dir : System.FilePath) (r : Record) : IO (String × System.FilePath) := do
+/-- Write a record under its hash into directory `dir` of the library at `root`; returns the record
+id and its path relative to `root`. -/
+def writeRecord (root dir : System.FilePath) (r : Record) : IO (String × System.FilePath) := do
   let text := r.toToml
   let hex := Sha256.hexOfString text
   let path := dir / (hex ++ ".toml")
-  IO.FS.createDirAll dir
+  IO.FS.createDirAll (root / dir)
   -- A record is never overwritten: `writeNew` fails if the file exists.
-  IO.FS.withFile path .writeNew (·.putStr text)
+  IO.FS.withFile (root / path) .writeNew (·.putStr text)
   return (mkHash hex, path)
 
-/-- Approve: one record per module, at the claim hashes of the current export. -/
+/-- Approve: one record per module, at the claim hashes of the current export. `keys` name
+declarations by name or id. -/
 def approve (root : System.FilePath) (signer? : Option String) (module? : Option String)
-    (names : Array String) (note? : Option String) : IO UInt32 := do
+    (keys : Array String) (note? : Option String) : IO UInt32 := do
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
   let graph ← Status.currentGraph root cur
   let boundary := graph.boundary
-  let some commit := boundary.commit
+  let some commit := cur.commit
     | fail "the current export has uncommitted changes; commit them and export again: a record names the commit it signs"
-  let claimOf : Std.HashMap String String :=
-    boundary.declarations.foldl (init := {}) fun m d => m.insert d.name graph.nodes[d.name]!.claim
-  let selected ← if !names.isEmpty then
-      names.mapM fun n => do
-        match boundary.declarations.find? (·.name == n) with
-        | some d => pure d
-        | none => fail s!"{n} is not on the boundary list"
+  let selected ← if !keys.isEmpty then
+      keys.mapM fun k => do
+        let some d ← IO.ofExcept (boundary.find? k) | fail s!"{k} is not on the boundary list"
+        pure d
     else if let some m := module? then do
       let ds := boundary.declarations.filter (·.module == m)
       if ds.isEmpty then fail s!"no tagged declarations in module {m}"
@@ -75,33 +74,43 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
       pure <| boundary.declarations.filter (cur.modules.contains ·.module)
   if selected.isEmpty then fail "nothing to sign"
   let modules := dedup (selected.map (·.module))
-  let dir ← recordsDir root ledger.cfg
+  let dir ← recordsDir ledger.cfg
   let date ← Std.Time.Timestamp.nowSeconds
   for m in modules.qsort (· < ·) do
-    let constants := (selected.filter (·.module == m)).map (fun d => (d.name, claimOf[d.name]!))
-      |>.qsort (fun a b => a.1 < b.1)
-    -- An `equiv` proof the signer relies on, if the record's constants name exactly one.
-    let proofs := dedup (← constants.filterMapM fun (n, c) => Status.evidenceFor root ledger n c)
-    if proofs.size > 1 then
-      IO.eprintln s!"note: the constants of {m} have {proofs.size} different equiv proofs; the record names none"
+    let mut constants : Array ApprovedConstant := #[]
+    for d in selected.filter (·.module == m) do
+      if constants.any (·.id == d.id) then continue
+      let some node := graph.nodes[d.name]? | fail s!"the current graph has no node for {d.name}"
+      -- The `equiv` proof the signer relies on, if there is one.
+      let evidence ← Status.evidenceFor root ledger d.id node.claim
+      constants := constants.push { id := d.id, name := d.name, claim := node.claim, evidence }
     let r : Record := .approve {
-      signer, date, module := m, commit, toolchain := boundary.toolchain
-      deps := boundary.deps, exportHash := cur.exportHash, boundary := cur.boundary
-      constants, evidence := if proofs.size == 1 then proofs[0]? else none, note := note? }
-    let (id, path) ← writeRecord dir r
-    IO.println s!"approve {id} {path} ({constants.size} constants of {m})"
+      signer, date, module := m, commit, toolchain := cur.toolchain, deps := cur.deps
+      exportHash := cur.exportHash, boundary := cur.boundary
+      constants := constants.qsort (·.name < ·.name), note := note? }
+    let (id, path) ← writeRecord root dir r
+    IO.println s!"approve {id} {path} ({constants.size} declarations of {m})"
   return 0
 
-/-- Withdraw some or all constants of one of your approve records. -/
+/-- Withdraw some or all declarations of one of your approve records; `keys?` names them by name or
+id. -/
 def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
-    (constants? : Option (Array String)) (note? : Option String) : IO UInt32 := do
+    (keys? : Option (Array String)) (note? : Option String) : IO UInt32 := do
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let refersTo ← recordId ref
+  let constants? ← keys?.mapM fun keys => do
+    if keys.isEmpty then fail "--constants lists no declaration; leave it out to withdraw all"
+    let some { record := .approve a, .. } := ledger.byId[refersTo]?
+      | fail s!"cannot withdraw: {refersTo} is no approve record"
+    keys.mapM fun k => match a.constants.filter fun c => c.id == k || c.name == k with
+      | #[c] => pure c.id
+      | #[] => fail s!"cannot withdraw: {k} is not in record {refersTo}"
+      | _ => fail s!"{k} is the name of one declaration of record {refersTo} and the id of another"
   let w : WithdrawRecord := { signer, date := ← Std.Time.Timestamp.nowSeconds, refersTo, constants := constants?, note := note? }
   if let .error ps := withdrawCovers ledger.byId w then
     fail s!"cannot withdraw: {"; ".intercalate ps.toList}"
-  let (id, path) ← writeRecord (← recordsDir root ledger.cfg) (.withdraw w)
+  let (id, path) ← writeRecord root (← recordsDir ledger.cfg) (.withdraw w)
   IO.println s!"withdraw {id} {path} (refers to {refersTo})"
   return 0
 

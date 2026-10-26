@@ -85,9 +85,10 @@ as X's `evidence`.
 Per tagged declaration X, `status` computes:
 
 - **state**: `valid` if at least `required_signers` distinct signers have live
-  approve records carrying X's current hash (default one); `outdated` if live
-  approve records list X but not enough of them carry the current hash;
-  `unsigned` if none lists X.
+  approve records carrying X's current hash (`init` sets one); `outdated` if
+  live approve records list X but not enough of them carry the current hash;
+  `unsigned` if none lists X. Records name X by its id, so a renamed X is
+  `outdated` (the name is hashed), not `unsigned`.
 - **blocked_by**: tagged dependencies whose state is not `valid`, recursively.
 - **evidence**: the `equiv` proof that X's current hash means what its last
   live approval meant, if there is one.
@@ -160,8 +161,9 @@ group     = H("leanblame.group.2",  count, member owns, external entries)
 member(c) = H("leanblame.member.2", group, name)
 ```
 
-A record stores `claim(c)` for each constant it covers, plus the export hash,
-the boundary-list hash, the library commit, toolchain and dependency commits.
+A record stores, for each declaration it covers, its id, its name and
+`claim(c)`, plus the export hash, the boundary-list hash, the library commit,
+toolchain and dependency commits.
 
 ## Blame
 

@@ -2,14 +2,16 @@
 The object store (docs/design/04-architecture.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too) and release
-manifests. Graphs, exports hashed against boundary lists (`Graph`), are the one kind that is keyed
-rather than content-addressed: `graphs/<export hex>-<hex of the boundary list's declarations>.json`.
+manifests. Graphs, exports hashed against boundary lists (`Graph`), are keyed by both:
+`graphs/<export hex>-<boundary hex>.json`.
 
 One small local file points into it: `.leanblame/current` (JSON), the export, boundary list and
-constant listing of the last `export` run. `equiv` writes evidence files next to it, in
-`.leanblame/equiv/evidence/`. `export` sweeps: an export, boundary list or listing that neither the
-current pointer nor a record names is deleted, so are the graphs of a deleted export, evidence for a
-claim that is no longer current, and a proof that neither evidence nor a record names.
+constant listing of the last `export` run, with the commit, toolchain and dependencies it was made
+from. `equiv` writes evidence files next to it, `.leanblame/equiv/evidence/<claim hex>.json`.
+`export` sweeps: an export, boundary list or listing that neither the current pointer nor a record
+names is deleted, so are the graphs of a deleted export, evidence for a claim that is no longer
+current, and a proof that neither evidence nor a record names. Every JSON file here has a schema
+id and is read strictly.
 -/
 import LeanBlame.Core.Util
 
@@ -77,14 +79,37 @@ def sweepDir (d : System.FilePath) (keep : Std.HashSet String) : IO Nat := do
 def sweep (root : System.FilePath) (k : Kind) (keep : Std.HashSet String) : IO Nat :=
   sweepDir (kindDir root k) keep
 
-/-- The export and boundary list of the last `export`, the library's own modules, and the
-object listing the constants defined in them. -/
+/-- The last `export`: its export, boundary list and listing of the constants the library defines;
+the library's own modules; and what it was made from: the commit (`none` with uncommitted changes,
+which cannot be signed), the toolchain and the commits of git dependencies. -/
 structure Current where
   exportHash : String
   boundary : String
-  modules : Array String
   owned : String
-  deriving Lean.ToJson, Lean.FromJson
+  modules : Array String
+  commit : Option String
+  toolchain : String
+  deps : Array (String × String)
+
+def Current.schemaId : String := "leanblame.current.1"
+
+instance : Lean.ToJson Current where
+  toJson c := Lean.Json.mkObj [("schema", Current.schemaId), ("export", c.exportHash),
+    ("boundary", c.boundary), ("owned", c.owned), ("modules", Lean.toJson c.modules),
+    ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps)]
+
+def Current.fromJson? (j : Lean.Json) : Except String Current := do
+  let o ← JsonObj.read j "current"
+    ["schema", "export", "boundary", "owned", "modules", "commit", "toolchain", "deps"]
+  o.schema Current.schemaId
+  let c : Current := {
+    exportHash := ← o.get String "export", boundary := ← o.get String "boundary"
+    owned := ← o.get String "owned", modules := ← o.get (Array String) "modules"
+    commit := ← o.get (Option String) "commit", toolchain := ← o.get String "toolchain"
+    deps := ← o.getStrings "deps" }
+  for (k, h) in [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned)] do
+    unless isHash h do throw s!"current.{k}: `{h}` is not a sha256: hash"
+  return c
 
 def currentPath (root : System.FilePath) : System.FilePath := dir root / "current"
 
@@ -94,30 +119,52 @@ def writeCurrent (root : System.FilePath) (c : Current) : IO Unit :=
 def readCurrent (root : System.FilePath) : IO Current := do
   let some text ← readFileIfExists (currentPath root)
     | fail s!"no export yet: run `leanblame export` first"
-  match Lean.Json.parse text >>= Lean.fromJson? with
-  | .ok (c : Current) => if isHash c.exportHash && isHash c.boundary then return c
-  | .error _ => pure ()
-  fail s!"{currentPath root} is malformed; run `leanblame export`"
+  match Lean.Json.parse text >>= Current.fromJson? with
+  | .ok c => return c
+  | .error e => fail s!"{currentPath root}: {e}; run `leanblame export`"
 
 def evidenceDir (root : System.FilePath) : System.FilePath := dir root / "equiv" / "evidence"
 
-/-- Where `equiv` records that declaration `name` at claim hash `claim` means what its last live
-approval meant: `<sha256 of "name claim">.json`, naming the proof (`evidence`) and the approve
-record it was compared with (`old_record`). -/
-def evidencePath (root : System.FilePath) (name claim : String) : System.FilePath :=
-  evidenceDir root / s!"{Sha256.hexOfString s!"{name} {claim}"}.json"
+/-- What `equiv` proved: that declaration `id` at claim `claim` means what the approve record
+`oldRecord` meant, by the solution export `proof`. -/
+structure Evidence where
+  id : String
+  claim : String
+  oldRecord : String
+  proof : String
 
-/-- The proof and record an evidence file names. -/
-def evidenceFields (text : String) : Option (String × String) :=
-  let field (k : String) := (Lean.Json.parse text >>= (·.getObjValAs? String k)).toOption.filter isHash
-  match field "evidence", field "old_record" with
-  | some proof, some record => some (proof, record)
-  | _, _ => none
+def Evidence.schemaId : String := "leanblame.evidence.1"
 
-/-- The evidence for `name` at `claim`, if `equiv` wrote one. -/
-def evidence? (root : System.FilePath) (name claim : String) : IO (Option (String × String)) := do
-  let some text ← readFileIfExists (evidencePath root name claim) | return none
-  return evidenceFields text
+instance : Lean.ToJson Evidence where
+  toJson e := Lean.Json.mkObj [("schema", Evidence.schemaId), ("id", e.id), ("claim", e.claim),
+    ("old_record", e.oldRecord), ("proof", e.proof)]
+
+def Evidence.fromJson? (j : Lean.Json) : Except String Evidence := do
+  let o ← JsonObj.read j "evidence" ["schema", "id", "claim", "old_record", "proof"]
+  o.schema Evidence.schemaId
+  let e : Evidence := { id := ← o.get String "id", claim := ← o.get String "claim"
+                        oldRecord := ← o.get String "old_record", proof := ← o.get String "proof" }
+  for (k, h) in [("claim", e.claim), ("old_record", e.oldRecord), ("proof", e.proof)] do
+    unless isHash h do throw s!"evidence.{k}: `{h}` is not a sha256: hash"
+  return e
+
+/-- Where the evidence for claim `claim` is: `<claim hex>.json`. A claim belongs to one declaration,
+since its name is hashed. -/
+def evidencePath (root : System.FilePath) (claim : String) : System.FilePath :=
+  evidenceDir root / s!"{hashHex claim}.json"
+
+def readEvidence (path : System.FilePath) : IO Evidence := do
+  match Lean.Json.parse (← IO.FS.readFile path) >>= Evidence.fromJson? with
+  | .ok e => return e
+  | .error e => fail s!"{path}: {e}"
+
+/-- The evidence for `claim`, if `equiv` wrote one. -/
+def evidence? (root : System.FilePath) (claim : String) : IO (Option Evidence) := do
+  let p := evidencePath root claim
+  unless ← p.pathExists do return none
+  let e ← readEvidence p
+  unless e.claim == claim do fail s!"{p}: the evidence is for claim {e.claim}, not {claim}"
+  return some e
 
 /-- The proofs every evidence file names, as hex digests. -/
 def evidenceProofs (root : System.FilePath) : IO (Std.HashSet String) := do
@@ -125,8 +172,7 @@ def evidenceProofs (root : System.FilePath) : IO (Std.HashSet String) := do
   unless ← d.isDir do return {}
   let mut out : Std.HashSet String := {}
   for e in ← d.readDir do
-    if let some (proof, _) := evidenceFields (← IO.FS.readFile e.path) then
-      out := out.insert (hashHex proof)
+    out := out.insert (hashHex (← readEvidence e.path).proof)
   return out
 
 end LeanBlame.Store

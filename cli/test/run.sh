@@ -4,21 +4,24 @@
 #   cli/test/run.sh            # from anywhere; needs elan (Lean 4.35.0), git, python3
 #
 # Copies the sample library to a scratch directory, makes it a git repository,
-# and walks through: init -> export -> sign -> status (valid) -> release -> edit
-# a body -> status (outdated, own-body) -> edit a dependency body -> status
-# (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
-# (withdrawn) -> blame -> validate (and its append-only check) -> a boundary list
-# from a verso-blueprint manifest, labels as ids -> equiv, in a copy made after the
-# first signoff: a definitional change proven (evidence shown by
-# status, the record carries the proof, valid), one that is not definitional, an
-# own-body change refused -> ids, in another copy made after the first signoff:
-# a new id changes no claim, status --json, blame by id, a rename keeps the id,
-# a shared id and a malformed one refused. Before the first export, `id` writes
-# the ids (export refuses a tag without one); after the first body edit, status
-# fails out loud when a signed graph is missing or broken. Also out loud: export
-# outside git, sign without --signer, a remote records repository, a file in
-# records/ that is not a record; an export of uncommitted changes names no commit,
-# so sign and release refuse it. Logs go to a directory outside the library.
+# and walks through: init -> export -> sign (records name declarations by id) ->
+# status (valid; --json complete, nothing on stderr) -> release -> edit a body ->
+# status (outdated, own-body) -> stored files read strictly; causes unknown
+# without the signed export -> edit a dependency body -> status (blocked) -> more
+# causes (untagged, own-text, dep-spec) -> withdraw -> status (withdrawn) ->
+# exclude (a withdraw record, no record, an approve record) -> blame -> validate
+# (and its append-only check) -> a boundary list from a verso-blueprint manifest,
+# labels as ids -> equiv, in a copy made after the first signoff: a definitional
+# change proven (evidence shown by status, the record carries the proof, valid),
+# one that is not definitional, an own-body change refused -> ids, in another
+# copy made after the first signoff: a rename keeps the id and the history, blame
+# by id, a new id is a new declaration, a shared id and a malformed one refused.
+# Before the first export, `id` writes the ids (export refuses a tag without
+# one); after the first body edit, status fails out loud when a signed graph is
+# missing or broken. Also out loud: export outside git, sign without --signer, a
+# remote records repository, a file in records/ that is not a record; an export
+# of uncommitted changes names no commit, so sign and release refuse it. Logs go
+# to a directory outside the library.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,7 +73,7 @@ must_fail() {
     grep -q -- "$p" "$logs/fail.log" || fail "$*: no '$p' in: $(cat "$logs/fail.log")"
   done
 }
-current_export() { python3 -c 'import json; print(json.load(open(".leanblame/current"))["exportHash"])'; }
+current_export() { python3 -c 'import json; print(json.load(open(".leanblame/current"))["export"])'; }
 
 echo "== init"
 run init
@@ -117,6 +120,11 @@ run sign --signer local:alice --note "first review"
 basic_record="$(awk '/of Sample.Basic\)$/ {print $2}' <<<"$out")"
 energy_record="$(awk '/of Sample.Energy\)$/ {print $2}' <<<"$out")"
 ok "two approve records, Sample.Basic is $basic_record"
+grep -qF "\"$(id_of Sample.Point)/x\" = {name = \"Sample.Point.x\", claim = \"sha256:" "records/${basic_record#sha256:}.toml" \
+  || fail "the record does not name Sample.Point.x by its structure's id: $(cat "records/${basic_record#sha256:}.toml")"
+grep -qF "$energy_id = {name = \"Sample.energy\", claim = \"sha256:" "records/${basic_record#sha256:}.toml" \
+  || fail "the record does not name Sample.energy by its id: $(cat "records/${basic_record#sha256:}.toml")"
+ok "records name declarations by id; a field by its structure's id and its name: $(id_of Sample.Point)/x"
 run validate
 ok "validate: $out"
 commit "first signoff"
@@ -136,39 +144,58 @@ want="warning: untagged Sample.double of this library is used by tagged Sample.e
 grep -qxF "$want" "$logs/status.err" || fail "no untagged-dependency warning: $(cat "$logs/status.err")"
 [[ "$(grep -c '^warning' "$logs/status.err")" == 1 ]] || fail "unexpected warnings: $(cat "$logs/status.err")"
 ok "status warns that tagged Sample.energy uses untagged Sample.double, and nothing else"
-run status --json
-python3 - "$out" <<'PY' || fail "status --json does not match docs/design/14"
+"$lb" status --json >"$logs/status.json" 2>"$logs/status-json.err" || fail "status --json: $(cat "$logs/status-json.err")"
+[[ ! -s "$logs/status-json.err" ]] || fail "status --json wrote to stderr: $(cat "$logs/status-json.err")"
+python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not match docs/design/14"
 import json, sys
-s = json.loads(sys.argv[1])
-assert s["schema"] == "leanblame.status.3"
-assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
+s = json.load(open(sys.argv[1]))
+ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
+assert s["schema"] == "leanblame.status.4"
+assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "export", "boundary", "generated", "modules",
+                  "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
 assert len(s["commit"]) == 40, s["commit"]
+assert s["toolchain"].startswith("v4.") and s["deps"] == {}, (s["toolchain"], s["deps"])
+assert sorted(s["modules"]) == ["Sample", "Sample.Basic", "Sample.Energy"], s["modules"]
+assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
+assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
 keys = {"id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
-        "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
-members = {"Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"}
+        "history", "blocked_by", "proof", "evidence", "tagged_deps", "untagged_deps", "closure_size"}
+members = {"Sample.Point.mk": "mk", "Sample.Point.x": "x", "Sample.Point.y": "y"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
-    assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
-    assert (d["id"] is None) == (name in members), (name, d["id"])
+    assert d["state"] == "valid" and d["signers"] == ["local:alice"] and d["change"] == [], name
+    want_id = ids["Sample.Point"] + "/" + members[name] if name in members else ids[name]
+    assert d["id"] == want_id, (name, d["id"])
     assert d["parent"] == ("Sample.Point" if name in members else None), (name, d["parent"])
     want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
             "Sample.one_site_pos": "proven"}.get(name, "n/a")
-    assert d["proof"]["status"] == want, (name, d["proof"])
-    assert d["history"][0]["action"] == "approve" and d["history"][0]["claim"] == d["claim"], name
+    assert d["proof"]["status"] == want and d["proof"]["unpermitted"] == [], (name, d["proof"])
+    h = d["history"]
+    assert len(h) == 1 and h[0]["action"] == "approve" and h[0]["claim"] == d["claim"], (name, h)
+    assert h[0]["name"] == name and h[0]["standing"] == "current", (name, h)
 assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
+assert {"name": "Sample.double", "module": "Sample.Basic"} in s["declarations"]["Sample.energy"]["untagged_deps"]
 text = lambda segs: "".join(seg["text"] for seg in segs)
 even = s["declarations"]["Sample.energy_even"]["statement"]
 assert text(even["pretty"]) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even["pretty"])
 assert "HMod.hMod" in text(even["plain"]), text(even["plain"])
 assert {"const": "Sample.energy", "text": "Sample.energy"} in even["pretty"], even["pretty"]
+assert all(set(seg) == {"text", "const"} for seg in even["pretty"]), even["pretty"]
 assert text(s["declarations"]["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
 assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 assert s["declarations"]["Sample.energy"]["role"] == "defined"
 assert s["declarations"]["Sample.energy_even"]["role"] == "proved"
 assert s["declarations"]["Sample.energy_pos"]["role"] == "assumed"
+records = s["records"]
+assert len(records) == 2 and all(r["action"] == "approve" and r["signer"] == "local:alice" for r in records), records
+basic = next(r for r in records if r["module"] == "Sample.Basic")
+assert basic["path"] == "records/" + basic["record"][len("sha256:"):] + ".toml", basic["path"]
+assert {c["name"] for c in basic["constants"]} == {"Sample.energy", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
+                                                  "Sample.Point.y", "Sample.Point.norm"}, basic["constants"]
+assert all(set(c) == {"id", "name", "claim", "evidence"} and c["evidence"] is None for c in basic["constants"])
 PY
-ok "status --json has the docs/design/14 fields; members name their structure; proven and open theorems"
+ok "status --json has the docs/design/14 fields and nothing on stderr; members' ids come from their structure's"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"
@@ -255,6 +282,34 @@ must_fail "not the graph of export" -- "$lb" status
 mv "$logs/graph.json" ".leanblame/store/graphs/$signed_graph"
 ok "status fails out loud when a signed graph is missing or broken"
 
+echo "== stored files are read strictly"
+cp .leanblame/current "$logs/current"
+python3 -c 'import json; p = ".leanblame/current"; c = json.load(open(p)); c["extra"] = 1; json.dump(c, open(p, "w"))'
+must_fail 'current: unknown key `extra`' -- "$lb" status
+python3 -c 'import json; p = ".leanblame/current"; c = json.load(open(p)); del c["extra"], c["toolchain"]; json.dump(c, open(p, "w"))'
+must_fail 'current: missing key `toolchain`' -- "$lb" status
+cp "$logs/current" .leanblame/current
+graph=".leanblame/store/graphs/$(current_export | sed 's/^sha256://')-$(python3 -c 'import json; print(json.load(open(".leanblame/current"))["boundary"][7:])').json"
+cp "$graph" "$logs/graph-current.json"
+python3 - "$graph" <<'PY'
+import json, sys
+g = json.load(open(sys.argv[1]))
+g["nodes"] = [n for n in g["nodes"] if n["name"] != "Sample.double"]
+json.dump(g, open(sys.argv[1], "w"))
+PY
+must_fail "depends on Sample.double, which has no node" -- "$lb" status
+cp "$logs/graph-current.json" "$graph"
+edit leanblame.toml '/^required_signers/d'
+must_fail "missing required key: required_signers" -- "$lb" status
+git checkout -q -- leanblame.toml
+ok "an unknown or missing key, and a graph without a node a declaration uses, stop status"
+signed_export=".leanblame/store/exports/${first_export#sha256:}"
+mv "$signed_export" "$logs/signed-export"
+run status
+expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=unknown"
+mv "$logs/signed-export" "$signed_export"
+ok "without the signed export in the store, the causes are unknown, and status says so"
+
 echo "== edit a dependency body: energy"
 edit Sample/Basic.lean 's/def energy (n : Nat) : Nat := double n$/def energy (n : Nat) : Nat := double n + 0/'
 commit "energy: new body"
@@ -300,14 +355,27 @@ expect_line Sample.Point "Sample.Point unsigned blocked-by=Sample.Point.mk"
 expect_line Sample.energy_even \
   "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
 
-echo "== a withdrawal cannot be excluded"
+echo "== exclude"
 edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$withdraw_record\"]|"
 grep -q '^exclude = \["sha256:' leanblame.toml || fail "test setup: exclude not set"
 must_fail "withdrawals cannot be excluded" -- "$lb" validate
-run status
-expect_line Sample.energy "Sample.energy unsigned"
+must_fail "withdrawals cannot be excluded" -- "$lb" status
 git checkout -q -- leanblame.toml
-ok "excluding a withdraw record fails validate and does not revive the approval"
+ok "excluding a withdraw record fails validate and status"
+edit leanblame.toml "s|^exclude = \[\]|exclude = [\"sha256:$(printf '0%.0s' {1..64})\"]|"
+must_fail "which is no record here" -- "$lb" status
+git checkout -q -- leanblame.toml
+ok "excluding a record that does not exist fails status"
+edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$energy_record\"]|"
+run status --json
+python3 - "$out" "$energy_record" <<'PY' || fail "status --json: an excluded approval"
+import json, sys
+d = json.loads(sys.argv[1])["declarations"]["Sample.second_site"]
+assert d["state"] == "unsigned", d["state"]
+assert [(h["record"], h["standing"]) for h in d["history"]] == [(sys.argv[2], "excluded")], d["history"]
+PY
+git checkout -q -- leanblame.toml
+ok "an excluded approval stays in the history, as excluded"
 
 echo "== blame"
 run blame Sample.energy
@@ -380,9 +448,10 @@ import json, sys
 d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
 assert set(d) == {"Sample.energy", "Sample.energy_even", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
                   "Sample.Point.y", "Sample.Point.norm", "Sample.pointEnergy"}, sorted(d)
-ids = {n: x["id"] for n, x in d.items() if x["id"]}
+ids = {n: x["id"] for n, x in d.items()}
 assert ids == {"Sample.energy": "def:energy", "Sample.energy_even": "thm:even", "Sample.Point": "def:point",
-               "Sample.pointEnergy": "def:pointEnergy"}, ids
+               "Sample.pointEnergy": "def:pointEnergy", "Sample.Point.mk": "def:point/mk", "Sample.Point.x": "def:point/x",
+               "Sample.Point.y": "def:point/y", "Sample.Point.norm": "def:point/norm"}, ids
 parents = {n: x["parent"] for n, x in d.items() if x["parent"]}
 assert parents == {n: "Sample.Point" for n in ["Sample.Point.mk", "Sample.Point.x", "Sample.Point.y", "Sample.Point.norm"]}, parents
 assert d["Sample.energy"]["informal"] == "The energy of a chain of $n$ sites is $2n$: two units per site."
@@ -394,7 +463,7 @@ run status
 grep -q "^8 tagged: " <<<"$out" || fail "status on the blueprint boundary list: $out"
 run blame def:point
 grep -q "^Sample.Point  inductive  " <<<"$out" || fail "blame by label: $out"
-ok "a label is the id of its first declaration; its other declarations and the structure's members name it as parent"
+ok "a label is the id of its first declaration; the others and the structure's members name it as parent: def:point/x"
 mkdir "$logs/bp"
 cp "$here/blueprint/blueprint-html-cache.json" "$logs/bp/"
 python3 - "$here/blueprint/blueprint-manifest.json" "$logs/bp/blueprint-manifest.json" <<'PY'
@@ -449,11 +518,11 @@ expect_line Sample.energy "Sample.energy outdated evidence=$proof change=untagge
 expect_line Sample.double_zero "Sample.double_zero outdated evidence=$proof change=untagged:Sample.double"
 run sign --signer local:alice Sample.energy Sample.double_zero
 record="$(awk '/^approve /{print $3}' <<<"$out")"
-grep -qxF "evidence = \"$proof\"" "$record" || fail "the approve record does not carry the proof: $(cat "$record")"
+[[ "$(grep -cF "evidence = \"$proof\"}" "$record")" -eq 2 ]] || fail "the approve record does not carry the proof: $(cat "$record")"
 run status
 expect_line Sample.energy "Sample.energy valid"
 expect_line Sample.double_zero "Sample.double_zero valid"
-ok "sign puts the proof in the record as evidence; both are valid again"
+ok "sign puts the proof in the record as each declaration's evidence; both are valid again"
 commit "sign after equiv"
 
 echo "== equiv: a change that is not definitional"
@@ -478,10 +547,29 @@ export_lib
 must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
 ok "equiv refuses an own-body change"
 
-echo "== id: a new id, renames, shared and malformed ids"
+echo "== id: renames, a new id, shared and malformed ids"
 rm -rf "$work"
 work="$work_id"
 cd "$work"
+edit Sample/Energy.lean 's/theorem second_site /theorem site_two /'
+export_lib
+run status
+expect_line Sample.site_two "Sample.site_two outdated change=own-body:Sample.site_two"
+run status --json
+python3 - "$out" "$(id_of Sample.second_site)" <<'PY' || fail "rename: $out"
+import json, sys
+d = json.loads(sys.argv[1])["declarations"]
+assert "Sample.second_site" not in d
+t = d["Sample.site_two"]
+assert t["id"] == sys.argv[2] and t["state"] == "outdated", t
+assert [(h["name"], h["standing"]) for h in t["history"]] == [("Sample.second_site", "superseded")], t["history"]
+PY
+git checkout -q -- Sample
+ok "a renamed declaration keeps its id and its sign-off history; it is outdated, as the name is hashed"
+run blame "$energy_id"
+grep -q "^Sample.energy  def  valid  claim " <<<"$out" || fail "blame by id: $out"
+grep -qxF "  id: $energy_id" <<<"$out" || fail "blame by id: $out"
+ok "blame takes an id"
 edit Sample/Basic.lean "s/@\[trusted \"$energy_id\"\] def energy/@[trusted] def energy/"
 run id
 new_energy_id="$(awk '$2 == "Sample.energy" {print $1}' <<<"$out")"
@@ -490,37 +578,13 @@ new_energy_id="$(awk '$2 == "Sample.energy" {print $1}' <<<"$out")"
 commit "energy: a new id"
 export_lib
 run status
-for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
-         Sample.energy Sample.energy_even Sample.energy_pos Sample.one_site_pos Sample.pointEnergy \
-         Sample.second_site; do
-  expect_line "$n" "$n valid"
-done
-ok "a new id changes no claim: what was signed before is still valid"
-run status --json
-python3 - "$out" "$ids" "$new_energy_id" <<'PY' || fail "status --json: ids"
-import json, sys
-d = json.loads(sys.argv[1])["declarations"]
-want = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
-want["Sample.energy"] = sys.argv[3]
-assert {n: x["id"] for n, x in d.items() if x["id"]} == want, d
-assert all(d[n]["id"] is None for n in ["Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"])
-PY
-ok "status --json carries the ids; a structure's constructor and fields have none"
-run blame "$new_energy_id"
-grep -q "^Sample.energy  def  valid  claim " <<<"$out" || fail "blame by id: $out"
-grep -qxF "  id: $new_energy_id" <<<"$out" || fail "blame by id: $out"
-ok "blame takes an id"
-edit Sample/Energy.lean 's/theorem second_site /theorem site_two /'
-export_lib
-run status --json
-python3 - "$out" "$(id_of Sample.second_site)" <<'PY' || fail "rename: $out"
-import json, sys
-d = json.loads(sys.argv[1])["declarations"]
-assert "Sample.second_site" not in d
-assert d["Sample.site_two"]["id"] == sys.argv[2] and d["Sample.site_two"]["state"] == "unsigned", d["Sample.site_two"]
-PY
-git checkout -q -- Sample
-ok "a renamed declaration keeps its id; its claim is new (the name is hashed), so it is unsigned"
+expect_line Sample.energy "Sample.energy unsigned"
+expect_line Sample.energy_even "Sample.energy_even valid blocked-by=Sample.energy"
+expect_line Sample.Point.x "Sample.Point.x valid"
+run blame "$energy_id"
+grep -qxF "$energy_id  (not on the current boundary list)" <<<"$out" || fail "blame by the old id: $out"
+grep -q "approve  local:alice  as Sample.energy  claim " <<<"$out" || fail "blame by the old id: $out"
+ok "a new id is a new declaration: the approvals stay with the old id"
 edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/$new_energy_id/"
 must_fail "Sample.energy and Sample.pointEnergy have the same id $new_energy_id" -- "$lb" export
 git checkout -q -- Sample

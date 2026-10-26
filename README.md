@@ -69,9 +69,9 @@ Run in the library root as `lake exe leanblame <command>`.
 | `id [--lib NAME]` | Write a random id into each `@[trusted]` that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |
-| `sign --signer local:NAME [--module M] [--note TEXT] [NAME...]` | Write an approve record (default: one per module of the library). |
-| `sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its constants. |
-| `equiv [NAME...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
+| `sign --signer local:NAME [--module M] [--note TEXT] [NAME\|ID...]` | Write an approve record (default: one per module of the library). |
+| `sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its declarations (names or ids). |
+| `equiv [NAME\|ID...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
 | `validate [--base-ref REF]` | Check record files: schema, signer authority, no edits or deletions since `REF`. |
 | `release --tag TAG [--out FILE]` | Signoff and kernel gates, axiom report, manifest. |
 
@@ -89,7 +89,8 @@ docstring), `cut-moved` (a dependency gained or lost its tag), `untagged`.
 ## Records and policy
 
 Records are TOML files in `records/`, named by the SHA-256 of their bytes,
-never edited. `leanblame.toml` sets the policy: `records` directories,
+never edited. They name declarations by id, so a sign-off follows a rename.
+`leanblame.toml` sets the policy, every key required: `records` directories,
 `exclude` (records the library refuses to count), `required_signers`,
 `allowed_signers`. From the terminal, `sign` writes `local:` signer ids; a sign
 server with login-backed ids is not built yet.

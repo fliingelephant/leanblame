@@ -21,12 +21,13 @@ tagged structure is on it too and names the structure as its parent.
 ## Id
 
 A random UUID in the source, `@[trusted "id"]`, written by `leanblame id`. It
-stays when the declaration is renamed or edited, so people cite a declaration
-by its id: `id@record`, the record fixing the commit. It is never hashed:
-writing an id changes no claim. Untagged members of a tagged structure have
-none; cite the structure, their parent. From a blueprint, a label is the id of
-the first declaration it names, the parent of the others. A tag without an id, or two declarations with one id, stop
-`export`.
+stays when the declaration is renamed or edited, so records name declarations
+by it and a sign-off follows a rename. Cite a declaration by its id:
+`id@record`, the record fixing the commit. It is never hashed: writing an id
+changes no claim. A member of a tagged structure has the structure's id and its
+name: `3f2b…/x`. From a blueprint, a label is the id of the first declaration it
+names; the others get the label and their names. A tag without an id, or two
+declarations with one id, stop `export`.
 
 ## Export, checker, comparator
 

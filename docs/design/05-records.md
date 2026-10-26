@@ -2,10 +2,13 @@
 
 ## Unit
 
-The declaration, each with its own claim hash. A record lists expanded
-constants explicitly: tagging a structure produces entries for the type, its
-constructors and its projections. One record may cover one declaration or a
-whole module. Default: one record per module.
+The declaration, each with its own claim hash. A record names each declaration
+by its id, with its name and claim hash at that export, so an approval follows
+the declaration through a rename. A record lists expanded constants explicitly:
+tagging a structure produces entries for the type, its constructors and its
+projections, whose ids are the structure's id and their names (`3f2b…/x`). One
+record may cover one declaration or a whole module. Default: one record per
+module.
 
 ## Fields
 
@@ -14,32 +17,38 @@ Exact schema in [14-schemas.md](14-schemas.md). Two examples:
 ### Approve
 
 ```toml
-schema = "leanblame.record.1"
+schema = "leanblame.record.2"
 action = "approve"
 signer = "openreview:~Jane_Doe1"
 date = 2026-10-23T14:02:11Z
 module = "OpenPhysics.Ising"
 commit = "9f8e7d…"
 toolchain = "v4.35.0"
-deps = { mathlib = "a1b2c3…", physlib = "d4e5f6…" }
 export = "sha256:…"
 boundary = "sha256:…"
 note = "Sign convention follows OpenPhysics.Conventions, section 2."
 
+[deps]
+mathlib = "a1b2c3…"
+physlib = "d4e5f6…"
+
 [constants]
-"OpenPhysics.Ising.Hamiltonian" = "sha256:3b1f…"
-"OpenPhysics.Ising.groundEnergy_le" = "sha256:77c0…"
+3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b = {name = "OpenPhysics.Ising.Hamiltonian", claim = "sha256:3b1f…"}
+0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b = {name = "OpenPhysics.Ising.groundEnergy_le", claim = "sha256:77c0…", evidence = "sha256:5e6f…"}
 ```
+
+`evidence` is optional: an `equiv` proof the signer relied on for that
+declaration ([06-versioning.md](06-versioning.md)).
 
 ### Withdraw
 
 ```toml
-schema = "leanblame.record.1"
+schema = "leanblame.record.2"
 action = "withdraw"
 signer = "openreview:~Jane_Doe1"
 date = 2027-01-05T09:30:00Z
 refers_to = "sha256:9c0d…"
-constants = ["OpenPhysics.Ising.Hamiltonian"]   # optional; default: all in the record
+constants = ["3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b"]   # ids; optional: left out, all in the record
 note = "Hamiltonian missed the boundary term for periodic chains. See issue 42."
 ```
 
@@ -66,21 +75,29 @@ may write declarations. Only humans sign.
 - `refers_to` must point at an approve record, never at a withdraw.
 - A withdraw counts only if its `signer` equals the approve record's signer.
   `validate` rejects others.
-- A withdraw may list `constants`; default is every constant in the record.
+- A withdraw may list `constants`, ids of declarations in that record, at least
+  one; left out, it withdraws every declaration in the record.
 - To undo a withdrawal, approve again. There is no withdraw of a withdraw.
 
 ## Several records for one declaration
 
-An approve record is **live** for a constant if no counting withdraw (rules
-above) covers that constant in it, and its signer is allowed by
-`leanblame.toml`. This is the one definition; validity is built on it
-([03-trust-model.md](03-trust-model.md), Validity). Withdrawals stay visible in
-`blame` and in the `history` of `status --json`.
+An approve record is **live** for a declaration if no counting withdraw (rules
+above) covers that declaration in it, `exclude` does not list it, and its signer
+is allowed by `leanblame.toml`. This is the one definition; validity is built on
+it ([03-trust-model.md](03-trust-model.md), Validity). Every record stays visible
+in `blame` and in the `history` of `status --json`, each approval with its
+standing: `current` (live, at the current claim), `superseded` (live, an older
+claim), `withdrawn`, `excluded` or `not-allowed`.
+
+A withdraw that breaks the rules above, an `exclude` entry that names no approve
+record, a record in two records directories, and a file in a records directory
+that is not a record are problems. `validate` lists them; the other commands
+stop.
 
 ## Storage
 
-- One file per record in `records/`. Filename = sha256 of the file bytes as
-  the sign server wrote them.
+- One file per record in a records directory (`records/` by default).
+  Filename = sha256 of the file bytes as the sign server wrote them.
 - Terminal `sign` writes `local:` records. Provider identities (OpenReview,
   ORCID, GitHub) come through the sign server, which is not built yet.
 - `validate` gates every record, wherever the adopter runs it: schema, authority rules, and no
@@ -90,14 +107,14 @@ above) covers that constant in it, and its signer is allowed by
 
 A library lists its records directories in `leanblame.toml` (local
 directories; remote repositories later) and excludes individual approve records
-by hash. `exclude` is applied before liveness. A
+by hash. Every key of `leanblame.toml` is required; `init` writes them all. A
 withdrawal cannot be excluded: a signer's word about their own record stands,
 and nobody can be made to vouch for what they took back.
 
 ## Decisions
 
-- One signer suffices by default (`required_signers = 1`). Several records for
-  the same hash accumulate.
+- One signer suffices with `required_signers = 1`, which `init` writes. Several
+  records for the same hash accumulate.
 - No delta records ("old → new is fine"). The signer approves the new hash;
   `equiv` evidence is attached as information.
 - `action` is the only type field.

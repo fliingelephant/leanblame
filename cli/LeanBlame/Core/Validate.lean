@@ -6,8 +6,9 @@ Checks every entry of the records directories:
   passes the record schema (strict: unknown keys, wrong types, non-UTC dates,
   malformed hashes and signer ids are errors);
 * authority: `refers_to` names an approve record, the withdraw's signer equals that
-  record's signer, and listed constants are in that record; `exclude` in
+  record's signer, and listed declarations are in that record; `exclude` in
   `leanblame.toml` names approve records only (a withdrawal cannot be excluded);
+  no record is in two records directories;
 * with `--base-ref REF`: every record of the merge base of REF and HEAD, in the
   records directories its `leanblame.toml` names, is still a record. Records are
   compared by id, so moving them passes; editing or deleting one does not.
@@ -45,12 +46,7 @@ def run (root : System.FilePath) (baseRef? : Option String) : IO UInt32 := do
   for (p, es) in bad do
     for msg in es do errors := errors.push s!"{p}: {msg}"
   -- Authority: the withdraw rule; `exclude` names approve records only.
-  let ledger := Ledger.build cfg loaded
-  for (r, ps) in ledger.problems do
-    for p in ps do errors := errors.push s!"{r.path}: {p}"
-  for id in cfg.exclude do
-    if let some { record := .withdraw _, .. } := ledger.byId[id]? then
-      errors := errors.push s!"{Config.fileName}: exclude lists {id}, a withdraw record; withdrawals cannot be excluded"
+  errors := errors ++ (Ledger.build cfg loaded).problems
   if let some baseRef := baseRef? then
     let mb := strTrim (← IO.Process.run
       { cmd := "git", args := #["merge-base", baseRef, "HEAD"], cwd := root })

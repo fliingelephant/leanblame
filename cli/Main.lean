@@ -25,11 +25,11 @@ commands:
                                          library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
   blame NAME|ID                          who signed it, when, at which claim hash
-  equiv [NAME...]                        ask the kernel whether what changed under NAME (default:
+  equiv [NAME|ID...]                     ask the kernel whether what changed under it (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
-  sign --signer local:NAME [--module M] [--note TEXT] [NAME...]
-  sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]
+  sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
+  sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
