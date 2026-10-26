@@ -56,10 +56,10 @@ def fail {α : Type} (msg : String) : IO α := throw (IO.userError msg)
 /-! Processes. -/
 
 /-- Run a command, copying its stdout to our stderr as it comes (our stdout carries results); fail
-with `what` on a non-zero exit. Its stderr is ours. -/
+with `what` on a non-zero exit. Its stderr is ours; `env` is added to our environment. -/
 partial def runToStderr (cmd : String) (args : Array String) (cwd : Option System.FilePath)
-    (what : String) : IO Unit := do
-  let child ← IO.Process.spawn { cmd, args, cwd, stdin := .null, stdout := .piped }
+    (what : String) (env : Array (String × Option String) := #[]) : IO Unit := do
+  let child ← IO.Process.spawn { cmd, args, cwd, env, stdin := .null, stdout := .piped }
   let out ← IO.getStderr
   let rec copy : IO Unit := do
     let chunk ← child.stdout.read (1024 * 1024)

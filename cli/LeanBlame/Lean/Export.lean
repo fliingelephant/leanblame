@@ -291,7 +291,9 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
     try runToStderr "lake" #["exe", "cache", "get"] root "`lake exe cache get`"
     catch e => IO.eprintln s!"warning: could not fetch the mathlib cache: {e}"
   IO.eprintln "leanblame: lake build"
-  runToStderr "lake" #["build"] root "`lake build`"
+  -- The modules are imported from the build directory. With Lake's artifact cache on, a build may
+  -- leave them only in the cache unless Lake is asked to restore them.
+  runToStderr "lake" #["build"] root "`lake build`" (env := #[("LAKE_RESTORE_ARTIFACTS", some "true")])
   let libs ← libraryNames root libsGiven
   let mods ← libraryModules root libs
   let vars := (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root }).lines.toArray

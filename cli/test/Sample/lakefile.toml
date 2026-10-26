@@ -1,5 +1,8 @@
 name = "sample"
 defaultTargets = ["Sample"]
+# Lake keeps build outputs in its cache; `export` must still find the modules
+# after an edit is reverted and Lake takes the old build from the cache.
+enableArtifactCache = true
 
 # The `@[trusted]` attribute. `test/run.sh` rewrites this path when it copies
 # the library to a scratch directory.
