@@ -22,6 +22,7 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
   "declarations": [
     {
       "name": "OpenPhysics.Ising.Hamiltonian",
+      "id": "3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b",
       "module": "OpenPhysics.Ising",
       "kind": "def",
       "role": "defined",
@@ -39,6 +40,7 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
 | Field | Meaning |
 |-------|---------|
 | `name` | fully qualified constant name, after structure expansion |
+| `id` | the id from `@[trusted "id"]`, a UUID; `null` when it has none (members of a tagged structure, `--boundary` lists, tags without an id). No two declarations share one. Never hashed |
 | `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on; required |
@@ -111,6 +113,7 @@ never need another source.
   "generated": "2026-10-23T15:00:00Z",
   "declarations": {
     "OpenPhysics.Ising.groundEnergy_le": {
+      "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
       "module": "OpenPhysics.Ising",
       "kind": "theorem",
       "role": "proved",
@@ -136,7 +139,7 @@ never need another source.
 
 | Field | Values |
 |-------|--------|
-| `kind`, `role` | as in the boundary list |
+| `id`, `kind`, `role` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |
 | `change` | causes since the last live approval: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`, each with the names involved; empty when valid |
 | `signers` | live approve records matching `claim` |

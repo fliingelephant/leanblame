@@ -87,17 +87,17 @@ def moduleOf (env : Environment) (n : Name) : Name :=
   | some idx => env.header.modules[idx.toNat]!.module
   | none => env.mainModule
 
-/-- The `@[trusted]` declarations, own and imported, with their docstrings; and the problems. -/
+/-- The `@[trusted]` declarations, own and imported, with their ids and docstrings; and the problems. -/
 def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
   let mut tags := #[]
   let mut errors := #[]
-  for n in (trustedDecls env).qsort (·.cmp · == .lt) do
+  for (n, id) in (trustedDecls env).qsort (·.1.cmp ·.1 == .lt) do
     let some doc ← findSimpleDocString? env n
       | errors := errors.push s!"{n}: tagged declarations need a docstring (the informal text)"; continue
     let informal := normalizeInformal doc
     if informal.isEmpty then
       errors := errors.push s!"{n}: tagged declarations need a non-empty docstring"; continue
-    tags := tags.push { name := n, informal, informalSource := "docstring" }
+    tags := tags.push { name := n, id, informal, informalSource := "docstring" }
   return (tags, errors)
 
 /-- The tags of a `--boundary` file, by content: a verso-blueprint manifest (JSON with `previews`)
@@ -119,8 +119,9 @@ constructors and projections of tagged inductives and structures that are not ta
 their own docstring or else the parent's text. `module`, `kind` and `role` come from `env`; the
 statement is filled in by `withStatements`. Also the problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
-  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) : Name × BoundaryDecl :=
-    (n, { name := n.toString, module := (moduleOf env n).toString, kind := Source.kindOf ci,
+  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) (id : Option String := none) :
+      Name × BoundaryDecl :=
+    (n, { name := n.toString, id, module := (moduleOf env n).toString, kind := Source.kindOf ci,
           role := Source.roleOf ci, informal, informalSource, statement := default })
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
   let mut out := #[]
@@ -132,7 +133,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       errors := errors.push s!"{t.name}: `unsafe` declarations cannot be tagged"; continue
     if ci matches .recInfo _ then
       errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
-    out := out.push (decl t.name ci t.informal t.informalSource)
+    out := out.push (decl t.name ci t.informal t.informalSource t.id)
     let .inductInfo iv := ci | continue
     let projs := ((getStructureInfo? env t.name).map (·.fieldInfo.map (·.projFn))).getD #[]
     for m in iv.ctors.toArray ++ projs do
@@ -141,6 +142,13 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       out := out.push <| match ((← findSimpleDocString? env m).map normalizeInformal).filter (· != "") with
         | some doc => decl m mi doc "docstring"
         | none => decl m mi t.informal t.informalSource
+  -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
+  let mut owner : Std.HashMap String Name := {}
+  for t in tags do
+    let some id := t.id | continue
+    if let some other := owner[id]? then
+      errors := errors.push s!"{other} and {t.name} have the same id {id}; remove it from one of them and run `leanblame id`"
+    owner := owner.insert id t.name
   return (out.qsort (·.2.name < ·.2.name), errors)
 
 /-- The Lean script that prints the statements (docs/design/14-schemas.md §1) of the constants named
@@ -264,16 +272,18 @@ def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath)
       (LeanExport.dumpEnv env (some roots.toList))
   return Sha256.toHex (← sha.get).finish
 
-structure Result where
-  exportHash : String
-  boundary : String
-  boundaryList : BoundaryList
-  /-- Constants hashed into the claims. -/
-  hashed : Nat
+/-- A built library with its modules imported. -/
+structure Loaded where
+  libs : Array String
+  mods : Array Name
+  deps : Array (String × String)
+  env : Environment
+  /-- Where the sources are (`LEAN_SRC_PATH` of `lake env`). -/
+  srcPath : System.SearchPath
 
-/-- Run the export in library root `root`; `backend` hashes it. -/
-def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
-    (libsGiven : Array String) : IO Result := do
+/-- Build the library in `root` (with the mathlib cache when it depends on mathlib) and import its
+modules. -/
+def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
   let deps ← manifestDeps root
   -- docs/design/04: build using the mathlib cache, when the library depends on mathlib.
   if deps.any (·.1 == "mathlib") then
@@ -291,6 +301,20 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     (System.SearchPath.parse leanPath)
   IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
   let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
+  let srcPath := System.SearchPath.parse ((var "LEAN_SRC_PATH").getD "")
+  return { libs, mods, deps, env, srcPath }
+
+structure Result where
+  exportHash : String
+  boundary : String
+  boundaryList : BoundaryList
+  /-- Constants hashed into the claims. -/
+  hashed : Nat
+
+/-- Run the export in library root `root`; `backend` hashes it. -/
+def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
+    (libsGiven : Array String) : IO Result := do
+  let { libs, mods, deps, env, .. } ← load root libsGiven
   -- The boundary list.
   let commit ← gitCommit root
   let toolchain := "v" ++ Lean.versionString
@@ -301,6 +325,11 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let (declarations, errors') ← expand env tags
   unless (errors ++ errors').isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
+  if boundaryFile?.isNone then
+    let own : NameSet := mods.foldl (·.insert ·) {}
+    let missing := tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)
+    unless missing.isEmpty do
+      IO.eprintln s!"warning: {missing.size} tagged declarations of this library have no id; `leanblame id` writes them"
   IO.eprintln "leanblame: printing statements"
   let declarations ← withStatements root mods declarations
   let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations := declarations.map (·.2) }

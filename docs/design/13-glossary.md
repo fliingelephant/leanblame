@@ -12,6 +12,7 @@
 | **closure** | A declaration plus everything it uses, recursively. |
 | **boundary list** | The declarations a human must read, with their informal text. Input to LeanBlame. |
 | **tagged** | On the boundary list. `@[trusted]` is the usual way. |
+| **id** | A declaration's random UUID, `@[trusted "id"]`, written by `leanblame id`. Survives renames; never hashed. Cite as `id@record`. |
 | **informal text** | The docstring, or the blueprint node text. The spec a signer relies on. |
 | **spec** | Name, type, informal text of a declaration. What its users sign. |
 | **claim hash** | Hash of what one signoff covers. See [03-trust-model.md](03-trust-model.md). |

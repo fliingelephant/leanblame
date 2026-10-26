@@ -33,14 +33,15 @@ modules form two layers ([15-generic-core.md](15-generic-core.md)):
 
 `Main` passes the Lean frontend to the core commands.
 
-Eight commands:
+Nine commands:
 
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml` and `records/`. |
 | `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list. `--boundary` takes a list from an adapter instead of `@[trusted]`. |
+| `id` | Write a new random id into each `@[trusted]` of the library that has none: `@[trusted "id"]`. Commit the change. |
 | `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). |
-| `blame X` | Who signed `X`, when, at which claim hash. |
+| `blame X` | Who signed `X` (a name or an id), when, at which claim hash. |
 | `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
 | `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |

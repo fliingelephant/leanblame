@@ -1,5 +1,5 @@
 /-
-`leanblame`: command-line entry point (docs/design/04-architecture.md, eight commands). It passes
+`leanblame`: command-line entry point (docs/design/04-architecture.md, nine commands). It passes
 the Lean frontend's backend to the two commands that need one (docs/design/15-generic-core.md):
 `export` hashes with it, `release` runs its kernel check.
 -/
@@ -8,6 +8,7 @@ import LeanBlame.Core.Sign
 import LeanBlame.Core.Status
 import LeanBlame.Core.Validate
 import LeanBlame.Lean.Equiv
+import LeanBlame.Lean.Ids
 import LeanBlame.Lean.Source
 
 open LeanBlame
@@ -20,8 +21,10 @@ commands:
   export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
                                          verso-blueprint blueprint-manifest.json or a
                                          leanblame.manual.1 TOML list)
+  id [--lib NAME]                        write a new random id into each @[trusted] of the
+                                         library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
-  blame NAME                             who signed NAME, when, at which claim hash
+  blame NAME|ID                          who signed it, when, at which claim hash
   equiv [NAME...]                        ask the kernel whether what changed under NAME (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
@@ -74,13 +77,17 @@ def cmdExport (args : List String) : IO UInt32 := do
   IO.println s!"boundary {r.boundary}"
   return 0
 
+def cmdId (args : List String) : IO UInt32 := do
+  let a ← parseArgs #["--lib"] #[] args
+  Ids.run (← IO.currentDir) (a.getAll "--lib")
+
 def cmdStatus (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #["--json"] args
   Status.run (← IO.currentDir) (a.has "--json")
 
 def cmdBlame (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)
-  let #[name] := a.positional | fail "usage: leanblame blame NAME"
+  let #[name] := a.positional | fail "usage: leanblame blame NAME|ID"
   Status.blame (← IO.currentDir) name
 
 def cmdValidate (args : List String) : IO UInt32 := do
@@ -119,6 +126,7 @@ def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0
   | "init" :: args => cmdInit args
   | "export" :: args => cmdExport args
+  | "id" :: args => cmdId args
   | "status" :: args => cmdStatus args
   | "blame" :: args => cmdBlame args
   | "sign" :: args => cmdSign args

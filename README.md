@@ -43,10 +43,14 @@ approves. Tagging a `structure` or `inductive` also tags its constructors and
 projections.
 
 ```
+lake exe leanblame id                          # write an id into each @[trusted]
 lake exe leanblame export                      # build and export the library
 lake exe leanblame sign --signer local:alice   # one approve record per module
 lake exe leanblame status                      # every tagged declaration: valid
 ```
+
+`id` turns `@[trusted]` into `@[trusted "3f2b8c1e-…"]`: a random id that stays
+when the declaration is renamed. Cite a declaration by its id. Commit the change.
 
 Without `@[trusted]`, `export --boundary FILE` takes a verso-blueprint
 `blueprint-manifest.json` or a TOML list (`schema = "leanblame.manual.1"`,
@@ -60,8 +64,9 @@ Run in the library root as `lake exe leanblame <command>`.
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
 | `export [--boundary FILE] [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
+| `id [--lib NAME]` | Write a random id into each `@[trusted]` that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
-| `blame NAME` | Who signed `NAME`, when, at which hash. |
+| `blame NAME\|ID` | Who signed it, when, at which hash. |
 | `sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]` | Write an approve record (default: one per module of the library). |
 | `sign --withdraw RECORD [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its constants. |
 | `equiv [NAME...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |

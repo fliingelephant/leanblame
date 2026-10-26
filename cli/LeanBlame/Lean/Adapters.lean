@@ -26,6 +26,8 @@ def constName? (s : String) : Option Name := Syntax.decodeNameLit ("`" ++ s)
 /-- A declaration put on the boundary, by `@[trusted]` or by a boundary-list file. -/
 structure Tag where
   name : Name
+  /-- Its id, from `@[trusted "id"]`; boundary-list files give none. -/
+  id : Option String := none
   informal : String
   informalSource : String
 

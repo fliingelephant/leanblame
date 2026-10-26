@@ -152,3 +152,13 @@ nothing).
 Per library, in `leanblame.toml`: `allowed_signers` (any, a list, or a repo)
 and `required_signers` (default 1). Pure rule over records, no Lean in it.
 Reviewer assignment is a web queue and never affects validity.
+
+### Declaration ids (owner, 2026-10-26)
+
+Each tagged declaration gets a random UUID in its source, `@[trusted "id"]`,
+written by `leanblame id`, never by `export` (a build on a server would make a
+new one each time). It survives renames and edits; the name is a label. It is
+not hashed, so writing it changes no claim. A cite is `id@record`: the record
+fixes the commit, the Lean version and the dependency commits. Not the commit
+alone (it moves when anything changes) and not the claim (it stops at signed
+dependencies). `export` refuses two declarations with one id.

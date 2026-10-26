@@ -1,6 +1,6 @@
 # 2. Concepts
 
-Seven terms. Everything else is built from these. The trust model itself is
+Eight terms. Everything else is built from these. The trust model itself is
 [03-trust-model.md](03-trust-model.md).
 
 ## Trusted boundary
@@ -16,6 +16,14 @@ A plain file naming the declarations on the trusted boundary, each with its
 informal text (usually the docstring). The `@[trusted]` attribute generates it.
 A blueprint adapter can generate it from a blueprint's node-to-declaration
 mapping. Everything on the list is "tagged."
+
+## Id
+
+A random UUID in the source, `@[trusted "id"]`, written by `leanblame id`. It
+stays when the declaration is renamed or edited, so people cite a declaration
+by its id: `id@record`, the record fixing the commit. It is never hashed:
+writing an id changes no claim. Members of a tagged structure have none; cite
+the structure. Two declarations with one id stop `export`.
 
 ## Export, checker, comparator
 

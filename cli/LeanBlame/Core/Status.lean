@@ -150,7 +150,7 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     closures := closures.insert n closure
     states := states.insert n state
     entries := entries.push (d, {
-      module := d.module, kind := d.kind, role := d.role, informal := d.informal
+      id := d.id, module := d.module, kind := d.kind, role := d.role, informal := d.informal
       informalSource := d.informalSource, statement := d.statement
       claim, state, change, signers, history := historyOf ledger n
       blockedBy := #[]
@@ -219,12 +219,15 @@ def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
     IO.println s!"{decls.size} tagged: {count .valid} valid, {count .outdated} outdated, {count .unsigned} unsigned; {blocked} blocked"
   return 0
 
-/-- `blame NAME`: who signed it, when, at which claim hash. -/
-def blame (root : System.FilePath) (name : String) : IO UInt32 := do
+/-- `blame NAME` or `blame ID`: who signed it, when, at which claim hash. An id stands for the
+declaration that carries it now. -/
+def blame (root : System.FilePath) (nameOrId : String) : IO UInt32 := do
   let ledger ← Ledger.load root
   let current? ← if (← (Store.currentPath root).pathExists) then
       some <$> compute root ledger (causes := false) (warn := false)
     else pure none
+  let name := (current?.bind fun r =>
+    (r.report.declarations.find? (·.2.id == some nameOrId)).map (·.1)).getD nameOrId
   let decl? := current?.bind fun r => (r.report.declarations.find? (·.1 == name)).map (·.2)
   let history := historyOf ledger name
   if decl?.isNone && history.isEmpty then
@@ -232,6 +235,7 @@ def blame (root : System.FilePath) (name : String) : IO UInt32 := do
   match decl? with
   | some d =>
     IO.println s!"{name}  {d.kind}  {d.state}  claim {d.claim}"
+    if let some id := d.id then IO.println s!"  id: {id}"
     unless d.signers.isEmpty do IO.println s!"  signed by: {", ".intercalate d.signers.toList}"
     unless d.blockedBy.isEmpty do IO.println s!"  blocked by: {", ".intercalate d.blockedBy.toList}"
   | none => IO.println s!"{name}  (not on the current boundary list)"

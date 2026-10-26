@@ -174,6 +174,9 @@ def Statement.fromJson? (j : Json) : Except String Statement := do
 
 structure BoundaryDecl where
   name : String
+  /-- The declaration's id (Lean: written in `@[trusted "id"]`): stays when it is renamed or edited;
+  never hashed. `none` when it has none. -/
+  id : Option String := none
   module : String
   /-- The proof assistant's own label (Lean: `def`, `theorem`, …); never interpreted. -/
   kind : String
@@ -194,7 +197,7 @@ structure BoundaryList where
 def BoundaryList.schemaId : String := "leanblame.boundary.2"
 
 instance : ToJson BoundaryDecl where
-  toJson d := Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind),
+  toJson d := Json.mkObj [("name", d.name), ("id", toJson d.id), ("module", d.module), ("kind", d.kind),
     ("role", toJson d.role), ("informal", d.informal), ("informal_source", d.informalSource),
     ("statement", toJson d.statement)]
 
@@ -218,6 +221,7 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
     | throw s!"{what}: role `{role}` is not one of {", ".intercalate (Role.all.map toString)}"
   let d : BoundaryDecl := {
     name, kind, role
+    id := ← (j.getObjValAs? (Option String) "id").mapError (s!"{what}.id: " ++ ·)
     module := ← getStrField j what "module"
     informal := ← getStrField j what "informal"
     informalSource := ← getStrField j what "informal_source"
@@ -236,9 +240,13 @@ def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
   let decls ← (j.getObjVal? "declarations" >>= (·.getArr?)).mapError (s!"{w}.declarations: " ++ ·)
   let decls ← decls.mapM BoundaryDecl.fromJson?
   let mut seen : Std.HashSet String := {}
+  let mut ids : Std.HashMap String String := {}
   for d in decls do
     if seen.contains d.name then throw s!"boundary list: `{d.name}` listed twice"
     seen := seen.insert d.name
+    if let some id := d.id then
+      if let some other := ids[id]? then throw s!"boundary list: `{other}` and `{d.name}` have the same id {id}"
+      ids := ids.insert id d.name
   let deps ← (j.getObjVal? "deps" >>= (·.getObj?)).mapError (s!"{w}.deps: " ++ ·)
   return {
     library := ← getStrField j w "library"
@@ -416,6 +424,7 @@ structure HistoryEntry where
   deriving Inhabited, Repr
 
 structure StatusDecl where
+  id : Option String
   module : String
   kind : String
   role : Role
@@ -451,7 +460,7 @@ instance : ToJson HistoryEntry where
     Json.opt "note" h.note
 
 instance : ToJson StatusDecl where
-  toJson d := Json.mkObj [("module", d.module), ("kind", d.kind), ("role", toJson d.role),
+  toJson d := Json.mkObj [("id", toJson d.id), ("module", d.module), ("kind", d.kind), ("role", toJson d.role),
     ("informal", d.informal), ("informal_source", d.informalSource),
     ("statement", toJson d.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),

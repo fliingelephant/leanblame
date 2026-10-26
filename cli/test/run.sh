@@ -11,7 +11,9 @@
 # from a verso-blueprint manifest and from a manual TOML list -> equiv, in a copy
 # made after the first signoff: a definitional change proven (evidence shown by
 # status, the record carries the proof, valid), one that is not definitional, an
-# own-body change refused.
+# own-body change refused -> id, in another copy made after the first signoff:
+# ids written into the sources, still valid, in status --json, blame by id, a
+# rename keeps the id, a shared id and a malformed one refused.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,6 +94,8 @@ ok "validate: $out"
 commit "first signoff"
 work_equiv="$work-equiv"
 cp -R "$work" "$work_equiv"
+work_id="$work-id"
+cp -R "$work" "$work_id"
 
 echo "== status: everything valid"
 out="$("$lb" status 2>"$work/status.err")"
@@ -110,11 +114,12 @@ import json, sys
 s = json.loads(sys.argv[1])
 assert s["schema"] == "leanblame.status.2"
 assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
-keys = {"module", "kind", "role", "informal", "informal_source", "statement", "claim", "state", "change", "signers",
+keys = {"id", "module", "kind", "role", "informal", "informal_source", "statement", "claim", "state", "change", "signers",
         "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
+    assert d["id"] is None, name
     want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
             "Sample.one_site_pos": "proven"}.get(name, "n/a")
     assert d["proof"]["status"] == want, (name, d["proof"])
@@ -438,6 +443,63 @@ commit "pointEnergy: new body"
 export_lib
 must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
 ok "equiv refuses an own-body change"
+
+echo "== id: a random id per tagged declaration, written into its source"
+rm -rf "$work"
+work="$work_id"
+cd "$work"
+run id
+ids="$out"
+[[ "$(grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} Sample\.' <<<"$ids")" -eq 8 ]] \
+  || fail "id: want 8 version-4 UUIDs, one per @[trusted]: $ids"
+id_of() { awk -v n="$1" '$2 == n {print $1}' <<<"$ids"; }
+energy_id="$(id_of Sample.energy)"
+grep -qF "@[trusted \"$energy_id\"] def energy" Sample/Basic.lean || fail "id: not written into the source"
+ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy"
+"$lb" id >"$work/id.log" 2>&1 || fail "id, second run: $(cat "$work/id.log")"
+grep -q "every tagged declaration of this library has an id" "$work/id.log" || fail "id, second run: $(cat "$work/id.log")"
+ok "a second run writes nothing"
+commit "ids"
+export_lib
+run status
+for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
+         Sample.energy Sample.energy_even Sample.energy_pos Sample.one_site_pos Sample.pointEnergy \
+         Sample.second_site; do
+  expect_line "$n" "$n valid"
+done
+ok "ids change no claim: what was signed before is still valid"
+run status --json
+python3 - "$out" "$ids" <<'PY' || fail "status --json: ids"
+import json, sys
+d = json.loads(sys.argv[1])["declarations"]
+want = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
+assert {n: x["id"] for n, x in d.items() if x["id"]} == want, d
+assert all(d[n]["id"] is None for n in ["Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"])
+PY
+ok "status --json carries the ids; a structure's constructor and fields have none"
+run blame "$energy_id"
+grep -q "^Sample.energy  def  valid  claim " <<<"$out" || fail "blame by id: $out"
+grep -qxF "  id: $energy_id" <<<"$out" || fail "blame by id: $out"
+ok "blame takes an id"
+edit Sample/Energy.lean 's/theorem second_site /theorem site_two /'
+export_lib
+run status --json
+python3 - "$out" "$(id_of Sample.second_site)" <<'PY' || fail "rename: $out"
+import json, sys
+d = json.loads(sys.argv[1])["declarations"]
+assert "Sample.second_site" not in d
+assert d["Sample.site_two"]["id"] == sys.argv[2] and d["Sample.site_two"]["state"] == "unsigned", d["Sample.site_two"]
+PY
+git checkout -q -- Sample
+ok "a renamed declaration keeps its id; its claim is new (the name is hashed), so it is unsigned"
+edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/$energy_id/"
+must_fail "Sample.energy and Sample.pointEnergy have the same id $energy_id" -- "$lb" export
+git checkout -q -- Sample
+ok "export refuses two declarations with the same id"
+edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/x/"
+must_fail "the id must be a UUID" -- "$lb" export
+git checkout -q -- Sample
+ok "a malformed id is a build error"
 
 rm -rf "$work"
 echo "PASS ($pass checks)"
