@@ -23,7 +23,8 @@ A random UUID in the source, `@[trusted "id"]`, written by `leanblame id`. It
 stays when the declaration is renamed or edited, so people cite a declaration
 by its id: `id@record`, the record fixing the commit. It is never hashed:
 writing an id changes no claim. Members of a tagged structure have none; cite
-the structure. Two declarations with one id stop `export`.
+the structure. A tag without an id, or two declarations with one id, stop
+`export`.
 
 ## Export, checker, comparator
 

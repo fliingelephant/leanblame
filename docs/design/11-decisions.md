@@ -161,4 +161,14 @@ new one each time). It survives renames and edits; the name is a label. It is
 not hashed, so writing it changes no claim. A cite is `id@record`: the record
 fixes the commit, the Lean version and the dependency commits. Not the commit
 alone (it moves when anything changes) and not the claim (it stops at signed
-dependencies). `export` refuses two declarations with one id.
+dependencies). `export` refuses a tag of the library without an id, and two
+declarations with one id.
+
+### Fail out loud (owner, 2026-10-26)
+
+"I want things break out loud if not expected." An unexpected state is an
+error, not a warning: a tag without an id, a graph the store should have
+(its export and boundary list are there) and does not, a graph file that does
+not read. A record made in another store, whose objects this store lacks, is
+expected: `status` warns that its causes are unknown. Development stage: no
+backward compatibility; after a format change, data is made again.

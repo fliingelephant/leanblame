@@ -38,6 +38,18 @@ def graph (root : System.FilePath) (exportHash boundary : String) : IO Core.Hash
   let some h ← graph? root exportHash boundary | fail s!"no graph for export {exportHash}"
   return h
 
+/-- The graph of export `exportHash` against boundary list `boundary`, both named by `record`: `none`
+when this store lacks them (the record was made in another store); an error when it has them but no
+graph of them, which `export` always writes. -/
+def recordGraph? (root : System.FilePath) (record exportHash boundary : String) : IO (Option Core.Hashed) := do
+  unless (← (Store.objectPath root .exports exportHash).pathExists) &&
+      (← (Store.objectPath root .boundaries boundary).pathExists) do
+    IO.eprintln s!"warning: record {record}: its export or boundary list is not in this store; causes unknown"
+    return none
+  let some h ← graph? root exportHash boundary
+    | fail s!"record {record}: the store has its export and boundary list but no graph of them; it was made by another version of leanblame"
+  return some h
+
 /-- The graph of the last `export`. -/
 def currentGraph (root : System.FilePath) (cur : Store.Current) : IO Core.Hashed := do
   let some h ← graph? root cur.exportHash cur.boundary
@@ -138,13 +150,9 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     let mut change : Array Change := #[]
     if let some (lastRec, last, lastClaim) := live.back? then
       if causes && state != .valid && lastClaim != claim then
-        -- A record from elsewhere may name objects this store lacks.
         let key := (last.exportHash, last.boundary)
         unless olds.contains key do
-          let old? ← try some <$> graph root last.exportHash last.boundary catch e => do
-            IO.eprintln s!"warning: record {lastRec.hash}: {e}; causes unknown"
-            pure none
-          olds := olds.insert key old?
+          olds := olds.insert key (← recordGraph? root lastRec.hash last.exportHash last.boundary)
         if let some (some old) := olds[key]? then change := Walk.changes old new n closure
     let (cut, untagged) := closure
     closures := closures.insert n closure

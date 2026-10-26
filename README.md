@@ -51,6 +51,7 @@ lake exe leanblame status                      # every tagged declaration: valid
 
 `id` turns `@[trusted]` into `@[trusted "3f2b8c1e-…"]`: a random id that stays
 when the declaration is renamed. Cite a declaration by its id. Commit the change.
+`export` refuses a tag without an id.
 
 Without `@[trusted]`, `export --boundary FILE` takes a verso-blueprint
 `blueprint-manifest.json` or a TOML list (`schema = "leanblame.manual.1"`,

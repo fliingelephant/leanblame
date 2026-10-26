@@ -323,13 +323,14 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     | some f => boundaryFileTags f
     | none => trustedTags env
   let (declarations, errors') ← expand env tags
-  unless (errors ++ errors').isEmpty do
-    fail ("export failed:\n" ++ "\n".intercalate ((errors ++ errors').toList.map ("  " ++ ·)))
-  if boundaryFile?.isNone then
-    let own : NameSet := mods.foldl (·.insert ·) {}
-    let missing := tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)
-    unless missing.isEmpty do
-      IO.eprintln s!"warning: {missing.size} tagged declarations of this library have no id; `leanblame id` writes them"
+  -- Every `@[trusted]` of this library has an id; imported libraries are theirs to fix.
+  let own : NameSet := mods.foldl (·.insert ·) {}
+  let noId := if boundaryFile?.isSome then #[] else
+    (tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)).map
+      (s!"{·.name}: tagged without an id; run `leanblame id`")
+  let problems := errors ++ errors' ++ noId
+  unless problems.isEmpty do
+    fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
   IO.eprintln "leanblame: printing statements"
   let declarations ← withStatements root mods declarations
   let boundaryList : BoundaryList := { library, commit, toolchain, deps, declarations := declarations.map (·.2) }

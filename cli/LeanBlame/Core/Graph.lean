@@ -143,11 +143,13 @@ def save (root : System.FilePath) (exportHash : String) (h : Core.Hashed) : IO U
     ("axioms", .arr (h.axioms.fold (init := #[]) fun acc n axs => acc.push (.arr #[toJson n, toJson axs]))),
     ("standard", toJson h.standard), ("incomplete", toJson h.incomplete), ("checker", h.checker)]
 
-/-- The graph of export `exportHash` against boundary list `b`, if the store has it. -/
+/-- The graph of export `exportHash` against boundary list `b`: `none` when the store has no file for
+them, an error when the file does not read as their graph. -/
 def load? (root : System.FilePath) (exportHash : String) (b : BoundaryList) :
     IO (Option Core.Hashed) := do
-  let some text ← readFileIfExists (path root exportHash b) | return none
-  return Except.toOption do
+  let p := path root exportHash b
+  let some text ← readFileIfExists p | return none
+  let parsed : Except String Core.Hashed := do
     let j ← Json.parse text
     unless (← j.getObjValAs? String "schema") == schema do throw "another schema"
     unless (← j.getObjValAs? (Array String) "declarations") == b.declarations.map (·.name) do
@@ -162,6 +164,9 @@ def load? (root : System.FilePath) (exportHash : String) (b : BoundaryList) :
       nodes, axioms, boundary := b, standard := ← j.getObjValAs? (Array String) "standard"
       incomplete := ← j.getObjValAs? (Array String) "incomplete"
       checker := ← j.getObjValAs? String "checker" }
+  match parsed with
+  | .ok h => return some h
+  | .error e => fail s!"{p}: not the graph of export {exportHash} and its boundary list: {e}"
 
 end Graph
 

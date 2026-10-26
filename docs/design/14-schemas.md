@@ -40,7 +40,7 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
 | Field | Meaning |
 |-------|---------|
 | `name` | fully qualified constant name, after structure expansion |
-| `id` | the id from `@[trusted "id"]`, a UUID; `null` when it has none (members of a tagged structure, `--boundary` lists, tags without an id). No two declarations share one. Never hashed |
+| `id` | the id from `@[trusted "id"]`, a UUID; `null` for members of a tagged structure, `--boundary` lists and tags imported from a library without ids (a tag of this library without one stops `export`). No two declarations share one. Never hashed |
 | `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on; required |

@@ -11,9 +11,11 @@
 # from a verso-blueprint manifest and from a manual TOML list -> equiv, in a copy
 # made after the first signoff: a definitional change proven (evidence shown by
 # status, the record carries the proof, valid), one that is not definitional, an
-# own-body change refused -> id, in another copy made after the first signoff:
-# ids written into the sources, still valid, in status --json, blame by id, a
-# rename keeps the id, a shared id and a malformed one refused.
+# own-body change refused -> ids, in another copy made after the first signoff:
+# a new id changes no claim, status --json, blame by id, a rename keeps the id,
+# a shared id and a malformed one refused. Before the first export, `id` writes
+# the ids (export refuses a tag without one); after the first body edit, status
+# fails out loud when a signed graph is missing or broken.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -74,6 +76,22 @@ grep -qx "/.lake/" .gitignore || fail "init dropped the existing .gitignore entr
 ok "init created leanblame.toml, records/, .gitignore entry"
 commit "sample library"
 
+echo "== id: a random id per tagged declaration, written into its source"
+must_fail "Sample.energy: tagged without an id; run" -- "$lb" export
+ok "export refuses a tag without an id"
+run id
+ids="$out"
+[[ "$(grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} Sample\.' <<<"$ids")" -eq 8 ]] \
+  || fail "id: want 8 version-4 UUIDs, one per @[trusted]: $ids"
+id_of() { awk -v n="$1" '$2 == n {print $1}' <<<"$ids"; }
+energy_id="$(id_of Sample.energy)"
+grep -qF "@[trusted \"$energy_id\"] def energy" Sample/Basic.lean || fail "id: not written into the source"
+ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy"
+"$lb" id >"$work/id.log" 2>&1 || fail "id, second run: $(cat "$work/id.log")"
+grep -q "every tagged declaration of this library has an id" "$work/id.log" || fail "id, second run: $(cat "$work/id.log")"
+ok "a second run writes nothing"
+commit "ids"
+
 echo "== export"
 export_lib
 [[ "$(current_export)" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "no current export"
@@ -119,7 +137,7 @@ keys = {"id", "module", "kind", "role", "informal", "informal_source", "statemen
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
-    assert d["id"] is None, name
+    assert (d["id"] is None) == (name in {"Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"}), (name, d["id"])
     want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
             "Sample.one_site_pos": "proven"}.get(name, "n/a")
     assert d["proof"]["status"] == want, (name, d["proof"])
@@ -202,9 +220,17 @@ ok "export removes exports and graphs that no record names"
 run status
 expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Sample.pointEnergy"
 expect_line Sample.energy_even "Sample.energy_even valid"
+# The causes come from the signed export's graph, which `export` stored: missing or broken, status stops.
+signed_graph="$(ls .leanblame/store/graphs | grep -v "^$(current_export | sed 's/^sha256://')-")"
+mv ".leanblame/store/graphs/$signed_graph" "$work/graph.json"
+must_fail "the store has its export and boundary list but no graph of them" -- "$lb" status
+printf 'not json\n' > ".leanblame/store/graphs/$signed_graph"
+must_fail "not the graph of export" -- "$lb" status
+mv "$work/graph.json" ".leanblame/store/graphs/$signed_graph"
+ok "status fails out loud when a signed graph is missing or broken"
 
 echo "== edit a dependency body: energy"
-edit Sample/Basic.lean 's/@\[trusted\] def energy (n : Nat) : Nat := double n/@[trusted] def energy (n : Nat) : Nat := double n + 0/'
+edit Sample/Basic.lean 's/def energy (n : Nat) : Nat := double n$/def energy (n : Nat) : Nat := double n + 0/'
 commit "energy: new body"
 export_lib
 run status
@@ -389,7 +415,7 @@ cd "$work"
 cat >> Sample/Basic.lean <<'EOF'
 
 /-- Twice zero is zero. -/
-@[trusted] theorem Sample.double_zero : Sample.double 0 = 0 := rfl
+@[trusted "5d1c1d36-7a3e-4b8e-9f0a-2b6c8d9e0f11"] theorem Sample.double_zero : Sample.double 0 = 0 := rfl
 EOF
 commit "double_zero"
 export_lib
@@ -444,22 +470,16 @@ export_lib
 must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
 ok "equiv refuses an own-body change"
 
-echo "== id: a random id per tagged declaration, written into its source"
+echo "== id: a new id, renames, shared and malformed ids"
 rm -rf "$work"
 work="$work_id"
 cd "$work"
+edit Sample/Basic.lean "s/@\[trusted \"$energy_id\"\] def energy/@[trusted] def energy/"
 run id
-ids="$out"
-[[ "$(grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} Sample\.' <<<"$ids")" -eq 8 ]] \
-  || fail "id: want 8 version-4 UUIDs, one per @[trusted]: $ids"
-id_of() { awk -v n="$1" '$2 == n {print $1}' <<<"$ids"; }
-energy_id="$(id_of Sample.energy)"
-grep -qF "@[trusted \"$energy_id\"] def energy" Sample/Basic.lean || fail "id: not written into the source"
-ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy"
-"$lb" id >"$work/id.log" 2>&1 || fail "id, second run: $(cat "$work/id.log")"
-grep -q "every tagged declaration of this library has an id" "$work/id.log" || fail "id, second run: $(cat "$work/id.log")"
-ok "a second run writes nothing"
-commit "ids"
+new_energy_id="$(awk '$2 == "Sample.energy" {print $1}' <<<"$out")"
+[[ -n "$new_energy_id" && "$new_energy_id" != "$energy_id" && "$(wc -l <<<"$out")" -eq 1 ]] \
+  || fail "id: want one new id, for Sample.energy: $out"
+commit "energy: a new id"
 export_lib
 run status
 for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
@@ -467,19 +487,20 @@ for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point
          Sample.second_site; do
   expect_line "$n" "$n valid"
 done
-ok "ids change no claim: what was signed before is still valid"
+ok "a new id changes no claim: what was signed before is still valid"
 run status --json
-python3 - "$out" "$ids" <<'PY' || fail "status --json: ids"
+python3 - "$out" "$ids" "$new_energy_id" <<'PY' || fail "status --json: ids"
 import json, sys
 d = json.loads(sys.argv[1])["declarations"]
 want = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
+want["Sample.energy"] = sys.argv[3]
 assert {n: x["id"] for n, x in d.items() if x["id"]} == want, d
 assert all(d[n]["id"] is None for n in ["Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"])
 PY
 ok "status --json carries the ids; a structure's constructor and fields have none"
-run blame "$energy_id"
+run blame "$new_energy_id"
 grep -q "^Sample.energy  def  valid  claim " <<<"$out" || fail "blame by id: $out"
-grep -qxF "  id: $energy_id" <<<"$out" || fail "blame by id: $out"
+grep -qxF "  id: $new_energy_id" <<<"$out" || fail "blame by id: $out"
 ok "blame takes an id"
 edit Sample/Energy.lean 's/theorem second_site /theorem site_two /'
 export_lib
@@ -492,8 +513,8 @@ assert d["Sample.site_two"]["id"] == sys.argv[2] and d["Sample.site_two"]["state
 PY
 git checkout -q -- Sample
 ok "a renamed declaration keeps its id; its claim is new (the name is hashed), so it is unsigned"
-edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/$energy_id/"
-must_fail "Sample.energy and Sample.pointEnergy have the same id $energy_id" -- "$lb" export
+edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/$new_energy_id/"
+must_fail "Sample.energy and Sample.pointEnergy have the same id $new_energy_id" -- "$lb" export
 git checkout -q -- Sample
 ok "export refuses two declarations with the same id"
 edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/x/"
