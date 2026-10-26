@@ -7,8 +7,9 @@ import LeanBlame.Core.Schema
 namespace LeanBlame
 
 structure Config where
-  /-- Records repositories. Local directories, relative to the library root. -/
-  records : Array String := #["records/"]
+  /-- Records directories, relative to the library root, without a trailing slash (`records/` and
+  `records` name the same one). Remote repositories are not supported yet. -/
+  records : Array String := #["records"]
   /-- Approve records this library refuses to count. Withdrawals cannot be excluded. -/
   exclude : Array String := #[]
   /-- Distinct live approvals a declaration needs. -/
@@ -33,6 +34,10 @@ open Lake.Toml (DecodeM Table logDecodeErrorAt) in
 def Config.decode (t : Table) : DecodeM Config := do
   checkKeys t #["records", "exclude", "required_signers", "allowed_signers"] Config.fileName
   let d : Config := {}
+  let records : Array String ← t.tryDecodeD `records #["records/"]
+  for r in records do
+    if (r.splitOn "://").length > 1 || r.startsWith "git@" then
+      logDecodeErrorAt (refOf t `records) s!"`records`: {r}: only local directories are supported"
   let exclude : Array String ← t.tryDecodeD `exclude d.exclude
   for x in exclude do
     unless isHash x do logDecodeErrorAt (refOf t `exclude) s!"`exclude`: `{x}` is not a sha256: record hash"
@@ -49,7 +54,7 @@ def Config.decode (t : Table) : DecodeM Config := do
       for id in ids do
         unless isSignerId id do logDecodeErrorAt v.ref s!"`allowed_signers`: `{id}` is not provider:id"
       pure (some ids)
-  return { records := ← t.tryDecodeD `records d.records, exclude
+  return { records := records.map fun r => if r.length > 1 then (r.dropSuffix "/").copy else r, exclude
            requiredSigners, allowedSigners }
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/

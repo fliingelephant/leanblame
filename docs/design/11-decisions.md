@@ -59,9 +59,11 @@ storage; the claim hash is the identity.
 
 ### The boundary list is the input
 
-Declarations plus informal text, from any source. `@[trusted]` is one
-generator; a blueprint manifest is another. Keeps LeanBlame independent of how
-a project plans or displays its work.
+Declarations plus informal text, made by `export` from `@[trusted "id"]` only
+(owner, 2026-10-26). The verso-blueprint and manual-list adapters were dropped:
+their declarations had no id, and an id is how a declaration is cited and
+followed. Keeps LeanBlame independent of how a project plans or displays its
+work.
 
 ### `status --json` is the output
 
@@ -169,6 +171,11 @@ declarations with one id.
 "I want things break out loud if not expected." An unexpected state is an
 error, not a warning: a tag without an id, a graph the store should have
 (its export and boundary list are there) and does not, a graph file that does
-not read. A record made in another store, whose objects this store lacks, is
-expected: `status` warns that its causes are unknown. Development stage: no
-backward compatibility; after a format change, data is made again.
+not read, `export` outside a git repository with commits, `sign` without
+`--signer` (no default from the environment), a remote records repository in
+`leanblame.toml`, a file in a records directory that is not a record. An export
+of uncommitted changes names no commit (`null`), so `sign` and `release` refuse
+it: a record names the commit it signs. A record made in another store, whose
+objects this store lacks, is expected: `status` warns that its causes are
+unknown. Development stage: no backward compatibility; after a format change,
+data is made again.

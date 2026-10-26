@@ -8,9 +8,8 @@ Every other file depends on this one.
 - For **tagged** declarations you use, you sign only their name, kind, type, informal text. Not the body.
 - For **untagged** declarations you use, you sign all of it, recursively, until you reach a tagged one.
 
-"Tagged" means: on the boundary list. `@[trusted]` puts a declaration there;
-so can a blueprint adapter. "Informal text" is the docstring, or the blueprint
-node text the boundary list points at. Theorem proofs are never part of any
+"Tagged" means: on the boundary list. `@[trusted "id"]` puts a declaration
+there. "Informal text" is the docstring. Theorem proofs are never part of any
 hash.
 
 ## Why these three lines

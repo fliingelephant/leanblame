@@ -33,10 +33,12 @@ def run (backend : Core.Backend) (root : System.FilePath) (tag : String)
     for (t, a) in r.unpermitted do
       IO.eprintln s!"release: theorem {t} rests on axiom {a}, which is neither standard nor tagged and signed"
     return 1
-  -- 4. The manifest.
+  -- 4. The manifest, which names the commit.
   let b := r.new.boundary
+  let some commit := b.commit
+    | fail "release: the current export has uncommitted changes; commit them and export again"
   let manifest : ReleaseManifest := {
-    library := b.library, tag, commit := b.commit, toolchain := b.toolchain, deps := b.deps
+    library := b.library, tag, commit, toolchain := b.toolchain, deps := b.deps
     exportHash := r.cur.exportHash, boundary := r.cur.boundary, records := r.validRecords
     checker := r.new.checker
     theorems := (decls.filter (·.2.role == .proved)).map fun (n, d) => (n, d.proof) }

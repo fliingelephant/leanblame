@@ -21,20 +21,9 @@ structure LoadedRecord where
   record : Record
   deriving Inhabited
 
-/-- A local records directory of `leanblame.toml`, without trailing slash (`records/` and
-`records` name the same directory); `none` for a remote repository. -/
-def localRecordDir? (r : String) : Option String :=
-  if r.startsWith "http://" || r.startsWith "https://" || r.startsWith "git@" then none
-  else some (if r.length > 1 then (r.dropSuffix "/").copy else r)
-
-/-- The records directories of the configuration. Remote repositories are not supported yet. -/
-def recordDirs (root : System.FilePath) (cfg : Config) : IO (Array System.FilePath) := do
-  let mut out := #[]
-  for r in cfg.records do
-    match localRecordDir? r with
-    | some d => out := out.push (root / d)
-    | none => IO.eprintln s!"warning: records repository {r} skipped: only local directories are supported"
-  return out
+/-- The records directories of the configuration. -/
+def recordDirs (root : System.FilePath) (cfg : Config) : Array System.FilePath :=
+  cfg.records.map fun (d : String) => root / d
 
 /-- Load a records directory. An entry is a record iff it is a file named `<sha256 of its
 bytes>.toml` that parses (docs/design/05); every other entry is a problem, returned with its path. A
@@ -71,7 +60,7 @@ def loadAllRecords (root : System.FilePath) (cfg : Config) :
     IO (Array LoadedRecord × Array (System.FilePath × Array String)) := do
   let mut good := #[]
   let mut bad := #[]
-  for d in ← recordDirs root cfg do
+  for d in recordDirs root cfg do
     let (g, b) ← loadRecordDir d
     good := good ++ g
     bad := bad ++ b
@@ -138,13 +127,14 @@ def Ledger.build (cfg : Config) (all : Array LoadedRecord) : Ledger := Id.run do
           entries := entries.alter c fun es => (es.getD #[]).push (.withdraw r w)
   return { cfg, byId, withdrawn, entries, problems }
 
-/-- `leanblame.toml` and its records, warning about every entry of a records directory that is not
-a record. -/
+/-- `leanblame.toml` and its records; an entry of a records directory that is not a record is an
+error. -/
 def Ledger.load (root : System.FilePath) : IO Ledger := do
   let cfg ← Config.load root
   let (all, bad) ← loadAllRecords root cfg
-  for (p, _) in bad do
-    IO.eprintln s!"warning: {p} is not a valid record and was ignored (see `leanblame validate`)"
+  unless bad.isEmpty do
+    fail ("not records (see `leanblame validate`):\n" ++
+      "\n".intercalate (bad.toList.map fun (p, es) => s!"  {p}: {"; ".intercalate es.toList}"))
   return Ledger.build cfg all
 
 def Ledger.entriesOf (l : Ledger) (name : String) : Array Ledger.Entry :=

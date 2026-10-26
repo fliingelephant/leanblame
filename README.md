@@ -51,11 +51,8 @@ lake exe leanblame status                      # every tagged declaration: valid
 
 `id` turns `@[trusted]` into `@[trusted "3f2b8c1e-…"]`: a random id that stays
 when the declaration is renamed. Cite a declaration by its id. Commit the change.
-`export` refuses a tag without an id.
-
-Without `@[trusted]`, `export --boundary FILE` takes a verso-blueprint
-`blueprint-manifest.json` or a TOML list (`schema = "leanblame.manual.1"`,
-`[declarations]` with name = text).
+`export` refuses a tag without an id. `sign` needs an export of committed
+files: with uncommitted changes, the export names no commit.
 
 ## Commands
 
@@ -64,12 +61,12 @@ Run in the library root as `lake exe leanblame <command>`.
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
-| `export [--boundary FILE] [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
+| `export [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
 | `id [--lib NAME]` | Write a random id into each `@[trusted]` that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |
-| `sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]` | Write an approve record (default: one per module of the library). |
-| `sign --withdraw RECORD [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its constants. |
+| `sign --signer local:NAME [--module M] [--note TEXT] [NAME...]` | Write an approve record (default: one per module of the library). |
+| `sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its constants. |
 | `equiv [NAME...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
 | `validate [--base-ref REF]` | Check record files: schema, signer authority, no edits or deletions since `REF`. |
 | `release --tag TAG [--out FILE]` | Signoff and kernel gates, axiom report, manifest. |

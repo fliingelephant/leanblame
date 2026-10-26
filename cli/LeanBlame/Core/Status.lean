@@ -158,8 +158,8 @@ def compute (root : System.FilePath) (ledger : Ledger) (causes := true) (warn :=
     closures := closures.insert n closure
     states := states.insert n state
     entries := entries.push (d, {
-      id := d.id, module := d.module, kind := d.kind, role := d.role, informal := d.informal
-      informalSource := d.informalSource, statement := d.statement
+      id := d.id, parent := d.parent, module := d.module, kind := d.kind, role := d.role
+      informal := d.informal, statement := d.statement
       claim, state, change, signers, history := historyOf ledger n
       blockedBy := #[]
       proof := { status := .na }

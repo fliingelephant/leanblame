@@ -1,11 +1,10 @@
 /-
-`leanblame export [--boundary FILE] [--lib NAME]...` (docs/design/04-architecture.md).
+`leanblame export [--lib NAME]...` (docs/design/04-architecture.md).
 
 Builds the library with `lake build`, imports its modules, and makes the
-boundary list: the declarations tagged `@[trusted]` (own and imported) or
-listed in `--boundary FILE`, plus the members of tagged structures and
-inductives, with `module`, `kind`, `role`, the printed statement and the
-provenance fields from the library itself. Exports the library's constants and the boundary list with the
+boundary list: the declarations tagged `@[trusted "id"]` (own and imported),
+plus the members of tagged structures and inductives, with `module`, `kind`,
+`role`, the printed statement and the provenance fields from the library itself. Exports the library's constants and the boundary list with the
 toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
 (docs/design/15-generic-core.md). Prints the two hashes.
@@ -18,12 +17,21 @@ import LeanExport.Basic
 import LeanBlame.Attr
 import LeanBlame.Core.Records
 import LeanBlame.Core.Walk
-import LeanBlame.Lean.Adapters
 import LeanBlame.Lean.Source
 
 namespace LeanBlame.Export
 
 open Lean
+
+/-- A declaration tagged `@[trusted]`, with its id and its docstring. -/
+structure Tag where
+  name : Name
+  id : Option String
+  informal : String
+
+/-- The informal text of a docstring, as docs/design/03 hashes it: ASCII whitespace trimmed, line
+endings normalized, no Unicode normalization (Lean core has none). -/
+def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
 /-- Library names: `--lib` flags, else the default `lean_lib` targets of `lakefile.toml`. -/
 def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array String) := do
@@ -64,15 +72,21 @@ def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Na
   if mods.isEmpty then fail "`lake query` reported no modules"
   return dedup mods
 
-/-- The library's commit, with a warning when the work tree is dirty. -/
-def gitCommit (root : System.FilePath) : IO String := do
-  let repo : Lake.GitRepo := root
-  let some rev ← repo.getHeadRevision?
-    | IO.eprintln "warning: not a git repository with commits; commit recorded as \"unknown\""
-      return "unknown"
-  if ← repo.hasDiff then
-    IO.eprintln "warning: uncommitted changes; the recorded commit does not contain them"
+/-- The commit of the git repository holding `root`; an error outside git: a record names the commit it
+signs. -/
+def gitHead (root : System.FilePath) : IO String := do
+  let some rev ← (root : Lake.GitRepo).getHeadRevision?
+    | fail "not a git repository with commits: a record names the commit it signs"
   return rev
+
+/-- `rev` when no file under `root` differs from it, tracked or untracked; else `none`, with a
+warning: such an export cannot be signed. -/
+def commitIfClean (root : System.FilePath) (rev : String) : IO (Option String) := do
+  let some changes ← (root : Lake.GitRepo).captureGit? #["status", "--porcelain", "--", "."]
+    | fail "`git status` failed"
+  if changes.isEmpty then return some rev
+  IO.eprintln "warning: uncommitted changes in the library: this export names no commit and cannot be signed"
+  return none
 
 /-- Commits of git dependencies, from `lake-manifest.json`. Path dependencies have none. -/
 def manifestDeps (root : System.FilePath) : IO (Array (String × String)) := do
@@ -97,33 +111,26 @@ def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
     let informal := normalizeInformal doc
     if informal.isEmpty then
       errors := errors.push s!"{n}: tagged declarations need a non-empty docstring"; continue
-    tags := tags.push { name := n, id, informal, informalSource := "docstring" }
+    tags := tags.push { name := n, id, informal }
   return (tags, errors)
-
-/-- The tags of a `--boundary` file, by content: a verso-blueprint manifest (JSON with `previews`)
-or a `leanblame.manual.1` TOML list; and the problems. -/
-def boundaryFileTags (f : System.FilePath) : IO (Array Tag × Array String) := do
-  let text ← IO.FS.readFile f
-  let accepted := "--boundary takes a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list"
-  match Json.parse text with
-  | .ok j =>
-    unless j.getObjVal? "previews" matches .ok _ do fail s!"{f}: {accepted}"
-    blueprintTags f j
-  | .error _ =>
-    match ← parseToml text f.toString decodeManual with
-    | .ok tags => return (tags, #[])
-    | .error es => fail s!"{f}: {accepted}; as a manual list:\n{"\n".intercalate (es.toList.map ("  " ++ ·))}"
 
 /-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
 constructors and projections of tagged inductives and structures that are not tagged themselves, with
-their own docstring or else the parent's text. `module`, `kind` and `role` come from `env`; the
+their own docstring or else the parent's text. A constructor or projection of a tagged inductive or
+structure names it as `parent`, tagged or not. `module`, `kind` and `role` come from `env`; the
 statement is filled in by `withStatements`. Also the problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
-  let decl (n : Name) (ci : ConstantInfo) (informal informalSource : String) (id : Option String := none) :
+  let decl (n : Name) (ci : ConstantInfo) (informal : String) (id parent : Option String) :
       Name × BoundaryDecl :=
-    (n, { name := n.toString, id, module := (moduleOf env n).toString, kind := Source.kindOf ci,
-          role := Source.roleOf ci, informal, informalSource, statement := default })
+    (n, { name := n.toString, id, parent, module := (moduleOf env n).toString, kind := Source.kindOf ci,
+          role := Source.roleOf ci, informal, statement := default })
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
+  let members (n : Name) : Array Name := match env.find? n with
+    | some (.inductInfo iv) =>
+      iv.ctors.toArray ++ (((getStructureInfo? env n).map (·.fieldInfo.map (·.projFn))).getD #[])
+    | _ => #[]
+  let parentOf : NameMap Name := tags.foldl (init := {}) fun m t =>
+    (members t.name).foldl (init := m) fun m c => m.insert c t.name
   let mut out := #[]
   let mut errors := #[]
   for t in tags do
@@ -133,15 +140,12 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       errors := errors.push s!"{t.name}: `unsafe` declarations cannot be tagged"; continue
     if ci matches .recInfo _ then
       errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
-    out := out.push (decl t.name ci t.informal t.informalSource t.id)
-    let .inductInfo iv := ci | continue
-    let projs := ((getStructureInfo? env t.name).map (·.fieldInfo.map (·.projFn))).getD #[]
-    for m in iv.ctors.toArray ++ projs do
+    out := out.push (decl t.name ci t.informal t.id ((parentOf.find? t.name).map (·.toString)))
+    for m in members t.name do
       if tagged.contains m then continue
       let some mi := env.find? m | errors := errors.push s!"{m}: member of {t.name} not found"; continue
-      out := out.push <| match ((← findSimpleDocString? env m).map normalizeInformal).filter (· != "") with
-        | some doc => decl m mi doc "docstring"
-        | none => decl m mi t.informal t.informalSource
+      let informal := (((← findSimpleDocString? env m).map normalizeInformal).filter (· != "")).getD t.informal
+      out := out.push (decl m mi informal none (some t.name.toString))
   -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
   let mut owner : Std.HashMap String Name := {}
   for t in tags do
@@ -314,22 +318,20 @@ structure Result where
   hashed : Nat
 
 /-- Run the export in library root `root`; `backend` hashes it. -/
-def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
-    (libsGiven : Array String) : IO Result := do
+def run (backend : Core.Backend) (root : System.FilePath) (libsGiven : Array String) : IO Result := do
+  let rev ← gitHead root
+  let ledger ← Ledger.load root
   let { libs, mods, deps, env, .. } ← load root libsGiven
-  -- The boundary list.
-  let commit ← gitCommit root
+  -- The boundary list. Checked after the build, which may update `lake-manifest.json`.
+  let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
-  let (tags, errors) ← match boundaryFile? with
-    | some f => boundaryFileTags f
-    | none => trustedTags env
+  let (tags, errors) ← trustedTags env
   let (declarations, errors') ← expand env tags
   -- Every `@[trusted]` of this library has an id; imported libraries are theirs to fix.
   let own : NameSet := mods.foldl (·.insert ·) {}
-  let noId := if boundaryFile?.isSome then #[] else
-    (tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)).map
-      (s!"{·.name}: tagged without an id; run `leanblame id`")
+  let noId := (tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)).map
+    (s!"{·.name}: tagged without an id; run `leanblame id`")
   let problems := errors ++ errors' ++ noId
   unless problems.isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
@@ -377,7 +379,6 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
   -- with their export; evidence while its claim is current; a proof while evidence or a record
   -- names it.
-  let ledger ← Ledger.load root
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert hex
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
   let mut proofs : Std.HashSet String := {}

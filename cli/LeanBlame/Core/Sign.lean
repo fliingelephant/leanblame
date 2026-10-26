@@ -26,14 +26,9 @@ def init (root : System.FilePath) : IO UInt32 := do
     IO.println "updated  .gitignore (.leanblame/)"
   return 0
 
-/-- `--signer`, else `$LEANBLAME_SIGNER`, else `local:$USER`. Only `local:` ids in this slice. -/
+/-- The signer `--signer` names; there is no default. Only `local:` ids in this slice. -/
 def resolveSigner (given? : Option String) : IO String := do
-  let s ← match given? with
-    | some s => pure s
-    | none => do
-      match ← IO.getEnv "LEANBLAME_SIGNER" with
-      | some s => pure s
-      | none => pure ("local:" ++ ((← IO.getEnv "USER").getD "dev"))
+  let some s := given? | fail "sign needs --signer local:NAME: a record names who signs"
   unless isSignerId s do fail s!"signer must be provider:id, got `{s}`"
   unless s.startsWith "local:" do
     fail s!"{s}: the terminal writes local: records only; provider logins go through the sign server"
@@ -41,7 +36,7 @@ def resolveSigner (given? : Option String) : IO String := do
 
 /-- The first local records directory: where new records go. -/
 def recordsDir (root : System.FilePath) (cfg : Config) : IO System.FilePath := do
-  let some d := (← recordDirs root cfg)[0]? | fail "leanblame.toml lists no local records directory"
+  let some d := (recordDirs root cfg)[0]? | fail "leanblame.toml lists no records directory"
   return d
 
 /-- Write a record under its hash; returns the record id and the path. -/
@@ -62,6 +57,8 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let cur ← Store.readCurrent root
   let graph ← Status.currentGraph root cur
   let boundary := graph.boundary
+  let some commit := boundary.commit
+    | fail "the current export has uncommitted changes; commit them and export again: a record names the commit it signs"
   let claimOf : Std.HashMap String String :=
     boundary.declarations.foldl (init := {}) fun m d => m.insert d.name graph.nodes[d.name]!.claim
   let selected ← if !names.isEmpty then
@@ -88,7 +85,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
     if proofs.size > 1 then
       IO.eprintln s!"note: the constants of {m} have {proofs.size} different equiv proofs; the record names none"
     let r : Record := .approve {
-      signer, date, module := m, commit := boundary.commit, toolchain := boundary.toolchain
+      signer, date, module := m, commit, toolchain := boundary.toolchain
       deps := boundary.deps, exportHash := cur.exportHash, boundary := cur.boundary
       constants, evidence := if proofs.size == 1 then proofs[0]? else none, note := note? }
     let (id, path) ← writeRecord dir r

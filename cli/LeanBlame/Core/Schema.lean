@@ -139,10 +139,6 @@ instance : ToJson Action := ⟨(Json.str <| toString ·)⟩
 
 /-! ## 1. Boundary list -/
 
-def isInformalSource (s : String) : Bool :=
-  s == "docstring" || s == "manual" ||
-    (s.startsWith "blueprint:" && s.length > "blueprint:".length)
-
 /-- One piece of a printed statement: text, and the constant it refers to when it is a reference. -/
 structure Segment where
   text : String
@@ -177,33 +173,38 @@ structure BoundaryDecl where
   /-- The declaration's id (Lean: written in `@[trusted "id"]`): stays when it is renamed or edited;
   never hashed. `none` when it has none. -/
   id : Option String := none
+  /-- For a constructor or projection of a tagged inductive or structure, tagged or not: that
+  declaration's name. -/
+  parent : Option String := none
   module : String
   /-- The proof assistant's own label (Lean: `def`, `theorem`, …); never interpreted. -/
   kind : String
   role : Role
+  /-- The docstring (a member without one: its parent's). -/
   informal : String
-  informalSource : String
   statement : Statement
   deriving Inhabited, Repr
 
 structure BoundaryList where
   library : String
-  commit : String
+  /-- The library's commit; `none` when the library had uncommitted changes: such an export cannot be
+  signed or released. -/
+  commit : Option String
   toolchain : String
   deps : Array (String × String)
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.2"
+def BoundaryList.schemaId : String := "leanblame.boundary.3"
 
 instance : ToJson BoundaryDecl where
-  toJson d := Json.mkObj [("name", d.name), ("id", toJson d.id), ("module", d.module), ("kind", d.kind),
-    ("role", toJson d.role), ("informal", d.informal), ("informal_source", d.informalSource),
+  toJson d := Json.mkObj [("name", d.name), ("id", toJson d.id), ("parent", toJson d.parent),
+    ("module", d.module), ("kind", d.kind), ("role", toJson d.role), ("informal", d.informal),
     ("statement", toJson d.statement)]
 
 instance : ToJson BoundaryList where
   toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
-    ("commit", b.commit), ("toolchain", b.toolchain),
+    ("commit", toJson b.commit), ("toolchain", b.toolchain),
     ("deps", Json.mkObj (b.deps.toList.map fun (k, v) => (k, v))),
     ("declarations", toJson b.declarations)]
 
@@ -222,14 +223,12 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   let d : BoundaryDecl := {
     name, kind, role
     id := ← (j.getObjValAs? (Option String) "id").mapError (s!"{what}.id: " ++ ·)
+    parent := ← (j.getObjValAs? (Option String) "parent").mapError (s!"{what}.parent: " ++ ·)
     module := ← getStrField j what "module"
     informal := ← getStrField j what "informal"
-    informalSource := ← getStrField j what "informal_source"
     statement := ← (Statement.fromJson? (j.getObjValD "statement")).mapError (s!"{what}: " ++ ·) }
   if strTrim d.informal == "" then
     throw s!"{what}: informal text is required"
-  unless isInformalSource d.informalSource do
-    throw s!"{what}: informal_source must be docstring, blueprint:<label> or manual"
   return d
 
 def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
@@ -250,7 +249,7 @@ def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
   let deps ← (j.getObjVal? "deps" >>= (·.getObj?)).mapError (s!"{w}.deps: " ++ ·)
   return {
     library := ← getStrField j w "library"
-    commit := ← getStrField j w "commit"
+    commit := ← (j.getObjValAs? (Option String) "commit").mapError (s!"{w}.commit: " ++ ·)
     toolchain := ← getStrField j w "toolchain"
     deps := ← deps.toList.toArray.mapM fun (k, v) => do
       return (k, ← v.getStr?.mapError (s!"{w}.deps.{k}: " ++ ·))
@@ -425,11 +424,11 @@ structure HistoryEntry where
 
 structure StatusDecl where
   id : Option String
+  parent : Option String
   module : String
   kind : String
   role : Role
   informal : String
-  informalSource : String
   statement : Statement
   claim : String
   state : State
@@ -445,13 +444,13 @@ structure StatusDecl where
 
 structure StatusReport where
   library : String
-  commit : String
+  commit : Option String
   exportHash : String
   generated : Std.Time.Timestamp
   declarations : Array (String × StatusDecl)
   deriving Inhabited, Repr
 
-def StatusReport.schemaId : String := "leanblame.status.2"
+def StatusReport.schemaId : String := "leanblame.status.3"
 
 /-- `claim` and `evidence` are `null` when absent; `note` is omitted. -/
 instance : ToJson HistoryEntry where
@@ -460,8 +459,8 @@ instance : ToJson HistoryEntry where
     Json.opt "note" h.note
 
 instance : ToJson StatusDecl where
-  toJson d := Json.mkObj [("id", toJson d.id), ("module", d.module), ("kind", d.kind), ("role", toJson d.role),
-    ("informal", d.informal), ("informal_source", d.informalSource),
+  toJson d := Json.mkObj [("id", toJson d.id), ("parent", toJson d.parent), ("module", d.module),
+    ("kind", d.kind), ("role", toJson d.role), ("informal", d.informal),
     ("statement", toJson d.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
     ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
@@ -471,7 +470,7 @@ instance : ToJson StatusDecl where
 
 instance : ToJson StatusReport where
   toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
-    ("commit", s.commit), ("export", s.exportHash), ("generated", s.generated.toIso),
+    ("commit", toJson s.commit), ("export", s.exportHash), ("generated", s.generated.toIso),
     ("declarations", Json.mkObj (s.declarations.toList.map fun (n, d) => (n, toJson d)))]
 
 end LeanBlame

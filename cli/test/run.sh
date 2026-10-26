@@ -7,22 +7,24 @@
 # and walks through: init -> export -> sign -> status (valid) -> release -> edit
 # a body -> status (outdated, own-body) -> edit a dependency body -> status
 # (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
-# (withdrawn) -> blame -> validate (and its append-only check) -> boundary lists
-# from a verso-blueprint manifest and from a manual TOML list -> equiv, in a copy
+# (withdrawn) -> blame -> validate (and its append-only check) -> equiv, in a copy
 # made after the first signoff: a definitional change proven (evidence shown by
 # status, the record carries the proof, valid), one that is not definitional, an
 # own-body change refused -> ids, in another copy made after the first signoff:
 # a new id changes no claim, status --json, blame by id, a rename keeps the id,
 # a shared id and a malformed one refused. Before the first export, `id` writes
 # the ids (export refuses a tag without one); after the first body edit, status
-# fails out loud when a signed graph is missing or broken.
+# fails out loud when a signed graph is missing or broken. Also out loud: export
+# outside git, sign without --signer, a remote records repository, a file in
+# records/ that is not a record; an export of uncommitted changes names no commit,
+# so sign and release refuse it. Logs go to a directory outside the library.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cli="$(cd "$here/.." && pwd)"
 
 pass=0
-fail() { echo "FAIL: $*" >&2; echo "work directory kept: $work" >&2; exit 1; }
+fail() { echo "FAIL: $*" >&2; echo "work directories kept: $work $logs" >&2; exit 1; }
 ok() { pass=$((pass + 1)); echo "  ok: $*"; }
 
 echo "== build leanblame"
@@ -32,6 +34,9 @@ lb="$cli/.lake/build/bin/leanblame"
 ok "canonical printing is linear in the term as a graph"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/leanblame-test.XXXXXX")"
+# Outside the library: a file in the library would make every export one of uncommitted changes.
+logs="$work-logs"
+mkdir "$logs"
 cp -R "$here/Sample/Sample" "$here/Sample/Sample.lean" "$here/Sample/lean-toolchain" "$work/"
 # Point the dependency on the attribute at this checkout.
 sed "s|path = \"../..\"|path = \"$cli\"|" "$here/Sample/lakefile.toml" > "$work/lakefile.toml"
@@ -43,7 +48,7 @@ git config user.email "test@example.invalid"
 commit() { git add -A && git commit -qm "$1"; }
 
 # Run a leanblame command; its stdout goes to $out, its stderr to stderr.log.
-run() { out="$("$lb" "$@" 2>>"$work/stderr.log")" || { tail -20 "$work/stderr.log" >&2; fail "leanblame $*"; }; }
+run() { out="$("$lb" "$@" 2>>"$logs/stderr.log")" || { tail -20 "$logs/stderr.log" >&2; fail "leanblame $*"; }; }
 # Assert that the status line of a declaration is exactly the given text.
 expect_line() {
   local name="$1" want="$2" got
@@ -51,7 +56,7 @@ expect_line() {
   [[ "$got" == "$want" ]] || fail "status line for $name: want '$want', got '$got'"
   ok "$want"
 }
-export_lib() { "$lb" export >/dev/null 2>"$work/export.log" || { cat "$work/export.log" >&2; fail "export"; }; }
+export_lib() { "$lb" export >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export"; }; }
 # Edit a file in place with a sed expression.
 edit() { sed -i.bak "$2" "$1" && rm "$1.bak"; }
 # Run a command that must fail, and whose output (stdout and stderr) must match every pattern.
@@ -59,15 +64,17 @@ must_fail() {
   local patterns=()
   while [[ "$1" != "--" ]]; do patterns+=("$1"); shift; done
   shift
-  if "$@" >"$work/fail.log" 2>&1; then fail "should have failed: $*"; fi
+  if "$@" >"$logs/fail.log" 2>&1; then fail "should have failed: $*"; fi
   for p in "${patterns[@]}"; do
-    grep -q -- "$p" "$work/fail.log" || fail "$*: no '$p' in: $(cat "$work/fail.log")"
+    grep -q -- "$p" "$logs/fail.log" || fail "$*: no '$p' in: $(cat "$logs/fail.log")"
   done
 }
 current_export() { python3 -c 'import json; print(json.load(open(".leanblame/current"))["exportHash"])'; }
 
 echo "== init"
 run init
+must_fail "not a git repository with commits" -- "$lb" export
+ok "export outside a git repository with commits is an error"
 for f in leanblame.toml records; do
   [[ -e "$f" ]] || fail "init did not create $f"
 done
@@ -87,8 +94,8 @@ id_of() { awk -v n="$1" '$2 == n {print $1}' <<<"$ids"; }
 energy_id="$(id_of Sample.energy)"
 grep -qF "@[trusted \"$energy_id\"] def energy" Sample/Basic.lean || fail "id: not written into the source"
 ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy"
-"$lb" id >"$work/id.log" 2>&1 || fail "id, second run: $(cat "$work/id.log")"
-grep -q "every tagged declaration of this library has an id" "$work/id.log" || fail "id, second run: $(cat "$work/id.log")"
+"$lb" id >"$logs/id.log" 2>&1 || fail "id, second run: $(cat "$logs/id.log")"
+grep -q "every tagged declaration of this library has an id" "$logs/id.log" || fail "id, second run: $(cat "$logs/id.log")"
 ok "a second run writes nothing"
 commit "ids"
 
@@ -102,6 +109,8 @@ must_fail "Sample.energy unsigned" "Sample.one_site_pos unsigned" "11 of 11 tagg
 ok "release refuses unsigned declarations and names them"
 
 echo "== sign"
+must_fail "sign needs --signer local:NAME" -- "$lb" sign
+ok "sign without --signer is an error"
 run sign --signer local:alice --note "first review"
 [[ "$(grep -c '^approve ' <<<"$out")" == 2 ]] || fail "expected one approve record per module: $out"
 basic_record="$(awk '/of Sample.Basic\)$/ {print $2}' <<<"$out")"
@@ -116,28 +125,31 @@ work_id="$work-id"
 cp -R "$work" "$work_id"
 
 echo "== status: everything valid"
-out="$("$lb" status 2>"$work/status.err")"
+out="$("$lb" status 2>"$logs/status.err")"
 for n in Sample.Point Sample.Point.mk Sample.Point.x Sample.Point.y Sample.Point.norm \
          Sample.energy Sample.energy_even Sample.energy_pos Sample.one_site_pos Sample.pointEnergy \
          Sample.second_site; do
   expect_line "$n" "$n valid"
 done
 want="warning: untagged Sample.double of this library is used by tagged Sample.energy; tag it so it gets its own signer"
-grep -qxF "$want" "$work/status.err" || fail "no untagged-dependency warning: $(cat "$work/status.err")"
-[[ "$(grep -c '^warning' "$work/status.err")" == 1 ]] || fail "unexpected warnings: $(cat "$work/status.err")"
+grep -qxF "$want" "$logs/status.err" || fail "no untagged-dependency warning: $(cat "$logs/status.err")"
+[[ "$(grep -c '^warning' "$logs/status.err")" == 1 ]] || fail "unexpected warnings: $(cat "$logs/status.err")"
 ok "status warns that tagged Sample.energy uses untagged Sample.double, and nothing else"
 run status --json
 python3 - "$out" <<'PY' || fail "status --json does not match docs/design/14"
 import json, sys
 s = json.loads(sys.argv[1])
-assert s["schema"] == "leanblame.status.2"
+assert s["schema"] == "leanblame.status.3"
 assert set(s) == {"schema", "library", "commit", "export", "generated", "declarations"}
-keys = {"id", "module", "kind", "role", "informal", "informal_source", "statement", "claim", "state", "change", "signers",
+assert len(s["commit"]) == 40, s["commit"]
+keys = {"id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
         "history", "blocked_by", "proof", "evidence", "tagged_deps", "closure_size"}
+members = {"Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"}
 for name, d in s["declarations"].items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"], name
-    assert (d["id"] is None) == (name in {"Sample.Point.mk", "Sample.Point.x", "Sample.Point.y"}), (name, d["id"])
+    assert (d["id"] is None) == (name in members), (name, d["id"])
+    assert d["parent"] == ("Sample.Point" if name in members else None), (name, d["parent"])
     want = {"Sample.energy_even": "open", "Sample.second_site": "proven",
             "Sample.one_site_pos": "proven"}.get(name, "n/a")
     assert d["proof"]["status"] == want, (name, d["proof"])
@@ -155,13 +167,13 @@ assert s["declarations"]["Sample.energy"]["role"] == "defined"
 assert s["declarations"]["Sample.energy_even"]["role"] == "proved"
 assert s["declarations"]["Sample.energy_pos"]["role"] == "assumed"
 PY
-ok "status --json has the docs/design/14 fields; the proof field shows proven and open theorems"
+ok "status --json has the docs/design/14 fields; members name their structure; proven and open theorems"
 
 echo "== release"
-run release --tag 2026.10 --out "$work/release.json"
+run release --tag 2026.10 --out "$logs/release.json"
 release_hash="$(awk '/^release /{print $2}' <<<"$out")"
-cmp -s "$work/release.json" ".leanblame/store/manifests/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
-python3 - "$work/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
+cmp -s "$logs/release.json" ".leanblame/store/manifests/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
+python3 - "$logs/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
   || fail "release manifest does not match docs/design/14"
 import hashlib, json, sys
 path, h, export, basic, energy = sys.argv[1:]
@@ -180,6 +192,19 @@ assert m["counts"] == {"proven": 2, "open": 1}, m["counts"]
 PY
 ok "release: leanchecker passed; energy_even open (sorryAx), one_site_pos proven from the tagged axiom"
 
+echo "== an export of uncommitted changes names no commit"
+touch notes.txt
+export_lib
+grep -q "warning: uncommitted changes in the library" "$logs/export.log" || fail "no warning: $(cat "$logs/export.log")"
+run status --json
+python3 -c 'import json, sys; assert json.loads(sys.argv[1])["commit"] is None' "$out" \
+  || fail "status --json: an export of uncommitted changes names a commit"
+must_fail "the current export has uncommitted changes" -- "$lb" sign --signer local:alice
+must_fail "release: the current export has uncommitted changes" -- "$lb" release --tag 2026.10.2
+rm notes.txt
+export_lib
+ok "an untracked file: the export names no commit; sign and release refuse it"
+
 echo "== release refuses an axiom that is neither standard nor tagged"
 cat >> Sample/Basic.lean <<'EOF'
 
@@ -191,9 +216,9 @@ grep -q ":= unsigned_pos 0" Sample/Energy.lean || fail "test setup: proof not sw
 export_lib
 want="theorem Sample.one_site_pos rests on axiom Sample.unsigned_pos, which is neither standard nor tagged and signed"
 must_fail "release: $want" -- "$lb" release --tag 2026.10.1
-out="$("$lb" status 2>"$work/status.err")"
+out="$("$lb" status 2>"$logs/status.err")"
 expect_line Sample.one_site_pos "Sample.one_site_pos valid"
-grep -qxF "warning: $want" "$work/status.err" || fail "status did not warn: $(cat "$work/status.err")"
+grep -qxF "warning: $want" "$logs/status.err" || fail "status did not warn: $(cat "$logs/status.err")"
 git checkout -q -- Sample
 export_lib
 ok "a theorem resting on an untagged axiom fails release and gets a status warning"
@@ -222,11 +247,11 @@ expect_line Sample.pointEnergy "Sample.pointEnergy outdated change=own-body:Samp
 expect_line Sample.energy_even "Sample.energy_even valid"
 # The causes come from the signed export's graph, which `export` stored: missing or broken, status stops.
 signed_graph="$(ls .leanblame/store/graphs | grep -v "^$(current_export | sed 's/^sha256://')-")"
-mv ".leanblame/store/graphs/$signed_graph" "$work/graph.json"
+mv ".leanblame/store/graphs/$signed_graph" "$logs/graph.json"
 must_fail "the store has its export and boundary list but no graph of them" -- "$lb" status
 printf 'not json\n' > ".leanblame/store/graphs/$signed_graph"
 must_fail "not the graph of export" -- "$lb" status
-mv "$work/graph.json" ".leanblame/store/graphs/$signed_graph"
+mv "$logs/graph.json" ".leanblame/store/graphs/$signed_graph"
 ok "status fails out loud when a signed graph is missing or broken"
 
 echo "== edit a dependency body: energy"
@@ -305,11 +330,9 @@ git checkout -q HEAD -- "$record_file"
 ok "validate refuses modified and deleted records"
 printf 'not a record\n' > records/notes.toml
 must_fail "records/notes.toml: not a record: the file name must be the sha256" -- "$lb" validate
-"$lb" status >/dev/null 2>"$work/status.err" || fail "status with a misnamed file in records/"
-grep -q "records/notes.toml is not a valid record and was ignored" "$work/status.err" \
-  || fail "status did not warn about the misnamed file: $(cat "$work/status.err")"
+must_fail "records/notes.toml: not a record: the file name must be the sha256" -- "$lb" status
 rm records/notes.toml
-ok "a misnamed file is a problem for validate and a warning for status"
+ok "a misnamed file in records/ fails validate and status"
 # Renaming the records directory in leanblame.toml must not hide a deletion.
 git mv records r
 edit leanblame.toml 's|^records = \["records/"\]|records = ["r/"]|'
@@ -329,6 +352,10 @@ edit leanblame.toml 's|^records = \["records/"\]|records = ["r/"]|'
 must_fail "record $withdraw_record of the merge base is missing" -- "$lb" validate --base-ref HEAD
 rm -rf r && git checkout -q -- leanblame.toml
 ok "repointing the records directory to one without the withdraw fails"
+edit leanblame.toml 's|^records = \["records/"\]|records = ["https://example.invalid/records.git"]|'
+must_fail "https://example.invalid/records.git: only local directories are supported" -- "$lb" status
+git checkout -q -- leanblame.toml
+ok "a remote records repository is an error"
 
 echo "== export refuses undocumented and unsafe tagged declarations"
 cat >> Sample/Basic.lean <<'EOF'
@@ -343,70 +370,6 @@ must_fail "Sample.undocumented: tagged declarations need a docstring" \
   'Sample.unsafeEnergy: `unsafe` declarations cannot be tagged' -- "$lb" export
 git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
-
-echo "== adapters: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
-stored_boundary() { echo ".leanblame/store/boundaries/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
-run export --boundary "$here/blueprint/blueprint-manifest.json"
-python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
-import json, sys
-d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
-assert set(d) == {"Sample.energy", "Sample.energy_even", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
-                  "Sample.Point.y", "Sample.Point.norm", "Sample.pointEnergy"}, sorted(d)
-src = {n: x["informal_source"] for n, x in d.items()}
-assert src == {"Sample.energy": "blueprint:def:energy", "Sample.energy_even": "blueprint:thm:even",
-               "Sample.Point": "blueprint:def:point", "Sample.Point.mk": "blueprint:def:point",
-               "Sample.Point.x": "docstring", "Sample.Point.y": "docstring",
-               "Sample.Point.norm": "blueprint:def:point", "Sample.pointEnergy": "blueprint:def:pointEnergy"}, src
-assert d["Sample.energy"]["informal"] == "The energy of a chain of $n$ sites is $2n$: two units per site."
-assert d["Sample.energy_even"]["informal"] == '<div class="theorem-body"><p>The energy of every chain is even.</p></div>'
-PY
-run status
-grep -q "^8 tagged: " <<<"$out" || fail "status on the blueprint boundary list: $out"
-ok "statement texts and blueprint:<label> sources from the manifest and its HTML cache; status works"
-mkdir "$work/bp"
-cp "$here/blueprint/blueprint-html-cache.json" "$work/bp/"
-python3 - "$here/blueprint/blueprint-manifest.json" "$work/bp/blueprint-manifest.json" <<'PY'
-import json, sys
-m = json.load(open(sys.argv[1]))
-m["previews"] += [
-  {"label": "«def:energy2»", "key": "def:energy2--statement", "targetKind": "block", "facet": "statement",
-   "codeData": {"externalDecls": [{"canonical": "Sample.energy"}]},
-   "externalMarkup": [{"language": "tex", "slot": "statement", "raw": "The energy, again."}]},
-  {"label": "«thm:silent»", "key": "thm:silent--statement", "targetKind": "block", "facet": "statement",
-   "codeData": {"literateDeclarations": {"definedTheorems": [{"name": "Sample.second_site"}]}}}]
-json.dump(m, open(sys.argv[2], "w"))
-PY
-must_fail "Sample.energy is claimed by labels def:energy and def:energy2" "no statement text for label thm:silent" \
-  -- "$lb" export --boundary "$work/bp/blueprint-manifest.json"
-ok "a name claimed by two labels and a statement without text are errors"
-
-echo "== adapters: a manual list"
-cat > "$work/manual.toml" <<'EOF'
-schema = "leanblame.manual.1"
-
-[declarations]
-"Sample.energy" = "The energy of a chain of n sites: two units per site."
-"Sample.pointEnergy" = '''
-The energy of a point: the energy of a chain as long as the point's norm.
-'''
-EOF
-run export --boundary "$work/manual.toml"
-python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the manual list"
-import json, sys
-d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
-assert sorted(d) == ["Sample.energy", "Sample.pointEnergy"], sorted(d)
-assert all(x["informal_source"] == "manual" for x in d.values())
-assert d["Sample.pointEnergy"]["informal"] == "The energy of a point: the energy of a chain as long as the point's norm."
-PY
-run status
-grep -q "^2 tagged: " <<<"$out" || fail "status on the manual list: $out"
-printf 'schema = "leanblame.manual.1"\nnote = "x"\n[declarations]\n"Sample.energy" = " "\n' > "$work/bad.toml"
-must_fail "unknown key \`note\` in a manual list" "\`Sample.energy\`: the informal text is empty" \
-  -- "$lb" export --boundary "$work/bad.toml"
-printf '{"declarations": []}\n' > "$work/other.json"
-must_fail "a verso-blueprint blueprint-manifest.json or a leanblame.manual.1 TOML list" \
-  -- "$lb" export --boundary "$work/other.json"
-ok "manual list: names and texts, strict keys, no empty text; other inputs are refused"
 
 echo "== equiv: a definitional change under two tagged declarations"
 rm -rf "$work"
@@ -455,7 +418,7 @@ export_lib
 must_fail "^Sample.double: not definitionally equal; a human reads$" "^  old: fun n => Nat.add n n$" \
   "^  new: fun n => HMul.hMul 2 n$" "^Sample.energy: not proven, because of Sample.double; a human reads$" \
   "^Sample.double_zero proven sha256:" "^equiv: 1 proven, 1 left to a human$" -- "$lb" equiv
-proof2="$(awk '/^Sample.double_zero proven /{print $3}' "$work/fail.log")"
+proof2="$(awk '/^Sample.double_zero proven /{print $3}' "$logs/fail.log")"
 run status
 expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
 expect_line Sample.double_zero "Sample.double_zero outdated evidence=$proof2 change=untagged:Sample.double"
@@ -522,5 +485,5 @@ must_fail "the id must be a UUID" -- "$lb" export
 git checkout -q -- Sample
 ok "a malformed id is a build error"
 
-rm -rf "$work"
+rm -rf "$work" "$logs"
 echo "PASS ($pass checks)"

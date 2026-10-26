@@ -203,7 +203,7 @@ cli/Main.lean                    wires the Lean backend into the core commands
 | `Canon` | the term printer: `name`, `level`, `expr`, `print`, `exprHash` |
 | `Erase`, `Load` | unchanged |
 | `Source` | new: `ofExport : LeanExport.ExportedEnv → IO Core.Source`, `ofFile`, `kindOf`, `roleOf`, the string→`Name` map with the collision check, the `Meta` runner, `backend : Core.Backend` |
-| `Export`, `Adapters`, `Equiv` | the same, building `BoundaryDecl` with `kind` and `role` from `Source.kindOf`/`roleOf`, calling the core |
+| `Export`, `Equiv` | the same, building `BoundaryDecl` with `kind` and `role` from `Source.kindOf`/`roleOf`, calling the core |
 
 Import rule, checked by grep: a module under `Core/` imports only `Init`, `Std`,
 `Lean.Data.*` (Json, HashMap and the like), `Lake.Toml`, `Lake.Util.*` and other

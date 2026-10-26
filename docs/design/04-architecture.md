@@ -26,7 +26,7 @@ modules form two layers ([15-generic-core.md](15-generic-core.md)):
   toolchain, Apache-2.0): seeds from the boundary list, cuts at tagged
   declarations, hashes specs, collects every mismatch, charges each change to
   a cause.
-- `Lean/`, the Lean frontend: `export` and its adapters, the toolchain's export
+- `Lean/`, the Lean frontend: `export`, `id`, the toolchain's export
   parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
   `equiv`. The export is turned back into a kernel environment by an
   adaptation of core's `Replay.lean`.
@@ -38,13 +38,13 @@ Nine commands:
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml` and `records/`. |
-| `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list. `--boundary` takes a list from an adapter instead of `@[trusted]`. |
+| `export` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list of the `@[trusted "id"]` declarations. Outside a git repository with commits: an error. With uncommitted changes under the library root, the boundary list names no commit, and `sign` and `release` refuse it. |
 | `id` | Write a new random id into each `@[trusted]` of the library that has none: `@[trusted "id"]`. Commit the change. |
 | `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). A graph the store should have and does not is an error. |
 | `blame X` | Who signed `X` (a name or an id), when, at which claim hash. |
 | `equiv [NAME...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
-| `sign [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
-| `validate` | Check record files against the schema and the authority rules. Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
+| `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
+| `validate` | Check record files against the schema and the authority rules (the other commands stop on a file in a records directory that is not a record). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
@@ -61,20 +61,10 @@ validator in `leanblame`. See [05-records.md](05-records.md).
 - **Page.** doc-gen4 output plus an overlay from `status --json`: signers,
   state, cause, blocked-by, history. Any other viewer reads the same JSON.
 
-## Adapters
-
-Input adapters produce a boundary list. Shipped: `@[trusted]`; a reader for
-verso-blueprint's `blueprint-manifest.json` (statement entries: Lean names from
-`codeData`, text from the `statement` slot of `externalMarkup` or else the
-entry's fragment in `blueprint-html-cache.json`); a hand-written TOML list,
-`schema = "leanblame.manual.1"` with a `[declarations]` table of name = text
-(`informal_source = "manual"`). `export --boundary FILE` tells the file formats
-apart by content.
-
 ## Config: `leanblame.toml`
 
 ```toml
-records = ["records/"]          # records directories (local, for now)
+records = ["records/"]          # records directories (local; a URL is an error for now)
 exclude = ["sha256:…"]          # approve records this library refuses to count
 required_signers = 1            # distinct live approvals a declaration needs
 allowed_signers = "any"         # or a list of provider:id

@@ -18,9 +18,7 @@ def usage : String :=
 
 commands:
   init                                   create leanblame.toml and records/
-  export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
-                                         verso-blueprint blueprint-manifest.json or a
-                                         leanblame.manual.1 TOML list)
+  export [--lib NAME]                    build, export, write the boundary list
   id [--lib NAME]                        write a new random id into each @[trusted] of the
                                          library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
@@ -28,8 +26,8 @@ commands:
   equiv [NAME...]                        ask the kernel whether what changed under NAME (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
-  sign [--signer local:NAME] [--module M] [--note TEXT] [NAME...]
-  sign --withdraw RECORD [--signer local:NAME] [--constants A,B] [--note TEXT]
+  sign --signer local:NAME [--module M] [--note TEXT] [NAME...]
+  sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
@@ -69,9 +67,9 @@ where
         fail s!"unexpected argument {a}"
 
 def cmdExport (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--boundary", "--lib"] #[] args
+  let a ← parseArgs #["--lib"] #[] args
   let root ← IO.currentDir
-  let r ← Export.run Source.backend root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
+  let r ← Export.run Source.backend root (a.getAll "--lib")
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"

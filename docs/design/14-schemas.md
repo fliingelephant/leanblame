@@ -7,14 +7,12 @@ strings in JSON.
 
 ## 1. Boundary list (JSON)
 
-Produced by `export` from `@[trusted]`, including tags found in imported
-libraries, or from `--boundary FILE`, a verso-blueprint manifest or a manual
-TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
-`status`, from the object store.
+Produced by `export` from `@[trusted "id"]`, including tags found in imported
+libraries. Read by `status`, from the object store.
 
 ```json
 {
-  "schema": "leanblame.boundary.2",
+  "schema": "leanblame.boundary.3",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
@@ -23,11 +21,11 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
     {
       "name": "OpenPhysics.Ising.Hamiltonian",
       "id": "3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b",
+      "parent": null,
       "module": "OpenPhysics.Ising",
       "kind": "def",
       "role": "defined",
       "informal": "Nearest-neighbour Ising Hamiltonian on a finite chain, H = -J Σ σᵢσᵢ₊₁, open boundary.",
-      "informal_source": "docstring",
       "statement": {
         "pretty": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : " }, { "const": "Real", "text": "ℝ" }, { "text": ") (σ : " }, { "const": "Fin", "text": "Fin" }, { "text": " n → " }, { "const": "Spin", "text": "Spin" }, { "text": ") : " }, { "const": "Real", "text": "ℝ" }],
         "plain": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : " }, { "const": "Real", "text": "Real" }, { "text": ") (σ : " }, { "const": "Fin", "text": "Fin" }, { "text": " n → " }, { "const": "Spin", "text": "Spin" }, { "text": ") : " }, { "const": "Real", "text": "Real" }]
@@ -39,12 +37,13 @@ TOML list ([04-architecture.md](04-architecture.md), Adapters). Read by
 
 | Field | Meaning |
 |-------|---------|
+| `commit` | the library's commit; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `name` | fully qualified constant name, after structure expansion |
-| `id` | the id from `@[trusted "id"]`, a UUID; `null` for members of a tagged structure, `--boundary` lists and tags imported from a library without ids (a tag of this library without one stops `export`). No two declarations share one. Never hashed |
+| `id` | the id from `@[trusted "id"]`, a UUID; `null` for untagged members of a tagged structure or inductive, and for tags imported from a library without ids (a tag of this library without one stops `export`). No two declarations share one. Never hashed |
+| `parent` | for a constructor or projection of a tagged structure or inductive, tagged or not: that declaration's name; else `null` |
 | `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
-| `informal` | the text the signer relies on; required |
-| `informal_source` | `docstring`, `blueprint:<label>`, or `manual` |
+| `informal` | the docstring, the text the signer relies on; required. An untagged member without a docstring has its parent's |
 | `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` with notation off; a segment is `{"text"}` or `{"const", "text"}`, `const` the printed name of the constant the text refers to |
 
 ## 2. Record (storage, TOML)
@@ -106,7 +105,7 @@ never need another source.
 
 ```json
 {
-  "schema": "leanblame.status.2",
+  "schema": "leanblame.status.3",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "export": "sha256:…",
@@ -114,11 +113,11 @@ never need another source.
   "declarations": {
     "OpenPhysics.Ising.groundEnergy_le": {
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
+      "parent": null,
       "module": "OpenPhysics.Ising",
       "kind": "theorem",
       "role": "proved",
       "informal": "…",
-      "informal_source": "docstring",
       "statement": { "pretty": [ "…" ], "plain": [ "…" ] },
       "claim": "sha256:77c0…",
       "state": "outdated",
@@ -139,7 +138,7 @@ never need another source.
 
 | Field | Values |
 |-------|--------|
-| `id`, `kind`, `role` | as in the boundary list |
+| `commit`, `id`, `parent`, `kind`, `role` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |
 | `change` | causes since the last live approval: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`, each with the names involved; empty when valid |
 | `signers` | live approve records matching `claim` |
