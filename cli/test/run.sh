@@ -7,8 +7,9 @@
 # and walks through: init -> export -> sign -> status (valid) -> release -> edit
 # a body -> status (outdated, own-body) -> edit a dependency body -> status
 # (blocked) -> more causes (untagged, own-text, dep-spec) -> withdraw -> status
-# (withdrawn) -> blame -> validate (and its append-only check) -> equiv, in a copy
-# made after the first signoff: a definitional change proven (evidence shown by
+# (withdrawn) -> blame -> validate (and its append-only check) -> a boundary list
+# from a verso-blueprint manifest, labels as ids -> equiv, in a copy made after the
+# first signoff: a definitional change proven (evidence shown by
 # status, the record carries the proof, valid), one that is not definitional, an
 # own-body change refused -> ids, in another copy made after the first signoff:
 # a new id changes no claim, status --json, blame by id, a rename keeps the id,
@@ -370,6 +371,50 @@ must_fail "Sample.undocumented: tagged declarations need a docstring" \
   'Sample.unsafeEnergy: `unsafe` declarations cannot be tagged' -- "$lb" export
 git checkout -q -- Sample/Basic.lean
 ok "export refuses a tagged declaration without docstring and an unsafe one"
+
+echo "== blueprint: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
+stored_boundary() { echo ".leanblame/store/boundaries/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
+run export --boundary "$here/blueprint/blueprint-manifest.json"
+python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
+import json, sys
+d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
+assert set(d) == {"Sample.energy", "Sample.energy_even", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
+                  "Sample.Point.y", "Sample.Point.norm", "Sample.pointEnergy"}, sorted(d)
+ids = {n: x["id"] for n, x in d.items() if x["id"]}
+assert ids == {"Sample.energy": "def:energy", "Sample.energy_even": "thm:even", "Sample.Point": "def:point",
+               "Sample.pointEnergy": "def:pointEnergy"}, ids
+parents = {n: x["parent"] for n, x in d.items() if x["parent"]}
+assert parents == {n: "Sample.Point" for n in ["Sample.Point.mk", "Sample.Point.x", "Sample.Point.y", "Sample.Point.norm"]}, parents
+assert d["Sample.energy"]["informal"] == "The energy of a chain of $n$ sites is $2n$: two units per site."
+assert d["Sample.energy_even"]["informal"] == '<div class="theorem-body"><p>The energy of every chain is even.</p></div>'
+assert d["Sample.Point.norm"]["informal"] == d["Sample.Point"]["informal"]
+assert d["Sample.Point.x"]["informal"] != d["Sample.Point"]["informal"]
+PY
+run status
+grep -q "^8 tagged: " <<<"$out" || fail "status on the blueprint boundary list: $out"
+run blame def:point
+grep -q "^Sample.Point  inductive  " <<<"$out" || fail "blame by label: $out"
+ok "a label is the id of its first declaration; its other declarations and the structure's members name it as parent"
+mkdir "$logs/bp"
+cp "$here/blueprint/blueprint-html-cache.json" "$logs/bp/"
+python3 - "$here/blueprint/blueprint-manifest.json" "$logs/bp/blueprint-manifest.json" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+m["previews"] += [
+  {"label": "«def:energy2»", "key": "def:energy2--statement", "targetKind": "block", "facet": "statement",
+   "codeData": {"externalDecls": [{"canonical": "Sample.energy"}]},
+   "externalMarkup": [{"language": "tex", "slot": "statement", "raw": "The energy, again."}]},
+  {"label": "«thm:silent»", "key": "thm:silent--statement", "targetKind": "block", "facet": "statement",
+   "codeData": {"literateDeclarations": {"definedTheorems": [{"name": "Sample.second_site"}]}}},
+  {"key": "nolabel--statement", "targetKind": "block", "facet": "statement",
+   "codeData": {"externalDecls": [{"canonical": "Sample.one_site_pos"}]}}]
+json.dump(m, open(sys.argv[2], "w"))
+PY
+must_fail "Sample.energy is claimed by labels def:energy and def:energy2" "no statement text for label thm:silent" \
+  "a statement entry for \[Sample.one_site_pos\] has no label" -- "$lb" export --boundary "$logs/bp/blueprint-manifest.json"
+printf '{"declarations": []}\n' > "$logs/other.json"
+must_fail "takes a verso-blueprint blueprint-manifest.json" -- "$lb" export --boundary "$logs/other.json"
+ok "a name claimed by two labels, a statement without text or label, and other files are errors"
 
 echo "== equiv: a definitional change under two tagged declarations"
 rm -rf "$work"

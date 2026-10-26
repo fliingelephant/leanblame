@@ -1,0 +1,133 @@
+{
+  "vbpInternalSchemaVersion": 1,
+  "previews": [
+    {
+      "label": "«def:energy»",
+      "parent": null,
+      "statementUses": [],
+      "proofUses": [],
+      "owner": null,
+      "tags": [],
+      "key": "def:energy--statement",
+      "targetKind": "block",
+      "authoredLabel": "def:energy",
+      "facet": "statement",
+      "kind": "definition",
+      "title": "Definition 1 (Energy of a chain)",
+      "href": "index.html#def:energy",
+      "leanCodePreviewKeys": ["Sample.energy--lean"],
+      "codeOnlyPreview": false,
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [], "definedTheorems": [] },
+        "externalDecls": [
+          {
+            "written": "Sample.energy",
+            "canonical": "Sample.energy",
+            "origin": "directiveLean",
+            "present": true,
+            "provenance": { "inWorkspace": { "moduleName": "Sample.Basic", "sourcePath": "Sample/Basic.lean" } },
+            "kind": "definition"
+          }
+        ]
+      },
+      "externalMarkup": [
+        { "language": "tex", "slot": "default", "raw": "Energy of a chain.", "location": null },
+        { "language": "tex", "slot": "statement", "raw": "The energy of a chain of $n$ sites is $2n$: two units per site.", "location": null }
+      ],
+      "sources": [],
+      "uses": [],
+      "usedBy": []
+    },
+    {
+      "label": "«thm:even»",
+      "key": "thm:even--proof",
+      "targetKind": "block",
+      "authoredLabel": "thm:even",
+      "facet": "proof",
+      "kind": "theorem",
+      "title": "Proof of Theorem 2",
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [], "definedTheorems": [{ "name": "Sample.energy_even", "commandIndex": 0, "weight": 2 }] },
+        "externalDecls": []
+      },
+      "externalMarkup": []
+    },
+    {
+      "label": "«thm:even»",
+      "key": "thm:even--statement",
+      "targetKind": "block",
+      "authoredLabel": "thm:even",
+      "facet": "statement",
+      "kind": "theorem",
+      "title": "Theorem 2",
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [], "definedTheorems": [{ "name": "Sample.energy_even", "commandIndex": 0, "weight": 2 }] },
+        "externalDecls": []
+      },
+      "externalMarkup": []
+    },
+    {
+      "label": "«def:point»",
+      "key": "def:point--statement",
+      "targetKind": "block",
+      "authoredLabel": "def:point",
+      "facet": "statement",
+      "kind": "definition",
+      "title": "Definition 3 (Points)",
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [], "definedTheorems": [] },
+        "externalDecls": [
+          { "written": "Point", "canonical": "Sample.Point", "origin": "directiveLean", "present": true },
+          { "written": "Point.norm", "canonical": "Sample.Point.norm", "origin": "directiveLean", "present": true }
+        ]
+      },
+      "externalMarkup": [
+        { "language": "markdown", "slot": "statement", "raw": "A point of the plane with natural coordinates, and its taxicab norm $|x| + |y|$.", "location": null }
+      ]
+    },
+    {
+      "label": "Sample.energy",
+      "key": "Sample.energy--lean",
+      "targetKind": "leanDecl",
+      "authoredLabel": "Sample.energy",
+      "facet": "statement",
+      "kind": null,
+      "title": "Sample.energy",
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [], "definedTheorems": [] },
+        "externalDecls": [{ "written": "Sample.energy", "canonical": "Sample.energy", "origin": "directiveLean", "present": true }]
+      },
+      "externalMarkup": []
+    },
+    {
+      "label": "«rem:intro»",
+      "key": "rem:intro--statement",
+      "targetKind": "block",
+      "authoredLabel": "rem:intro",
+      "facet": "statement",
+      "kind": "proposition",
+      "title": "Proposition 4",
+      "codeData": null,
+      "externalMarkup": []
+    },
+    {
+      "label": "«def:pointEnergy»",
+      "key": "external-markup:def:pointEnergy",
+      "targetKind": "externalMarkup",
+      "authoredLabel": "def:pointEnergy",
+      "facet": "statement",
+      "kind": "definition",
+      "title": "Definition 5",
+      "codeData": {
+        "literateDeclarations": { "definedDefs": [{ "name": "Sample.pointEnergy", "commandIndex": 1, "weight": 1 }], "definedTheorems": [] },
+        "externalDecls": []
+      },
+      "externalMarkup": [
+        { "language": "tex", "slot": "statement", "raw": "The energy of a point $p$ is the energy of a chain of $|p|$ sites.", "location": null }
+      ]
+    }
+  ],
+  "groups": [],
+  "graphs": [],
+  "sourceDocuments": []
+}

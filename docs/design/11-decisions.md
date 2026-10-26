@@ -59,11 +59,12 @@ storage; the claim hash is the identity.
 
 ### The boundary list is the input
 
-Declarations plus informal text, made by `export` from `@[trusted "id"]` only
-(owner, 2026-10-26). The verso-blueprint and manual-list adapters were dropped:
-their declarations had no id, and an id is how a declaration is cited and
-followed. Keeps LeanBlame independent of how a project plans or displays its
-work.
+Declarations plus informal text, from `@[trusted "id"]` or a verso-blueprint
+manifest. Keeps LeanBlame independent of how a project plans or displays its
+work: a blueprint project can sign statements before they are proved. An id is
+how a declaration is cited and followed (owner, 2026-10-26): from a blueprint,
+a label is the id of the first declaration it names, the parent of the others.
+The hand-written TOML list was dropped: it had no ids.
 
 ### `status --json` is the output
 

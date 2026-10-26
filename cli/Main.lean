@@ -18,7 +18,9 @@ def usage : String :=
 
 commands:
   init                                   create leanblame.toml and records/
-  export [--lib NAME]                    build, export, write the boundary list
+  export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
+                                         verso-blueprint blueprint-manifest.json, read
+                                         instead of @[trusted])
   id [--lib NAME]                        write a new random id into each @[trusted] of the
                                          library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
@@ -67,9 +69,9 @@ where
         fail s!"unexpected argument {a}"
 
 def cmdExport (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--lib"] #[] args
+  let a ← parseArgs #["--boundary", "--lib"] #[] args
   let root ← IO.currentDir
-  let r ← Export.run Source.backend root (a.getAll "--lib")
+  let r ← Export.run Source.backend root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"

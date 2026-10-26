@@ -8,7 +8,9 @@ strings in JSON.
 ## 1. Boundary list (JSON)
 
 Produced by `export` from `@[trusted "id"]`, including tags found in imported
-libraries. Read by `status`, from the object store.
+libraries, or from a verso-blueprint manifest (`--boundary FILE`,
+[04-architecture.md](04-architecture.md), Blueprints). Read by `status`, from
+the object store.
 
 ```json
 {
@@ -39,11 +41,11 @@ libraries. Read by `status`, from the object store.
 |-------|---------|
 | `commit` | the library's commit; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `name` | fully qualified constant name, after structure expansion |
-| `id` | the id from `@[trusted "id"]`, a UUID; `null` for untagged members of a tagged structure or inductive, and for tags imported from a library without ids (a tag of this library without one stops `export`). No two declarations share one. Never hashed |
-| `parent` | for a constructor or projection of a tagged structure or inductive, tagged or not: that declaration's name; else `null` |
+| `id` | the id from `@[trusted "id"]`, a UUID; from a blueprint, the label, on the first declaration it names. `null` for the other declarations: untagged members of a tagged structure or inductive, a label's other declarations, tags imported from a library without ids (a tag of this library without one stops `export`). No two declarations share one. Never hashed |
+| `parent` | the declaration whose id stands for this one: the first declaration of its blueprint label, else the tagged structure or inductive it is a constructor or projection of; a parent without an id is passed over for its own parent; else `null` |
 | `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
-| `informal` | the docstring, the text the signer relies on; required. An untagged member without a docstring has its parent's |
+| `informal` | the text the signer relies on, the docstring or the blueprint's statement; required. An untagged member without a docstring has its parent's |
 | `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` with notation off; a segment is `{"text"}` or `{"const", "text"}`, `const` the printed name of the constant the text refers to |
 
 ## 2. Record (storage, TOML)

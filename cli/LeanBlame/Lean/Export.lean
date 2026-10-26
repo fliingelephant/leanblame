@@ -1,10 +1,11 @@
 /-
-`leanblame export [--lib NAME]...` (docs/design/04-architecture.md).
+`leanblame export [--boundary FILE] [--lib NAME]...` (docs/design/04-architecture.md).
 
 Builds the library with `lake build`, imports its modules, and makes the
-boundary list: the declarations tagged `@[trusted "id"]` (own and imported),
-plus the members of tagged structures and inductives, with `module`, `kind`,
-`role`, the printed statement and the provenance fields from the library itself. Exports the library's constants and the boundary list with the
+boundary list: the declarations tagged `@[trusted "id"]` (own and imported), or
+named by the blueprint `--boundary FILE`, plus the members of tagged structures
+and inductives, with `module`, `kind`, `role`, the printed statement and the
+provenance fields from the library itself. Exports the library's constants and the boundary list with the
 toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
 (docs/design/15-generic-core.md). Prints the two hashes.
@@ -17,16 +18,20 @@ import LeanExport.Basic
 import LeanBlame.Attr
 import LeanBlame.Core.Records
 import LeanBlame.Core.Walk
+import LeanBlame.Lean.Blueprint
 import LeanBlame.Lean.Source
 
 namespace LeanBlame.Export
 
 open Lean
 
-/-- A declaration tagged `@[trusted]`, with its id and its docstring. -/
+/-- A declaration put on the boundary by `@[trusted]` or by a blueprint, with its id and its
+informal text. -/
 structure Tag where
   name : Name
   id : Option String
+  /-- In a blueprint: the first declaration of its label, which carries the label as its id. -/
+  parent : Option Name := none
   informal : String
 
 /-- The informal text of a docstring, as docs/design/03 hashes it: ASCII whitespace trimmed, line
@@ -114,11 +119,29 @@ def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
     tags := tags.push { name := n, id, informal }
   return (tags, errors)
 
+/-- The tags of a verso-blueprint manifest (`--boundary FILE`), and the problems. A label is the id
+of the first declaration it names; the label's other declarations name that one as their parent. -/
+def blueprintTags (f : System.FilePath) : IO (Array Tag × Array String) := do
+  let accepted := "--boundary takes a verso-blueprint blueprint-manifest.json"
+  let j ← match Json.parse (← IO.FS.readFile f) with
+    | .ok j => pure j
+    | .error e => fail s!"{f}: {accepted}: {e}"
+  unless j.getObjVal? "previews" matches .ok _ do fail s!"{f}: {accepted}"
+  let (nodes, errors) ← Blueprint.nodes f j
+  let tags := nodes.flatMap fun n =>
+    let informal := normalizeInformal n.text
+    n.names.mapIdx fun i name => match i with
+      | 0 => { name, id := some n.label, informal }
+      | _ => { name, id := none, parent := n.names[0]?, informal }
+  return (tags, errors)
+
 /-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
 constructors and projections of tagged inductives and structures that are not tagged themselves, with
-their own docstring or else the parent's text. A constructor or projection of a tagged inductive or
-structure names it as `parent`, tagged or not. `module`, `kind` and `role` come from `env`; the
-statement is filled in by `withStatements`. Also the problems. -/
+their own docstring or else the parent's text. `parent` names the declaration whose id stands for
+this one: the first declaration of its blueprint label, else the tagged inductive or structure it is
+a constructor or projection of; a parent without an id is passed over for its own parent. `module`,
+`kind` and `role` come from `env`; the statement is filled in by `withStatements`. Also the
+problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
   let decl (n : Name) (ci : ConstantInfo) (informal : String) (id parent : Option String) :
       Name × BoundaryDecl :=
@@ -140,12 +163,19 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       errors := errors.push s!"{t.name}: `unsafe` declarations cannot be tagged"; continue
     if ci matches .recInfo _ then
       errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
-    out := out.push (decl t.name ci t.informal t.id ((parentOf.find? t.name).map (·.toString)))
+    out := out.push (decl t.name ci t.informal t.id ((t.parent <|> parentOf.find? t.name).map (·.toString)))
     for m in members t.name do
       if tagged.contains m then continue
       let some mi := env.find? m | errors := errors.push s!"{m}: member of {t.name} not found"; continue
       let informal := (((← findSimpleDocString? env m).map normalizeInformal).filter (· != "")).getD t.informal
       out := out.push (decl m mi informal none (some t.name.toString))
+  -- A parent stands for a member by its id: one without an id is passed over for its own parent.
+  let byName : Std.HashMap String BoundaryDecl := out.foldl (init := {}) fun m (_, d) => m.insert d.name d
+  let rec cite (fuel : Nat) (p : String) : String :=
+    match fuel, byName[p]? with
+    | fuel + 1, some { id := none, parent := some q, .. } => cite fuel q
+    | _, _ => p
+  out := out.map fun (n, d) => (n, { d with parent := d.parent.map (cite out.size) })
   -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
   let mut owner : Std.HashMap String Name := {}
   for t in tags do
@@ -318,7 +348,8 @@ structure Result where
   hashed : Nat
 
 /-- Run the export in library root `root`; `backend` hashes it. -/
-def run (backend : Core.Backend) (root : System.FilePath) (libsGiven : Array String) : IO Result := do
+def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
+    (libsGiven : Array String) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
   let { libs, mods, deps, env, .. } ← load root libsGiven
@@ -326,12 +357,15 @@ def run (backend : Core.Backend) (root : System.FilePath) (libsGiven : Array Str
   let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
   let library := ", ".intercalate libs.toList
-  let (tags, errors) ← trustedTags env
+  let (tags, errors) ← match boundaryFile? with
+    | some f => blueprintTags f
+    | none => trustedTags env
   let (declarations, errors') ← expand env tags
   -- Every `@[trusted]` of this library has an id; imported libraries are theirs to fix.
   let own : NameSet := mods.foldl (·.insert ·) {}
-  let noId := (tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)).map
-    (s!"{·.name}: tagged without an id; run `leanblame id`")
+  let noId := if boundaryFile?.isSome then #[] else
+    (tags.filter fun t => t.id.isNone && own.contains (moduleOf env t.name)).map
+      (s!"{·.name}: tagged without an id; run `leanblame id`")
   let problems := errors ++ errors' ++ noId
   unless problems.isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))

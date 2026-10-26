@@ -54,6 +54,10 @@ when the declaration is renamed. Cite a declaration by its id. Commit the change
 `export` refuses a tag without an id. `sign` needs an export of committed
 files: with uncommitted changes, the export names no commit.
 
+Instead of `@[trusted]`, `export --boundary FILE` reads a verso-blueprint
+`blueprint-manifest.json`. A label is the id of the first declaration it names;
+its other declarations point to that one.
+
 ## Commands
 
 Run in the library root as `lake exe leanblame <command>`.
@@ -61,7 +65,7 @@ Run in the library root as `lake exe leanblame <command>`.
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
-| `export [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
+| `export [--boundary FILE] [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
 | `id [--lib NAME]` | Write a random id into each `@[trusted]` that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |

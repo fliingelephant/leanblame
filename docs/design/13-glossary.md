@@ -13,7 +13,7 @@
 | **boundary list** | The declarations a human must read, with their informal text. Input to LeanBlame. |
 | **tagged** | On the boundary list. `@[trusted]` is the usual way. |
 | **id** | A declaration's random UUID, `@[trusted "id"]`, written by `leanblame id`. Survives renames; never hashed. Cite as `id@record`. |
-| **informal text** | The docstring. The spec a signer relies on. |
+| **informal text** | The docstring, or the blueprint's statement text. The spec a signer relies on. |
 | **spec** | Name, type, informal text of a declaration. What its users sign. |
 | **claim hash** | Hash of what one signoff covers. See [03-trust-model.md](03-trust-model.md). |
 | **record** | One signoff file: approve or withdraw. |
@@ -29,7 +29,7 @@
 | **nanoda, con-ron, con-leche** | Independent re-implementations of the Lean kernel, used as extra checkers. |
 | **AXLE, Kimina, Pantograph** | Fast proof-check services that trust the elaborator. Filters, not gates. |
 | **doc-gen4** | Lean's documentation generator. Our page base. |
-| **verso-blueprint, LeanArchitect** | Blueprint tools: prose, Lean declarations and dependency graph in one document. Possible `status --json` consumers. |
+| **verso-blueprint, LeanArchitect** | Blueprint tools: prose, Lean declarations and dependency graph in one document. verso-blueprint's manifest is a boundary-list source; both are possible `status --json` consumers. |
 | **lean-eval** | Lean FRO's comparator-based benchmark. Its per-problem TOML files are the model for records. |
 | **OpenID Connect / OAuth 2.0** | Login protocols. OpenReview and ORCID speak the first; GitHub only the second. |
 | **ORCID / ROR** | Persistent ids for researchers / institutions. |

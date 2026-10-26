@@ -13,10 +13,10 @@ surface syntax and is not on the boundary.
 ## Boundary list
 
 A plain file naming the declarations on the trusted boundary, each with its
-informal text, the docstring. `export` makes it from the `@[trusted "id"]`
-attribute; nothing else does. Everything on the list is "tagged." A
-constructor or projection of a tagged structure is on it too and names the
-structure as its parent.
+informal text. `export` makes it from the `@[trusted "id"]` attribute, with the
+docstring as text, or from a verso-blueprint, with the blueprint's statement as
+text. Everything on the list is "tagged." A constructor or projection of a
+tagged structure is on it too and names the structure as its parent.
 
 ## Id
 
@@ -24,7 +24,8 @@ A random UUID in the source, `@[trusted "id"]`, written by `leanblame id`. It
 stays when the declaration is renamed or edited, so people cite a declaration
 by its id: `id@record`, the record fixing the commit. It is never hashed:
 writing an id changes no claim. Untagged members of a tagged structure have
-none; cite the structure, their parent. A tag without an id, or two declarations with one id, stop
+none; cite the structure, their parent. From a blueprint, a label is the id of
+the first declaration it names, the parent of the others. A tag without an id, or two declarations with one id, stop
 `export`.
 
 ## Export, checker, comparator

@@ -11,8 +11,8 @@ comparator's closure walk (`Compare.lean`, Apache-2.0).
 
 ## Build, in order
 
-Done in `cli/`: 1 to 5, 8, and the `local:` and `--withdraw` parts of 7.
-Next: 6, the rest of 7, 9.
+Done in `cli/`: 1 to 5, 8, 9, and the `local:` and `--withdraw` parts of 7.
+Next: 6, the rest of 7, 10.
 
 | # | Item | Size |
 |---|------|------|
@@ -24,7 +24,8 @@ Next: 6, the rest of 7, 9.
 | 6 | Web page: doc-gen4 plus overlay | small |
 | 7 | Sign server: `local`, then `openreview`, `orcid`, `github`; `sign --withdraw` | medium |
 | 8 | `equiv`: shared/duplicated `Old.` reconstruction, goal by kind, `leanchecker` replay, object store | medium |
-| 9 | OpenPhysics: first tagged modules, conventions module, memo text | content |
+| 9 | verso-blueprint reader → boundary list, labels as ids | small |
+| 10 | OpenPhysics: first tagged modules, conventions module, memo text | content |
 
 ## Later, if needed
 

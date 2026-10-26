@@ -9,8 +9,8 @@ Every other file depends on this one.
 - For **untagged** declarations you use, you sign all of it, recursively, until you reach a tagged one.
 
 "Tagged" means: on the boundary list. `@[trusted "id"]` puts a declaration
-there. "Informal text" is the docstring. Theorem proofs are never part of any
-hash.
+there; so can a blueprint. "Informal text" is the docstring, or the blueprint's
+statement text. Theorem proofs are never part of any hash.
 
 ## Why these three lines
 

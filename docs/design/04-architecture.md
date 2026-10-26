@@ -26,7 +26,7 @@ modules form two layers ([15-generic-core.md](15-generic-core.md)):
   toolchain, Apache-2.0): seeds from the boundary list, cuts at tagged
   declarations, hashes specs, collects every mismatch, charges each change to
   a cause.
-- `Lean/`, the Lean frontend: `export`, `id`, the toolchain's export
+- `Lean/`, the Lean frontend: `export` and its blueprint reader, `id`, the toolchain's export
   parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
   `equiv`. The export is turned back into a kernel environment by an
   adaptation of core's `Replay.lean`.
@@ -38,7 +38,7 @@ Nine commands:
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml` and `records/`. |
-| `export` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list of the `@[trusted "id"]` declarations. Outside a git repository with commits: an error. With uncommitted changes under the library root, the boundary list names no commit, and `sign` and `release` refuse it. |
+| `export [--boundary FILE]` | Build at the current commit using the mathlib cache, run `leanexport`, write the export and the boundary list of the `@[trusted "id"]` declarations, or of a blueprint's (see Blueprints). Outside a git repository with commits: an error. With uncommitted changes under the library root, the boundary list names no commit, and `sign` and `release` refuse it. |
 | `id` | Write a new random id into each `@[trusted]` of the library that has none: `@[trusted "id"]`. Commit the change. |
 | `status [--json]` | One state per tagged declaration: `valid`, `outdated`, `unsigned`; what blocks it; the causes of any hash move since the last live approval; the `equiv` evidence, if any. `--json`: write the complete index ([14-schemas.md](14-schemas.md)). A graph the store should have and does not is an error. |
 | `blame X` | Who signed `X` (a name or an id), when, at which claim hash. |
@@ -60,6 +60,16 @@ validator in `leanblame`. See [05-records.md](05-records.md).
   signers, the cause of any pending change, and on approval writes one record.
 - **Page.** doc-gen4 output plus an overlay from `status --json`: signers,
   state, cause, blocked-by, history. Any other viewer reads the same JSON.
+
+## Blueprints
+
+`export --boundary FILE` reads verso-blueprint's `blueprint-manifest.json`
+instead of `@[trusted]`: statement entries name their Lean declarations in
+`codeData`, the text comes from the `statement` slot of `externalMarkup` or else
+the entry's fragment in `blueprint-html-cache.json`. A label is the id of the
+first declaration it names; its other declarations name that one as `parent`.
+A name claimed by two labels, or a statement entry without label or text, is
+an error.
 
 ## Config: `leanblame.toml`
 
