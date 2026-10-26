@@ -202,9 +202,10 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
     (← Store.readString root .owned cur.owned).lines.fold (·.insert ·.copy) {}
   let report : StatusReport := {
     library := new.boundary.library, commit := cur.commit, toolchain := cur.toolchain, deps := cur.deps
+    requires := cur.requires
     exportHash := cur.exportHash, boundary := cur.boundary, generated := ← Std.Time.Timestamp.nowSeconds
     modules := cur.modules, standard := new.standard, declarations := decls, records := ledger.records
-    untaggedInLibrary := untaggedInLibrary new closures cur.modules owned }
+    untaggedInLibrary := untaggedInLibrary new closures (cur.modules.map (·.name)) owned }
   return { cur, new, report, validRecords := (validRecords.qsort (· < ·)).eraseReps }
 
 /-- The warnings the text form prints: untagged declarations of this library that tagged ones use,

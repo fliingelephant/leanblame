@@ -1,5 +1,5 @@
 /-
-`leanblame`: command-line entry point (docs/design/04-architecture.md, nine commands). It passes
+`leanblame`: command-line entry point (docs/design/04-architecture.md, ten commands). It passes
 the Lean frontend's backend to the two commands that need one (docs/design/15-generic-core.md):
 `export` hashes with it, `release` runs its kernel check.
 -/
@@ -9,6 +9,7 @@ import LeanBlame.Core.Status
 import LeanBlame.Core.Validate
 import LeanBlame.Lean.Equiv
 import LeanBlame.Lean.Ids
+import LeanBlame.Lean.Sorried
 import LeanBlame.Lean.Source
 
 open LeanBlame
@@ -30,6 +31,8 @@ commands:
                                          is definitionally equal to what was approved
   sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
   sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
+  sorried HASH...                        print the library's modules with proofs replaced by
+                                         sorry, by the hashes `status --json` lists
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
@@ -113,6 +116,20 @@ def cmdSign (args : List String) : IO UInt32 := do
       fail "--constants goes with --withdraw; to approve, list the names"
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
+def cmdSorried (args : List String) : IO UInt32 := do
+  let a ← parseArgs #[] #[] args (positional := true)
+  if a.positional.isEmpty then fail "usage: leanblame sorried HASH..."
+  let root ← IO.currentDir
+  let cur ← Store.readCurrent root
+  let texts ← a.positional.mapM fun h => do
+    let some m := cur.modules.find? (·.text == h)
+      | fail s!"{h} is no module copy of the last export (`leanblame status --json` lists them)"
+    let c ← Sorried.read root m.key
+    unless mkHash (Sha256.hexOfString c.text) == h do fail s!"{Sorried.path root m.key}: its text does not hash to {h}"
+    return (h, Lean.Json.str c.text)
+  IO.println (Lean.Json.mkObj texts.toList).pretty
+  return 0
+
 def cmdEquiv (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)
   Equiv.run (← IO.currentDir) a.positional
@@ -133,6 +150,7 @@ def dispatch : List String → IO UInt32
   | "validate" :: args => cmdValidate args
   | "release" :: args => cmdRelease args
   | "equiv" :: args => cmdEquiv args
+  | "sorried" :: args => cmdSorried args
   | cmd :: _ => do
     IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
     return 2

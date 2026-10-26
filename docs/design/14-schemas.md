@@ -111,15 +111,19 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "schema": "leanblame.status.4",
+  "schema": "leanblame.status.5",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
   "deps": { "mathlib": "a1b2c3…", "physlib": "d4e5f6…" },
+  "requires": [{ "name": "physlib", "git": "https://github.com/leanprover-community/physlib", "rev": "d4e5f6…", "sub_dir": null }],
   "export": "sha256:…",
   "boundary": "sha256:…",
   "generated": "2026-10-23T15:00:00Z",
-  "modules": ["OpenPhysics", "OpenPhysics.Ising"],
+  "modules": [
+    { "name": "OpenPhysics", "imports": ["OpenPhysics.Ising"], "sorried": "sha256:…" },
+    { "name": "OpenPhysics.Ising", "imports": [], "sorried": "sha256:…" }
+  ],
   "standard_axioms": ["propext", "Classical.choice", "Quot.sound"],
   "declarations": {
     "OpenPhysics.Ising.groundEnergy_le": {
@@ -161,7 +165,8 @@ every record. Viewers display it; they never need another source. With
 |-------|--------|
 | `commit` | the commit the export comes from; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `toolchain`, `deps` | the Lean version, and the commits of git dependencies |
-| `modules` | the library's own modules |
+| `requires` | what the library's lakefile requires: the git URL, commit and subdirectory of each; `git` and `rev` are `null` for a path dependency |
+| `modules` | the library's own modules: the own modules each imports directly, and `sorried`, the hash of its sorried copy, which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
 | `standard_axioms` | the axioms every proof may rest on |
 | `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |

@@ -521,17 +521,59 @@ structure StatusDecl where
   closureSize : Nat
   deriving Inhabited, Repr
 
+/-- One of the library's own modules: the own modules it imports directly, and its sorried copy
+(docs/design/04-architecture.md, "Sorried copies"): `text` hashes the copy, `key` what made it; the
+store keeps the copy under its key. -/
+structure OwnModule where
+  name : String
+  imports : Array String
+  key : String
+  text : String
+  deriving Inhabited, Repr
+
+def OwnModule.fromJson? (j : Json) : Except String OwnModule := do
+  let o ← JsonObj.read j "module" ["name", "imports", "key", "text"]
+  let m : OwnModule := { name := ← o.get String "name", imports := ← o.get (Array String) "imports",
+                         key := ← o.get String "key", text := ← o.get String "text" }
+  for (k, h) in [("key", m.key), ("text", m.text)] do
+    unless isHash h do throw s!"module {m.name}.{k}: `{h}` is not a sha256: hash"
+  return m
+
+instance : ToJson OwnModule where
+  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("key", m.key), ("text", m.text)]
+
+/-- A dependency the library's lakefile requires (Lake: a package of `lake-manifest.json` that is
+not inherited): its git URL, commit and subdirectory; `git` and `rev` are `none` for a path
+dependency. -/
+structure Require where
+  name : String
+  git : Option String
+  rev : Option String
+  subDir : Option String
+  deriving Inhabited, Repr
+
+def Require.fromJson? (j : Json) : Except String Require := do
+  let o ← JsonObj.read j "require" ["name", "git", "rev", "sub_dir"]
+  return { name := ← o.get String "name", git := ← o.get (Option String) "git",
+           rev := ← o.get (Option String) "rev", subDir := ← o.get (Option String) "sub_dir" }
+
+instance : ToJson Require where
+  toJson r := Json.mkObj [("name", r.name), ("git", toJson r.git), ("rev", toJson r.rev),
+    ("sub_dir", toJson r.subDir)]
+
 structure StatusReport where
   library : String
   /-- `none` when the export has uncommitted changes. -/
   commit : Option String
   toolchain : String
   deps : Array (String × String)
+  /-- What the library's lakefile requires. -/
+  requires : Array Require
   exportHash : String
   boundary : String
   generated : Std.Time.Timestamp
   /-- The library's own modules. -/
-  modules : Array String
+  modules : Array OwnModule
   /-- The assumptions every proof may rest on (`Core.Backend.standard`). -/
   standard : Array String
   /-- Sorted by name. -/
@@ -542,7 +584,7 @@ structure StatusReport where
   untaggedInLibrary : Array (String × Array String)
   deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.4"
+def StatusReport.schemaId : String := "leanblame.status.5"
 
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
@@ -566,7 +608,10 @@ instance : ToJson StatusReport where
   toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
     ("commit", toJson s.commit), ("toolchain", s.toolchain), ("deps", stringsJson s.deps),
     ("export", s.exportHash), ("boundary", s.boundary), ("generated", s.generated.toIso),
-    ("modules", toJson s.modules), ("standard_axioms", toJson s.standard),
+    ("requires", toJson s.requires),
+    ("modules", Json.arr (s.modules.map fun m =>
+      Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("sorried", m.text)])),
+    ("standard_axioms", toJson s.standard),
     ("declarations", Json.mkObj (s.declarations.toList.map fun d => (d.decl.name, toJson d))),
     ("records", toJson s.records),
     ("untagged_in_library", Json.arr (s.untaggedInLibrary.map fun (n, users) =>

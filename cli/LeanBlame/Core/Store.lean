@@ -2,18 +2,20 @@
 The object store (docs/design/04-architecture.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too) and release
-manifests. Graphs, exports hashed against boundary lists (`Graph`), are keyed by both:
-`graphs/<export hex>-<boundary hex>.json`.
+manifests. Two kinds are keyed by what made them: graphs, exports hashed against boundary lists
+(`Graph`), `graphs/<export hex>-<boundary hex>.json`; and sorried copies of the library's modules
+(`Sorried`), `sorried/<key hex>.json`.
 
-One small local file points into it: `.leanblame/current` (JSON), the export, boundary list and
-constant listing of the last `export` run, with the commit, toolchain and dependencies it was made
-from. `equiv` writes evidence files next to it, `.leanblame/equiv/evidence/<claim hex>.json`.
-`export` sweeps: an export, boundary list or listing that neither the current pointer nor a record
-names is deleted, so are the graphs of a deleted export, evidence for a claim that is no longer
-current, and a proof that neither evidence nor a record names. Every JSON file here has a schema
-id and is read strictly.
+One small local file points into it: `.leanblame/current` (JSON), the export, boundary list,
+constant listing and module copies of the last `export` run, with the commit, toolchain and
+dependencies it was made from. `equiv` writes evidence files next to it,
+`.leanblame/equiv/evidence/<claim hex>.json`. `export` sweeps: an export, boundary list or listing
+that neither the current pointer nor a record names is deleted, so are the graphs of a deleted
+export, copies the current pointer does not name, evidence for a claim that is no longer current,
+and a proof that neither evidence nor a record names. Every JSON file here has a schema id and is
+read strictly.
 -/
-import LeanBlame.Core.Util
+import LeanBlame.Core.Schema
 
 namespace LeanBlame.Store
 
@@ -23,7 +25,7 @@ def objectsDir (root : System.FilePath) : System.FilePath := dir root / "store"
 
 /-- The kinds of object, one directory each. -/
 inductive Kind where
-  | exports | boundaries | owned | proofs | manifests | graphs
+  | exports | boundaries | owned | proofs | manifests | graphs | sorried
   deriving BEq, Repr
 
 def Kind.dir : Kind → String
@@ -33,6 +35,7 @@ def Kind.dir : Kind → String
   | .proofs => "proofs"
   | .manifests => "manifests"
   | .graphs => "graphs"
+  | .sorried => "sorried"
 
 def kindDir (root : System.FilePath) (k : Kind) : System.FilePath := objectsDir root / k.dir
 
@@ -80,33 +83,36 @@ def sweep (root : System.FilePath) (k : Kind) (keep : Std.HashSet String) : IO N
   sweepDir (kindDir root k) keep
 
 /-- The last `export`: its export, boundary list and listing of the constants the library defines;
-the library's own modules; and what it was made from: the commit (`none` with uncommitted changes,
-which cannot be signed), the toolchain and the commits of git dependencies. -/
+the library's own modules with their sorried copies; and what it was made from: the commit (`none`
+with uncommitted changes, which cannot be signed), the toolchain, the commits of git dependencies
+and what the lakefile requires. -/
 structure Current where
   exportHash : String
   boundary : String
   owned : String
-  modules : Array String
+  modules : Array OwnModule
   commit : Option String
   toolchain : String
   deps : Array (String × String)
+  requires : Array Require
 
-def Current.schemaId : String := "leanblame.current.1"
+def Current.schemaId : String := "leanblame.current.2"
 
 instance : Lean.ToJson Current where
   toJson c := Lean.Json.mkObj [("schema", Current.schemaId), ("export", c.exportHash),
     ("boundary", c.boundary), ("owned", c.owned), ("modules", Lean.toJson c.modules),
-    ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps)]
+    ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps),
+    ("requires", Lean.toJson c.requires)]
 
 def Current.fromJson? (j : Lean.Json) : Except String Current := do
   let o ← JsonObj.read j "current"
-    ["schema", "export", "boundary", "owned", "modules", "commit", "toolchain", "deps"]
+    ["schema", "export", "boundary", "owned", "modules", "commit", "toolchain", "deps", "requires"]
   o.schema Current.schemaId
   let c : Current := {
     exportHash := ← o.get String "export", boundary := ← o.get String "boundary"
-    owned := ← o.get String "owned", modules := ← o.get (Array String) "modules"
+    owned := ← o.get String "owned", modules := ← (← o.get (Array Lean.Json) "modules").mapM OwnModule.fromJson?
     commit := ← o.get (Option String) "commit", toolchain := ← o.get String "toolchain"
-    deps := ← o.getStrings "deps" }
+    deps := ← o.getStrings "deps", requires := ← (← o.get (Array Lean.Json) "requires").mapM Require.fromJson? }
   for (k, h) in [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned)] do
     unless isHash h do throw s!"current.{k}: `{h}` is not a sha256: hash"
   return c

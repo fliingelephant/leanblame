@@ -7,8 +7,9 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 `module`, `kind`, `role` and the printed statement. Exports the library's constants and the
 boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
-(docs/design/15-generic-core.md); then points `.leanblame/current` at them, with the commit,
-toolchain and dependencies they were made from. Prints the two hashes.
+(docs/design/15-generic-core.md). Makes the sorried copy of each module (`Sorried`). Then points
+`.leanblame/current` at them, with the commit, toolchain and dependencies they were made from.
+Prints the two hashes.
 -/
 import Lean
 import Lake.Load.Manifest
@@ -19,6 +20,7 @@ import LeanBlame.Attr
 import LeanBlame.Core.Records
 import LeanBlame.Core.Walk
 import LeanBlame.Lean.Blueprint
+import LeanBlame.Lean.Sorried
 import LeanBlame.Lean.Source
 
 namespace LeanBlame.Export
@@ -62,18 +64,20 @@ def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array
   return chosen
 
 /-- The modules of each library, from Lake (`lake query --json LIB:modules`). -/
-def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array Name) := do
+def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array (String × Array Name)) := do
   let out ← IO.Process.run
     { cmd := "lake", args := #["query", "--json"] ++ libs.map (· ++ ":modules"), cwd := root }
-  let mut mods := #[]
-  for line in out.lines do
-    if line.trimAscii.isEmpty then continue
-    let .ok (.arr xs) := Json.parse line.copy | fail s!"unexpected output from `lake query`: {line}"
-    for x in xs do
-      let .str m := x | fail s!"unexpected output from `lake query`: {line}"
-      mods := mods.push m.toName
-  if mods.isEmpty then fail "`lake query` reported no modules"
-  return dedup mods
+  let lines := (out.lines.toArray.map (·.copy)).filter (!·.trimAscii.isEmpty)
+  unless lines.size == libs.size do fail s!"unexpected output from `lake query`: {out}"
+  let mut byLib := #[]
+  for lib in libs, line in lines do
+    let .ok (.arr xs) := Json.parse line | fail s!"unexpected output from `lake query`: {line}"
+    let mods ← xs.mapM fun
+      | .str m => pure m.toName
+      | _ => fail s!"unexpected output from `lake query`: {line}"
+    byLib := byLib.push (lib, mods)
+  if byLib.all (·.2.isEmpty) then fail "`lake query` reported no modules"
+  return byLib
 
 /-- The commit of the git repository holding `root`; an error outside git: a record names the commit it
 signs. -/
@@ -91,14 +95,20 @@ def commitIfClean (root : System.FilePath) (rev : String) : IO (Option String) :
   IO.eprintln "warning: uncommitted changes in the library: this export names no commit and cannot be signed"
   return none
 
-/-- Commits of git dependencies, from `lake-manifest.json`, which `lake build` writes. Path
-dependencies have none. -/
-def manifestDeps (root : System.FilePath) : IO (Array (String × String)) := do
+/-- From `lake-manifest.json`, which `lake build` writes: the commits of git dependencies (path
+dependencies have none), and what the lakefile requires (the packages that are not inherited). -/
+def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Array Require) := do
   let some m ← Lake.Manifest.load? (root / "lake-manifest.json")
     | fail "no lake-manifest.json after `lake build`"
-  return m.packages.filterMap fun p => match p.src with
-    | .git (rev := rev) .. => some (p.name.toString (escape := false), rev)
+  let name (p : Lake.PackageEntry) := p.name.toString (escape := false)
+  let deps := m.packages.filterMap fun p => match p.src with
+    | .git (rev := rev) .. => some (name p, rev)
     | .path .. => none
+  let requires := m.packages.filterMap fun p =>
+    if p.inherited then none else some <| match p.src with
+      | .git url rev _ subDir? => { name := name p, git := some url, rev := some rev, subDir := subDir?.map toString }
+      | .path .. => { name := name p, git := none, rev := none, subDir := none }
+  return (deps, requires)
 
 /-- The module defining `n`. (`env.header.moduleNames` would copy the module list on every call.) -/
 def moduleOf (env : Environment) (n : Name) : Except String Name :=
@@ -328,11 +338,17 @@ def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath)
 /-- A built library with its modules imported. -/
 structure Loaded where
   libs : Array String
+  /-- The modules of each library. -/
+  byLib : Array (String × Array Name)
   mods : Array Name
   deps : Array (String × String)
+  requires : Array Require
   env : Environment
   /-- Where the sources are (`LEAN_SRC_PATH` of `lake env`). -/
   srcPath : System.SearchPath
+  /-- The toolchain (`LEAN_SYSROOT`) and where its `lean` finds the modules (`LEAN_PATH`). -/
+  sysroot : System.FilePath
+  leanPath : String
 
 /-- Build the libraries of `root` (with the mathlib cache when they depend on mathlib) and import
 their modules. -/
@@ -346,17 +362,21 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
   -- The modules are imported from the build directory. With Lake's artifact cache on, a build may
   -- leave them only in the cache unless Lake is asked to restore them.
   runToStderr "lake" (#["build"] ++ libs) root "`lake build`" (env := #[("LAKE_RESTORE_ARTIFACTS", some "true")])
-  let deps ← manifestDeps root
-  let mods ← libraryModules root libs
+  let (deps, requires) ← manifestDeps root
+  let byLib ← libraryModules root libs
+  let mods := dedup (byLib.flatMap (·.2))
   let vars := (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root }).lines.toArray
   let var (k : String) : IO String := do
     let some v := vars.findSome? fun l => (l.dropPrefix? (k ++ "=")).map (·.copy)
       | fail s!"`lake env printenv` did not report {k}"
     return v
-  initSearchPath (System.FilePath.mk (← var "LEAN_SYSROOT")) (System.SearchPath.parse (← var "LEAN_PATH"))
+  let sysroot := System.FilePath.mk (← var "LEAN_SYSROOT")
+  let leanPath ← var "LEAN_PATH"
+  initSearchPath sysroot (System.SearchPath.parse leanPath)
   IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
   let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
-  return { libs, mods, deps, env, srcPath := System.SearchPath.parse (← var "LEAN_SRC_PATH") }
+  return { libs, byLib, mods, deps, requires, env, srcPath := System.SearchPath.parse (← var "LEAN_SRC_PATH"),
+           sysroot, leanPath }
 
 structure Result where
   exportHash : String
@@ -370,7 +390,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     (libsGiven : Array String) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
-  let { libs, mods, deps, env, .. } ← load root libsGiven
+  let { libs, byLib, mods, deps, requires, env, srcPath, sysroot, leanPath } ← load root libsGiven
   -- Checked after the build, which may update `lake-manifest.json`.
   let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
@@ -399,6 +419,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
+  let modules ← Sorried.make root env byLib (.ofList own.toList) srcPath sysroot leanPath
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     roots := roots.push n
@@ -422,10 +443,10 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, owned := ownedHash, modules := mods.map toString, commit, toolchain, deps }
+    { exportHash, boundary, owned := ownedHash, modules, commit, toolchain, deps, requires }
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
-  -- with their export; evidence while its claim is current; a proof while evidence or a record
-  -- names it.
+  -- with their export; copies while the current pointer names them; evidence while its claim is
+  -- current; a proof while evidence or a record names it.
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex exportHash)
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
   let mut proofs : Std.HashSet String := {}
@@ -439,6 +460,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     if n.informal.isSome then acc.insert s!"{hashHex n.claim}.json" else acc
   let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
   removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
+  removed := removed + (← Store.sweep root .sorried (.ofList (modules.toList.map (s!"{hashHex ·.key}.json"))))
   removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
   removed := removed + (← Store.sweep root .proofs (proofs.union (← Store.evidenceProofs root)))
   Graph.sweep root exports

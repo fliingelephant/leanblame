@@ -100,7 +100,7 @@ def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
     let mod ← IO.ofExcept (Export.moduleOf l.env n)
     let some file ← Lean.SearchPath.findWithExt l.srcPath "lean" mod
       | problems := problems.push s!"{n}: cannot find the source of {mod}; write @[trusted \"{id}\"] by hand"
-    let some r := declRangeExt.find? (level := .exported) l.env n <|> declRangeExt.find? (level := .server) l.env n
+    let some r := Sorried.declRange? l.env n
       | problems := problems.push s!"{n}: Lean has no source position for it; write @[trusted \"{id}\"] by hand"
     let cs ← match texts[file]? with
       | some cs => pure cs

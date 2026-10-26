@@ -5,7 +5,9 @@
 #
 # Copies the sample library to a scratch directory, makes it a git repository,
 # and walks through: init -> export -> sign (records name declarations by id) ->
-# status (valid; --json complete, nothing on stderr) -> release -> edit a body ->
+# status (valid; --json complete, nothing on stderr) -> sorried copies (proofs
+# replaced by sorry but those a definition uses; they build without the
+# library; copied again only where a module changed) -> release -> edit a body ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
 # causes (untagged, own-text, dep-spec) -> withdraw -> status (withdrawn) ->
@@ -150,12 +152,17 @@ python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not matc
 import json, sys
 s = json.load(open(sys.argv[1]))
 ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
-assert s["schema"] == "leanblame.status.4"
-assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "export", "boundary", "generated", "modules",
-                  "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
+assert s["schema"] == "leanblame.status.5"
+assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "requires", "export", "boundary", "generated",
+                  "modules", "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
 assert len(s["commit"]) == 40, s["commit"]
 assert s["toolchain"].startswith("v4.") and s["deps"] == {}, (s["toolchain"], s["deps"])
-assert sorted(s["modules"]) == ["Sample", "Sample.Basic", "Sample.Energy"], s["modules"]
+assert s["requires"] == [{"name": "leanblame", "git": None, "rev": None, "sub_dir": None}], s["requires"]
+modules = {m["name"]: m for m in s["modules"]}
+assert sorted(modules) == ["Sample", "Sample.Basic", "Sample.Energy"], s["modules"]
+assert all(set(m) == {"name", "imports", "sorried"} and m["sorried"].startswith("sha256:") for m in s["modules"])
+assert modules["Sample"]["imports"] == ["Sample.Basic", "Sample.Energy"], modules["Sample"]
+assert modules["Sample.Energy"]["imports"] == ["Sample.Basic"] and modules["Sample.Basic"]["imports"] == []
 assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
 assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
 keys = {"id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
@@ -197,6 +204,39 @@ assert all(set(c) == {"id", "name", "claim", "evidence"} and c["evidence"] is No
 PY
 ok "status --json has the docs/design/14 fields and nothing on stderr; members' ids come from their structure's"
 
+echo "== sorried: the library's modules with proofs replaced by sorry"
+sorried_of() { python3 -c 'import json, sys; print(next(m["sorried"] for m in json.load(open(sys.argv[1]))["modules"] if m["name"] == sys.argv[2]))' "$logs/status.json" "$1"; }
+run sorried "$(sorried_of Sample)" "$(sorried_of Sample.Basic)" "$(sorried_of Sample.Energy)"
+copies="$work-copies"
+mkdir -p "$copies/Sample"
+printf '%s' "$out" > "$logs/sorried.json"
+python3 - "$logs/sorried.json" "$copies" "$(sorried_of Sample)" "$(sorried_of Sample.Basic)" "$(sorried_of Sample.Energy)" <<'PY' \
+  || fail "sorried: the copies are not the modules with proofs replaced by sorry"
+import hashlib, json, sys
+printed, out, root, basic, energy = sys.argv[1:]
+texts = json.load(open(printed))
+assert set(texts) == {root, basic, energy}, set(texts)
+for h, t in texts.items():
+    assert h == "sha256:" + hashlib.sha256(t.encode()).hexdigest(), h
+assert texts[root] == open("Sample.lean").read()
+assert texts[basic] == open("Sample/Basic.lean").read(), "a definition uses two_pos, so its proof stays"
+e = texts[energy]
+for kept in ["theorem second_site", "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry",
+             "axiom energy_pos", "theorem one_site_pos : 0 < energy 1 := sorry"]:
+    assert kept in e, (kept, e)
+assert "rfl" not in e and "energy_pos 0" not in e and e.count(":= sorry") == 3, e
+assert "(⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in e, "a proof inside a statement stays"
+for path, h in [("Sample.lean", root), ("Sample/Basic.lean", basic), ("Sample/Energy.lean", energy)]:
+    open(f"{out}/{path}", "w").write(texts[h])
+PY
+ok "sorried prints each copy by its hash: three theorem proofs are sorry; two_pos keeps its proof"
+cp lean-toolchain "$copies/"
+printf 'name = "copies"\ndefaultTargets = ["Sample"]\n\n[[require]]\nname = "leanblame"\npath = "%s"\n\n[[lean_lib]]\nname = "Sample"\n' "$cli" > "$copies/lakefile.toml"
+(cd "$copies" && lake build) >"$logs/copies.log" 2>&1 || fail "the copies do not build without the library: $(cat "$logs/copies.log")"
+ok "the copies build on their own"
+must_fail "is no module copy of the last export" -- "$lb" sorried "sha256:$(printf '0%.0s' {1..64})"
+ok "sorried refuses a hash the last export does not list"
+
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"
 release_hash="$(awk '/^release /{print $2}' <<<"$out")"
@@ -224,6 +264,7 @@ echo "== an export of uncommitted changes names no commit"
 touch notes.txt
 export_lib
 grep -q "warning: uncommitted changes in the library" "$logs/export.log" || fail "no warning: $(cat "$logs/export.log")"
+! grep -q "copying" "$logs/export.log" || fail "no module changed, yet export copied: $(cat "$logs/export.log")"
 run status --json
 python3 -c 'import json, sys; assert json.loads(sys.argv[1])["commit"] is None' "$out" \
   || fail "status --json: an export of uncommitted changes names a commit"
@@ -231,7 +272,7 @@ must_fail "the current export has uncommitted changes" -- "$lb" sign --signer lo
 must_fail "release: the current export has uncommitted changes" -- "$lb" release --tag 2026.10.2
 rm notes.txt
 export_lib
-ok "an untracked file: the export names no commit; sign and release refuse it"
+ok "an untracked file: the export names no commit; sign and release refuse it; no module is copied again"
 
 echo "== release refuses an axiom that is neither standard nor tagged"
 cat >> Sample/Basic.lean <<'EOF'
@@ -258,9 +299,10 @@ commit "second_site: another proof of 2 < 3 in the statement"
 before="$(current_export)"
 export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
+grep -q "copying 2 of 3 modules" "$logs/export.log" || fail "want Sample.Energy and Sample copied again: $(cat "$logs/export.log")"
 run status
 expect_line Sample.second_site "Sample.second_site valid"
-ok "a proof inside a statement is not part of the hash"
+ok "a proof inside a statement is not part of the hash; only its module and the one importing it are copied again"
 
 echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'

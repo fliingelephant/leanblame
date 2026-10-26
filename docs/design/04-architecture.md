@@ -28,12 +28,12 @@ modules form two layers ([15-generic-core.md](15-generic-core.md)):
   a cause.
 - `Lean/`, the Lean frontend: `export` and its blueprint reader, `id`, the toolchain's export
   parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
-  `equiv`. The export is turned back into a kernel environment by an
+  `equiv`, sorried copies. The export is turned back into a kernel environment by an
   adaptation of core's `Replay.lean`.
 
 `Main` passes the Lean frontend to the core commands.
 
-Nine commands:
+Ten commands:
 
 | Command | Does |
 |---------|------|
@@ -45,6 +45,7 @@ Nine commands:
 | `equiv [X...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
 | `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
+| `sorried HASH...` | Print the sorried copies of the last export by the hashes `status --json` lists, as one JSON object: hash to text. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
@@ -72,6 +73,30 @@ and their ids are the label and their names (`def:point/norm`). A name claimed
 by two labels, a statement entry without label or text, and a value of an
 unexpected type are errors.
 
+## Sorried copies
+
+A comparator challenge must not depend on the library it comes from: it carries
+what its theorems need. `export` copies each module of the library with the
+proofs of its `theorem`s and `lemma`s replaced by `sorry`. A challenge carries
+the copies of its theorems' modules and of the library modules they import, and
+requires what the library's lakefile requires (`requires` in `status --json`).
+
+- A proof stays when a definition's value or any type reaches its theorem, or
+  something that proof made (a matcher, an auxiliary lemma). With `sorry` there,
+  `sorryAx` would reach every statement that uses the definition, and the
+  comparator would refuse every solution.
+- Each copy is elaborated again as `lean` does, against the library's own
+  imports, and compared with the module's `.olean`: every constant's kind,
+  universes and type, every definition's value, every kept proof. Any difference
+  stops `export`. So does a kept part that uses something another module's copy
+  lacks: the copies would not build together.
+- One `lean` process per module, as many at once as the machine has hardware
+  threads. A copy is stored by a key that hashes Lake's hash of everything the
+  module's build depends on, the proofs it keeps and the script, so only a module
+  that changed, or imports one that did, is copied again.
+- Files of Lean's module system (`module` headers) are not supported yet: an
+  error.
+
 ## Config: `leanblame.toml`
 
 ```toml
@@ -91,18 +116,20 @@ signed `axiom` in the library or its tagged dependencies.
 ## Storage
 
 - Code, records, config: git.
-- Exports, boundary lists, graphs, `equiv` proofs, release manifests: an
+- Exports, boundary lists, graphs, sorried copies, `equiv` proofs, release manifests: an
   object store keyed by hash, one directory per kind
   (`.leanblame/store/<kind>/`). A graph is an export hashed against a boundary
   list: every claim hash, with the parts `status` compares and the axiom
   report. `export` writes it; the other commands read it and never hash. It is
-  the one kind keyed by what it was computed from instead of its own bytes:
+  one of two kinds keyed by what they were computed from instead of their own bytes:
   `graphs/<export>-<boundary list>.json`, both by their hashes; a graph that is
-  not complete is an error. `.leanblame/current` points at the last export, with
-  the commit, toolchain and dependencies it was made from. `export` deletes what nothing names
-  any more: exports and boundary lists named by no record and not current, the
-  graphs of deleted exports, evidence whose claim is no longer current, proofs
-  named by no evidence and no record.
+  not complete is an error. The other is the sorried copies,
+  `sorried/<key>.json` (see Sorried copies). `.leanblame/current` points at the
+  last export and its copies, with the commit, toolchain and dependencies it was
+  made from. `export` deletes what nothing names any more: exports and boundary
+  lists named by no record and not current, the graphs of deleted exports, copies
+  that are not current, evidence whose claim is no longer current, proofs named by
+  no evidence and no record.
 - `equiv` evidence: `.leanblame/equiv/evidence/<claim>.json`, one file per claim
   hash, naming the declaration's id, the proof and the record it was compared
   with. Every JSON file here has a schema id and is read strictly.
