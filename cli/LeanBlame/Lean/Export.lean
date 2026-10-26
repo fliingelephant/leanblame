@@ -242,7 +242,7 @@ partial def flatten (cur : Option Name) : CodeWithInfos → Array Json → Array
     | some n =>
       let chars := s.toList
       let lead := chars.takeWhile Char.isWhitespace
-      let trail := chars.reverse.takeWhile Char.isWhitespace
+      let trail := (chars.reverse.takeWhile Char.isWhitespace).reverse
       let core := String.ofList ((chars.drop lead.length).take (chars.length - lead.length - trail.length))
       let acc := if lead.isEmpty then acc else acc.push (segment (String.ofList lead))
       let acc := if core.isEmpty then acc else acc.push (segment core (some n))
