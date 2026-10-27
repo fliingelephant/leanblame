@@ -1,8 +1,9 @@
 /-
 Sorried copies (docs/design/04-architecture.md, "Sorried copies"): each of the library's modules with
-the proofs of its theorems replaced by `sorry`, without its imports, which `status` lists. A
-comparator challenge for some theorems carries the copies of the modules they need, merged into one
-file, and requires what the library requires, not the library.
+the proofs of its theorems replaced by `sorry`, without its imports, which `status` lists, cut into
+one piece per command. A piece says what the command declares and what of the library it uses; a
+comparator challenge for some theorems carries the pieces they need and requires what the library
+requires, not the library.
 
 A proof stays when the type of a library constant or the value of a library definition reaches its
 theorem, or something its elaboration made, such as a matcher (`kept`): with `sorry` there, `sorryAx`
@@ -13,9 +14,8 @@ them all; without what the proof made, the definition would not be the same.
 machine has hardware threads. Each copy is stored as `sorried/<key hex>.json`; the key hashes the
 script, the module, Lake's hash of everything the module's build depends on (`depHash`), its Lean
 options and the proofs it keeps, so a module whose key is stored is not copied again. Each copy is
-checked against the module's `.olean` by the script; then a reference from what a copy keeps (every
-type, every definition, every kept proof) to a constant that another module's copy lacks is an
-error, since the copies would not build together.
+checked against the module's `.olean` by the script; then a piece that uses a constant no piece
+declares is an error, since a challenge could not carry it.
 -/
 import Lean
 import LeanBlame.Core.Store
@@ -70,31 +70,44 @@ def kept (own : Std.HashMap Name ConstantInfo) : NameSet := Id.run do
     if let some m := madeBy? own n then todo := todo.push m
   return keep
 
-/-- What a copy keeps of the constant `n`: its type and, unless it is a theorem whose proof is
-not kept, its value. -/
-def keptUses (keep : NameSet) (n : Name) (ci : ConstantInfo) : Array Name :=
-  let value := if ci.isTheorem && !keep.contains n then none else ci.value? (allowOpaque := true)
-  ci.type.getUsedConstants ++ (value.map (·.getUsedConstants)).getD #[]
+/-- One command of a copy, with the comments before it: what it declares, and the constants of the
+library it uses. A challenge keeps it when its theorems need what it declares, or always (`keep`):
+when it is not a declaration, or is an instance. -/
+structure Piece where
+  text : String
+  keep : Bool
+  declares : Array String
+  uses : Array String
 
-/-- A stored copy: the module after its imports, with proofs replaced by `sorry` (and an `end` for
-each scope it leaves open); and the module's constants that the copy lacks, other than those Lean
-makes again on demand. -/
+instance : ToJson Piece where
+  toJson p := Json.mkObj [("text", p.text), ("keep", p.keep), ("declares", toJson p.declares),
+    ("uses", toJson p.uses)]
+
+def Piece.fromJson? (j : Json) : Except String Piece := do
+  let o ← JsonObj.read j "piece" ["text", "keep", "declares", "uses"]
+  return { text := ← o.get String "text", keep := ← o.get Bool "keep",
+           declares := ← o.get (Array String) "declares", uses := ← o.get (Array String) "uses" }
+
+/-- A stored copy: the module after its imports, with proofs replaced by `sorry`, one piece per
+command, then one with an `end` for each scope the module leaves open. -/
 structure Copy where
   module : String
-  text : String
-  missing : Array String
+  pieces : Array Piece
 
-def Copy.schemaId : String := "leanblame.sorried.1"
+def Copy.schemaId : String := "leanblame.sorried.2"
 
 instance : ToJson Copy where
-  toJson c := Json.mkObj [("schema", Copy.schemaId), ("module", c.module), ("text", c.text),
-    ("missing", toJson c.missing)]
+  toJson c := Json.mkObj [("schema", Copy.schemaId), ("module", c.module), ("pieces", toJson c.pieces)]
 
 def Copy.fromJson? (j : Json) : Except String Copy := do
-  let o ← JsonObj.read j "sorried copy" ["schema", "module", "text", "missing"]
+  let o ← JsonObj.read j "sorried copy" ["schema", "module", "pieces"]
   o.schema Copy.schemaId
-  return { module := ← o.get String "module", text := ← o.get String "text",
-           missing := ← o.get (Array String) "missing" }
+  return { module := ← o.get String "module",
+           pieces := ← (← o.get (Array Json) "pieces").mapM Piece.fromJson? }
+
+/-- What `status` names a copy by: the hash of its pieces, as `leanblame sorried` prints them. -/
+def Copy.hash (c : Copy) : String :=
+  mkHash (Sha256.hexOfString (toJson c.pieces).compress)
 
 def path (root : System.FilePath) (key : String) : System.FilePath :=
   Store.kindDir root .sorried / s!"{hashHex key}.json"
@@ -113,6 +126,8 @@ structure Job where
   /-- Where the theorems whose proofs stay begin: line and column. -/
   keep : Array (Nat × Nat)
   keepNames : Array Name
+  /-- The library's modules. -/
+  own : Array Name
   options : Json
   key : String
 
@@ -123,7 +138,7 @@ def runJob (root lean scriptFile : System.FilePath) (leanPath : String) (j : Job
   let out ← Store.tmpPath root s!"sorried-{j.module}-out"
   IO.FS.writeFile input (Json.mkObj [("module", toString j.module), ("source", j.source.toString),
     ("olean", j.olean.toString), ("keep", toJson j.keep), ("keep_names", toJson (j.keepNames.map toString)),
-    ("options", j.options), ("out", out.toString)]).compress
+    ("own", toJson (j.own.map toString)), ("options", j.options), ("out", out.toString)]).compress
   let r ← IO.Process.output { cmd := lean.toString, args := #["--run", scriptFile.toString, input.toString],
                               cwd := root, env := #[("LEAN_PATH", some leanPath)] }
   let text? ← readFileIfExists out
@@ -131,12 +146,11 @@ def runJob (root lean scriptFile : System.FilePath) (leanPath : String) (j : Job
     if ← f.pathExists then IO.FS.removeFile f
   let some text := text?
     | fail s!"{j.module}: copying failed (exit {r.exitCode}):\n{r.stdout}{r.stderr}"
-  let o ← IO.ofExcept (Json.parse text >>= (JsonObj.read · s!"{j.module}: the script's output" ["text", "problems", "missing"]))
+  let o ← IO.ofExcept (Json.parse text >>= (JsonObj.read · s!"{j.module}: the script's output" ["pieces", "problems"]))
   let problems ← IO.ofExcept (o.get (Array String) "problems")
   unless problems.isEmpty do
     fail s!"{j.module}: the copy differs from the library:\n{"\n".intercalate problems.toList}"
-  return { module := toString j.module, text := ← IO.ofExcept (o.get String "text"),
-           missing := ← IO.ofExcept (o.get (Array String) "missing") }
+  return { module := toString j.module, pieces := ← IO.ofExcept ((← IO.ofExcept (o.get (Array Json) "pieces")).mapM Piece.fromJson?) }
 
 /-- `f` on each of `xs`, at most `width` at a time, each result in its place. -/
 def parallel (width : Nat) (xs : Array α) (f : α → IO β) : IO (Array (Except IO.Error β)) := do
@@ -209,8 +223,8 @@ def make (root : System.FilePath) (env : Environment) (byLib : Array (String × 
     let some opts := options[m]? | fail s!"Lake gave no options for {m}"
     let key := mkHash <| Sha256.hexOfString <| script ++ "\n" ++ (Json.mkObj [("module", toString m),
       ("dep_hash", depHash), ("options", opts), ("keep", toJson keepAt),
-      ("keep_names", toJson (keepNames.map toString))]).compress
-    jobs := jobs.push { module := m, source, olean := ← findOLean m, keep := keepAt, keepNames, options := opts, key }
+      ("keep_names", toJson (keepNames.map toString)), ("own", toJson (mods.map toString))]).compress
+    jobs := jobs.push { module := m, source, olean := ← findOLean m, keep := keepAt, keepNames, own := mods, options := opts, key }
   let todo ← jobs.filterM fun j => return !(← (path root j.key).pathExists)
   unless todo.isEmpty do
     IO.eprintln s!"leanblame: copying {todo.size} of {jobs.size} modules with proofs replaced by sorry"
@@ -226,26 +240,25 @@ def make (root : System.FilePath) (env : Environment) (byLib : Array (String × 
       | .error e => errors := errors.push (toString e)
     unless errors.isEmpty do fail ("export failed:\n" ++ "\n".intercalate errors.toList)
   let mut out := #[]
-  let mut missing : NameSet := {}
+  let mut copies := #[]
   for j in jobs do
     let c ← read root j.key
     unless c.module == toString j.module do fail s!"{path root j.key}: a copy of {c.module}, not {j.module}"
-    for n in c.missing do
-      let some n := Syntax.decodeNameLit ("`" ++ n) | fail s!"{path root j.key}: not a name: {n}"
-      missing := missing.insert n
     let some d := env.getModuleIdx? j.module >>= (env.header.moduleData[·.toNat]?)
       | fail s!"module {j.module} was not imported"
     let imports := dedup (d.imports.filterMap fun i => if i.module == `Init then none else some (toString i.module))
-    out := out.push { name := toString j.module, imports, key := j.key, text := mkHash (Sha256.hexOfString c.text) }
-  unless missing.isEmpty do
-    let mut problems := #[]
-    for (n, ci) in own do
-      if missing.contains n then continue
-      for u in keptUses keep n ci do
-        if missing.contains u && moduleName u != moduleName n then
-          problems := problems.push s!"{n} uses {u}, which the copy of {(moduleName u).getD .anonymous} lacks"
-    unless problems.isEmpty do
-      fail ("the sorried copies would not build together:\n" ++ "\n".intercalate (problems.qsort (· < ·)).toList)
+    out := out.push { name := toString j.module, imports, key := j.key, copy := c.hash }
+    copies := copies.push c
+  -- A challenge finds what a piece uses among the pieces it carries.
+  let declared : Std.HashSet String := copies.foldl (fun s c => c.pieces.foldl (·.insertMany ·.declares) s) {}
+  let mut problems := #[]
+  for c in copies do
+    for p in c.pieces do
+      for u in p.uses do
+        unless declared.contains u do
+          problems := problems.push s!"{c.module}: a piece uses {u}, which no copy declares"
+  unless problems.isEmpty do
+    fail ("the sorried copies would not build together:\n" ++ "\n".intercalate (dedup problems).toList)
   return out
 
 end LeanBlame.Sorried

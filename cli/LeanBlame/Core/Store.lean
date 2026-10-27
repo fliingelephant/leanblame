@@ -96,7 +96,7 @@ structure Current where
   deps : Array (String × String)
   requires : Array Require
 
-def Current.schemaId : String := "leanblame.current.2"
+def Current.schemaId : String := "leanblame.current.3"
 
 instance : Lean.ToJson Current where
   toJson c := Lean.Json.mkObj [("schema", Current.schemaId), ("export", c.exportHash),

@@ -111,7 +111,7 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "schema": "leanblame.status.5",
+  "schema": "leanblame.status.6",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
@@ -166,7 +166,7 @@ every record. Viewers display it; they never need another source. With
 | `commit` | the commit the export comes from; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `toolchain`, `deps` | the Lean version, and the commits of git dependencies |
 | `requires` | what the library's lakefile requires: the git URL, commit and subdirectory of each; `git` and `rev` are `null` for a path dependency |
-| `modules` | the library's own modules: the modules each imports directly but `Init`, in its order, and `sorried`, the hash of its sorried copy (the module after its imports), which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
+| `modules` | the library's own modules: the modules each imports directly but `Init`, in its order, and `sorried`, the hash of its sorried copy (the module after its imports, in pieces), which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
 | `standard_axioms` | the axioms every proof may rest on |
 | `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |
@@ -182,3 +182,28 @@ every record. Viewers display it; they never need another source. With
 | `closure_size` | constants hashed into `claim`, proofs excluded |
 | `records` | every record of the records directories, with all its fields, its hash and its path |
 | `untagged_in_library` | untagged declarations of this library that tagged ones use, with those users; tag them so they get their own signer |
+
+## 5. Sorried copies (output of `sorried`)
+
+```json
+{
+  "sha256:…": [
+    { "text": "namespace OpenPhysics", "keep": true, "declares": [], "uses": [] },
+    { "text": "\n\n/-- The energy of a spin chain. -/\ndef energy (s : Chain) : ℝ := …",
+      "keep": false, "declares": ["OpenPhysics.energy"], "uses": ["OpenPhysics.Chain"] },
+    { "text": "\nend OpenPhysics", "keep": true, "declares": [], "uses": [] }
+  ]
+}
+```
+
+One key per hash asked for, as `status --json` lists them under `modules`; the
+pieces of that module's copy, in order ([04-architecture.md](04-architecture.md),
+Sorried copies). Joined, the texts are the module after its imports, proofs
+replaced by `:= sorry`, with a last piece that closes the scopes it leaves open.
+
+| Field | Meaning |
+|-------|---------|
+| `text` | the command, with the comments before it |
+| `keep` | a challenge keeps the piece whatever its theorems need: it is not a declaration, or it is an instance written as one |
+| `declares` | the constants the command added |
+| `uses` | the constants of the library, declared by other pieces, that the command needs |

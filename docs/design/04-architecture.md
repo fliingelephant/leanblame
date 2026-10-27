@@ -45,7 +45,7 @@ Ten commands:
 | `equiv [X...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
 | `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
-| `sorried HASH...` | Print the sorried copies of the last export by the hashes `status --json` lists, as one JSON object: hash to text. |
+| `sorried HASH...` | Print the sorried copies of the last export by the hashes `status --json` lists, as one JSON object: hash to pieces. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ### 2. `records` (git)
@@ -77,25 +77,35 @@ unexpected type are errors.
 
 A comparator challenge must not depend on the library it comes from: it carries
 what its theorems need. `export` copies each module of the library with the
-proofs of its `theorem`s and `lemma`s replaced by `sorry`. A challenge carries
-the copies of its theorems' modules and of the library modules they import, and
-requires what the library's lakefile requires (`requires` in `status --json`).
+proofs of its `theorem`s and `lemma`s replaced by `sorry`, cut into one piece per
+command. A challenge carries the pieces its theorems need, and requires what the
+library's lakefile requires (`requires` in `status --json`).
 
-- A copy is the module after its imports (`status --json` lists them), with an
-  `end` for each namespace or section it leaves open. So a challenge can merge
-  the copies into one file, as lean-eval does: every import that is not a copy,
-  then each copy in a section of its own, after the copies it imports. Text after
-  `#exit` is left out. `prelude` files are an error.
-
+- A copy is the module after its imports (`status --json` lists them), up to its
+  end or `#exit`, then a piece with an `end` for each namespace or section it
+  leaves open. A piece is a command with the comments before it. It lists the
+  constants the command declares, and the constants of the library it uses: those
+  its syntax names (Lean's info trees, as for hover, including the section's
+  `variable`s, which Lean reads again for each declaration) and those in the
+  types and values of what it declares.
+- A challenge for some theorems keeps, of each module its theorems' modules
+  import: the pieces that declare what the theorems' pieces use, what those use,
+  and so on; and every piece that is not a declaration (`open`, `variable`,
+  `namespace`, notation…) or is an instance written as one, since Lean uses those
+  without naming them (a coercion leaves no trace in a term). It merges them into
+  one file, as lean-eval does: every import that is not a module of the library,
+  then each module after the ones it imports, in a section of its own. So its size
+  grows with what the theorems need, not with the library. `prelude` files are an
+  error.
 - A proof stays when a definition's value or any type reaches its theorem, or
   something that proof made (a matcher, an auxiliary lemma). With `sorry` there,
   `sorryAx` would reach every statement that uses the definition, and the
   comparator would refuse every solution.
 - Each copy is elaborated again as `lean` does, against the library's own
   imports, and compared with the module's `.olean`: every constant's kind,
-  universes and type, every definition's value, every kept proof. Any difference
-  stops `export`. So does a kept part that uses something another module's copy
-  lacks: the copies would not build together.
+  universes and type, every definition's value, every kept proof. Any difference,
+  and any error in any command, stops `export`. So does a piece that uses a
+  constant no piece declares: a challenge could not carry it.
 - One `lean` process per module, as many at once as the machine has hardware
   threads. A copy is stored by a key that hashes Lake's hash of everything the
   module's build depends on, the proofs it keeps and the script, so only a module

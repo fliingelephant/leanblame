@@ -32,7 +32,7 @@ commands:
   sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
   sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
   sorried HASH...                        print the library's modules with proofs replaced by
-                                         sorry, by the hashes `status --json` lists
+                                         sorry, in pieces, by the hashes `status --json` lists
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
@@ -121,13 +121,13 @@ def cmdSorried (args : List String) : IO UInt32 := do
   if a.positional.isEmpty then fail "usage: leanblame sorried HASH..."
   let root ← IO.currentDir
   let cur ← Store.readCurrent root
-  let texts ← a.positional.mapM fun h => do
-    let some m := cur.modules.find? (·.text == h)
+  let copies ← a.positional.mapM fun h => do
+    let some m := cur.modules.find? (·.copy == h)
       | fail s!"{h} is no module copy of the last export (`leanblame status --json` lists them)"
     let c ← Sorried.read root m.key
-    unless mkHash (Sha256.hexOfString c.text) == h do fail s!"{Sorried.path root m.key}: its text does not hash to {h}"
-    return (h, Lean.Json.str c.text)
-  IO.println (Lean.Json.mkObj texts.toList).pretty
+    unless c.hash == h do fail s!"{Sorried.path root m.key}: its pieces do not hash to {h}"
+    return (h, Lean.toJson c.pieces)
+  IO.println (Lean.Json.mkObj copies.toList).pretty
   return 0
 
 def cmdEquiv (args : List String) : IO UInt32 := do

@@ -1,7 +1,7 @@
 /-
 The Lean script that makes one module's sorried copy (`LeanBlame.Lean.Sorried`): the module's source
 with the proof of each `theorem`, `lemma` and `example` replaced by `sorry`, except the proofs that
-start at a kept place.
+start at a kept place, cut into one piece per command.
 
 `export` runs it with the library's `lean --run` (it needs the library's environment extensions, as
 `Export.statementScript` does), one process per module, after `Sorried` appends a `main` that calls
@@ -13,14 +13,19 @@ every constant, the value of every definition, and the proofs that were kept. An
 any error while elaborating, is a problem; `export` stops on one. Its definitions live in their own
 namespace so that no library name shadows them.
 
+A piece is a command with the comments before it. It says which constants the command declares, and
+which constants of the library it uses: those its syntax names (Lean's info trees, as for hover), and
+those in the types and values of what it declares. A challenge keeps the pieces its theorems need,
+and every piece that is not a declaration (`open`, `variable`, `namespace`, notation…) or that is
+an instance, since Lean uses those without naming them (a coercion leaves no trace).
+
 Input, a JSON file: `module`, `source`, `olean`, `keep` (`[line, column]` where the declarations
 whose proofs stay begin, as Lean's declaration ranges have them), `keep_names` (their names: their
-proofs are compared too), `options` (the module's Lean options, as Lake gives them), `out`. Output,
-into `out`: `text` (the copy: the module after its imports, ending in a line break, then an `end`
-for each namespace or section it leaves open, so that it can sit in a section of a file that merges
-modules), `problems`,
-and `missing`: the module's constants that the copy lacks (the auxiliary lemmas of proofs that became
-`sorry`), except names that Lean makes again on demand (equation lemmas).
+proofs are compared too), `own` (the library's modules), `options` (the module's Lean options, as
+Lake gives them), `out`. Output, into `out`: `pieces` (the module after its imports, up to its end
+or `#exit`, as `text`, `keep`, `declares`, `uses`; then a piece with an `end` for each namespace or
+section the module leaves open, so that it can sit in a section of a file that merges modules), and
+`problems`.
 -/
 import Lean
 
@@ -40,12 +45,13 @@ structure Input where
   olean : System.FilePath
   keep : Array Pos
   keepNames : Array Name
+  own : Array Name
   options : Options
   out : System.FilePath
 
 def Input.read (path : System.FilePath) : IO Input := do
   let j ← IO.ofExcept (Json.parse (← IO.FS.readFile path))
-  let keys := ["module", "source", "olean", "keep", "keep_names", "options", "out"]
+  let keys := ["module", "source", "olean", "keep", "keep_names", "own", "options", "out"]
   let .obj fields := j | throw (IO.userError s!"{path}: not a JSON object")
   for (k, _) in fields do
     unless keys.contains k do throw (IO.userError s!"{path}: unknown key `{k}`")
@@ -55,10 +61,11 @@ def Input.read (path : System.FilePath) : IO Input := do
     let a ← p.getArrVal? 0 >>= (·.getNat?)
     let b ← p.getArrVal? 1 >>= (·.getNat?)
     return (a, b))
-  let keepNames ← IO.ofExcept ((← get "keep_names").getArr?) >>= (·.mapM fun n => do
-    let s ← IO.ofExcept n.getStr?
-    let some n := Syntax.decodeNameLit ("`" ++ s) | throw (IO.userError s!"not a name: {s}")
-    return n)
+  let names (k : String) : IO (Array Name) := do
+    IO.ofExcept ((← get k).getArr?) >>= (·.mapM fun n => do
+      let s ← IO.ofExcept n.getStr?
+      let some n := Syntax.decodeNameLit ("`" ++ s) | throw (IO.userError s!"not a name: {s}")
+      return n)
   let options ← IO.ofExcept ((← get "options").getObj?) >>= fun o =>
     o.toList.foldlM (init := ({} : Options)) fun opts (k, v) =>
       match v with
@@ -70,7 +77,7 @@ def Input.read (path : System.FilePath) : IO Input := do
         | _, _ => throw (IO.userError s!"option {k}: {v}")
       | _ => throw (IO.userError s!"option {k}: {v}")
   return { module := (← str "module").toName, source := ← str "source", olean := ← str "olean",
-           keep, keepNames, options, out := ← str "out" }
+           keep, keepNames := ← names "keep_names", own := ← names "own", options, out := ← str "out" }
 
 /-- The syntax without source positions, to put where a proof was. -/
 partial def bare : Syntax → Syntax
@@ -105,22 +112,69 @@ partial def strip (keep : Pos → Bool) (fileMap : FileMap) (sorryVal : Syntax) 
     return .node info k (← args.mapM (strip keep fileMap sorryVal))
   | stx => pure stx
 
+/-- A declaration, which a copy may leave out when nothing needs it: `def`, `theorem`, `structure`
+and the like, a `mutual` block, or one of them after `… in`. -/
+partial def cuttable (stx : Syntax) : Bool :=
+  stx.isOfKind ``Parser.Command.declaration || stx.isOfKind ``Parser.Command.mutual ||
+    stx.isOfKind ``Parser.Command.in && cuttable stx[2]
+
+/-- An instance written as one (`instance`, `@[instance]`): Lean finds it by itself, and a coercion
+uses it without naming it. Instances Lean makes (`deriving`, `SizeOf`) are named where used. -/
+partial def writesInstance (stx : Syntax) : Bool :=
+  if stx.isOfKind ``Parser.Command.in then writesInstance stx[2]
+  else stx.isOfKind ``Parser.Command.declaration &&
+    (stx[1].isOfKind ``Parser.Command.instance || (stx[0].find? (·.isOfKind ``Parser.Attr.instance)).isSome)
+
+/-- A command as the loop read it: where its first token starts and its last one ends, whether a
+challenge keeps it whatever it needs, the constants it added, and the constants its syntax names
+(Lean's info trees, as for hover: its own and those of what it elaborated in tasks). -/
+structure Cmd where
+  start : String.Pos.Raw
+  stop : String.Pos.Raw
+  keep : Bool
+  declares : Array Name
+  names : Array Name
+  deriving Inhabited
+
+/-- The constants an info tree names. -/
+def refs (_ : ContextInfo) (info : Info) (acc : Array Name) : Array Name :=
+  match info with
+  | .ofTermInfo ti => acc ++ ti.expr.getUsedConstants
+  | .ofFieldInfo fi => acc.push fi.projName
+  | _ => acc
+
 /-- Lean's own command loop (`Frontend.processCommand`), with `rewrite` between parsing and
-elaborating. -/
-partial def loop (rewrite : Syntax → StateM (Array Range) Syntax) (ranges : IO.Ref (Array Range)) :
+elaborating. Lean starts each command with no messages and no info trees, so each command's go to
+`log` and `cmds` as soon as it is elaborated, with what it elaborated in tasks. -/
+partial def loop (rewrite : Syntax → StateM (Array Range) Syntax) (ranges : IO.Ref (Array Range))
+    (cmds : IO.Ref (Array Cmd)) (known : IO.Ref (Std.HashSet Name)) (log : IO.Ref MessageLog) :
     FrontendM Unit := do
   updateCmdPos
   let cmdState ← getCommandState
   let scope := cmdState.scopes.head!
   let pmctx := { env := cmdState.env, options := scope.opts, currNamespace := scope.currNamespace,
                  openDecls := scope.openDecls }
-  let (cmd, ps, messages) := Parser.parseCommand (← getInputContext) pmctx (← getParserState) cmdState.messages
+  let (cmd, ps, parsed) := Parser.parseCommand (← getInputContext) pmctx (← getParserState) {}
   setParserState ps
-  setMessages messages
+  log.modify (· ++ parsed)
   let (cmd', rs) := (rewrite cmd).run #[]
   ranges.modify (· ++ rs)
   elabCommandAtFrontend cmd'
-  unless Parser.isTerminalCommand cmd do loop rewrite ranges
+  let st ← getCommandState
+  let tasks := (Language.SnapshotTree.mk { diagnostics := .empty }
+    (st.snapshotTasks.extract cmdState.snapshotTasks.size)).getAll
+  log.modify fun l => tasks.foldl (· ++ ·.diagnostics.msgLog) (l ++ st.messages)
+  unless Parser.isTerminalCommand cmd do
+    -- `constants` waits for the proofs elaborated in tasks, and so has what they made.
+    let seen ← known.get
+    let added := st.env.constants.map₂.foldl (init := #[]) fun acc n _ =>
+      if seen.contains n then acc else acc.push n
+    known.set (seen.insertMany added)
+    let names := (st.infoState.trees.toArray ++ tasks.filterMap (·.infoTree?)).foldl (fun acc t => t.foldInfo refs acc) #[]
+    let (some start, some stop) := (cmd.getPos?, cmd.getTailPos?)
+      | throw (IO.userError s!"a command without a position: {cmd}")
+    cmds.modify (·.push { start, stop, keep := !cuttable cmd || writesInstance cmd, declares := added, names })
+    loop rewrite ranges cmds known log
 
 def kindOf : ConstantInfo → String
   | .axiomInfo _ => "axiom" | .defnInfo _ => "def" | .thmInfo _ => "theorem"
@@ -143,16 +197,26 @@ def differs (c o : ConstantInfo) (proofToo : Bool) : Option String :=
     | _, _ => none
 
 /-- The commands that close the scopes left open, innermost first; the last scope is the file's. -/
-def closing (scopes : List Command.Scope) : String :=
-  String.join (scopes.dropLast.map fun s =>
-    if s.header.isEmpty then "end\n" else s!"end {Name.mkSimple s.header}\n")
+def closing (scopes : List Command.Scope) : List String :=
+  scopes.dropLast.map fun s => if s.header.isEmpty then "end" else s!"end {Name.mkSimple s.header}"
 
-/-- The source from `start` to `stop`, with each range (all inside) replaced by `:= sorry`. -/
+/-- One command of the copy, with the comments before it. -/
+structure Piece where
+  text : String
+  keep : Bool
+  declares : Array Name
+  uses : Array Name
+
+instance : ToJson Piece where
+  toJson p := Json.mkObj [("text", p.text), ("keep", p.keep), ("declares", toJson (p.declares.map toString)),
+    ("uses", toJson (p.uses.map toString))]
+
+/-- The source from `start` to `stop`, with each range inside replaced by `:= sorry`. -/
 def replace (input : String) (ranges : Array Range) (start stop : String.Pos.Raw) : String := Id.run do
   let bytes := input.toUTF8
   let mut out := ByteArray.empty
   let mut pos := start.byteIdx
-  for (a, b) in ranges.qsort (·.1.byteIdx < ·.1.byteIdx) do
+  for (a, b) in (ranges.filter fun (a, b) => start ≤ a && b ≤ stop).qsort (·.1.byteIdx < ·.1.byteIdx) do
     out := out ++ bytes.extract pos a.byteIdx ++ ":= sorry".toUTF8
     pos := b.byteIdx
   return String.fromUTF8! (out ++ bytes.extract pos stop.byteIdx)
@@ -177,30 +241,46 @@ def run (i : Input) : IO Json := do
     | .error e => throw (IO.userError e)
   let keep : Std.HashSet Pos := .ofArray i.keep
   let ranges ← IO.mkRef #[]
-  let (_, st) ← ((loop (strip keep.contains ictx.fileMap sorryVal) ranges).run { inputCtx := ictx }).run
+  let cmds ← IO.mkRef #[]
+  let known ← IO.mkRef {}
+  let log ← IO.mkRef {}
+  let (_, st) ← ((loop (strip keep.contains ictx.fileMap sorryVal) ranges cmds known log).run { inputCtx := ictx }).run
     { commandState := Command.mkState env msgs opts, parserState := ps, cmdPos := ps.pos }
-  -- Errors of the commands, and of the proofs elaborated in tasks.
-  let tasks := Language.SnapshotTree.mk { diagnostics := .empty } st.commandState.snapshotTasks
-  let messages := tasks.getAll.foldl (· ++ ·.diagnostics.msgLog) st.commandState.messages
   let mut problems := #[]
-  for m in messages.toList do
+  for m in (← log.get).toList do
     if m.severity == .error then problems := problems.push (← m.toString)
   let (data, _) ← readModuleData i.olean
   let original : Std.HashMap Name ConstantInfo := .ofList (data.constNames.zip data.constants).toList
   let keepNames : Std.HashSet Name := .ofArray i.keepNames
   let copy := st.commandState.env
-  let mut present : Std.HashSet Name := {}
   for (n, c) in copy.constants.map₂.toList do
-    present := present.insert n
     match original[n]? with
     | none => problems := problems.push s!"{n} is in the copy but not in the library"
     | some o => if let some why := differs c o (keepNames.contains n) then problems := problems.push s!"{n}: {why}"
-  let missing := data.constNames.filter fun n => !present.contains n && !isReservedName copy n
-  -- From the end of the imports to the command that ended the file: the end, or `#exit`.
-  let body := replace input (← ranges.get) ps.pos st.cmdPos
-  let body := if body.isEmpty || body.endsWith "\n" then body else body ++ "\n"
-  return Json.mkObj [("text", Json.str (body ++ closing st.commandState.scopes)),
-    ("problems", toJson problems), ("missing", toJson (missing.map toString))]
+  let cmds ← cmds.get
+  let declared : Std.HashSet Name := cmds.foldl (·.insertMany ·.declares) {}
+  let own : Std.HashSet Name := .ofArray i.own
+  let ofLibrary (n : Name) : Bool := !isReservedName copy n &&
+    (declared.contains n || ((copy.getModuleIdxFor? n).bind (copy.header.moduleNames[·.toNat]?)).any own.contains)
+  let rs ← ranges.get
+  let mut pieces := #[]
+  for c in cmds, k in [:cmds.size] do
+    let mine : Std.HashSet Name := .ofArray c.declares
+    let terms := c.declares.flatMap fun n => match copy.find? n with
+      | some ci => ci.type.getUsedConstants ++ ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
+      | none => #[]
+    let uses := (c.names ++ terms).filter fun n => !mine.contains n && ofLibrary n
+    -- From the end of the command before, so that the comments before a command go with it.
+    let start := if k == 0 then c.start else cmds[k - 1]!.stop
+    pieces := pieces.push {
+      text := replace input rs start c.stop
+      keep := c.keep
+      declares := c.declares.qsort (·.toString < ·.toString)
+      uses := (uses.qsort (·.toString < ·.toString)).eraseReps : Piece }
+  let close := closing st.commandState.scopes
+  unless close.isEmpty do
+    pieces := pieces.push { text := "\n" ++ "\n".intercalate close, keep := true, declares := #[], uses := #[] }
+  return Json.mkObj [("pieces", toJson pieces), ("problems", toJson problems)]
 
 /-- Imports run the imported modules' initializers, as `lean` does for a file it compiles. -/
 unsafe def main (args : List String) : IO UInt32 := do

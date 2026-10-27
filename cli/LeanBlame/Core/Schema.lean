@@ -522,25 +522,25 @@ structure StatusDecl where
   deriving Inhabited, Repr
 
 /-- One of the library's own modules: the modules it imports (but `Init`), and its sorried copy
-(docs/design/04-architecture.md, "Sorried copies"): `text` hashes the copy, `key` what made it; the
-store keeps the copy under its key. -/
+(docs/design/04-architecture.md, "Sorried copies"): `copy` hashes the copy's pieces, `key` what made
+it; the store keeps the copy under its key. -/
 structure OwnModule where
   name : String
   imports : Array String
   key : String
-  text : String
+  copy : String
   deriving Inhabited, Repr
 
 def OwnModule.fromJson? (j : Json) : Except String OwnModule := do
-  let o ← JsonObj.read j "module" ["name", "imports", "key", "text"]
+  let o ← JsonObj.read j "module" ["name", "imports", "key", "copy"]
   let m : OwnModule := { name := ← o.get String "name", imports := ← o.get (Array String) "imports",
-                         key := ← o.get String "key", text := ← o.get String "text" }
-  for (k, h) in [("key", m.key), ("text", m.text)] do
+                         key := ← o.get String "key", copy := ← o.get String "copy" }
+  for (k, h) in [("key", m.key), ("copy", m.copy)] do
     unless isHash h do throw s!"module {m.name}.{k}: `{h}` is not a sha256: hash"
   return m
 
 instance : ToJson OwnModule where
-  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("key", m.key), ("text", m.text)]
+  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("key", m.key), ("copy", m.copy)]
 
 /-- A dependency the library's lakefile requires (Lake: a package of `lake-manifest.json` that is
 not inherited): its git URL, commit and subdirectory; `git` and `rev` are `none` for a path
@@ -584,7 +584,7 @@ structure StatusReport where
   untaggedInLibrary : Array (String × Array String)
   deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.5"
+def StatusReport.schemaId : String := "leanblame.status.6"
 
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
@@ -610,7 +610,7 @@ instance : ToJson StatusReport where
     ("export", s.exportHash), ("boundary", s.boundary), ("generated", s.generated.toIso),
     ("requires", toJson s.requires),
     ("modules", Json.arr (s.modules.map fun m =>
-      Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("sorried", m.text)])),
+      Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("sorried", m.copy)])),
     ("standard_axioms", toJson s.standard),
     ("declarations", Json.mkObj (s.declarations.toList.map fun d => (d.decl.name, toJson d))),
     ("records", toJson s.records),

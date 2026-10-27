@@ -5,6 +5,9 @@ noncomputable section
 
 namespace Sample
 
+-- Names `Point` and declares nothing: a challenge keeps this line, and so `Point`.
+variable (q : Point)
+
 /-- The energy of a point: the energy of a chain as long as the point's norm. -/
 @[trusted] def pointEnergy (p : Point) : Nat := energy p.norm
 
