@@ -1,7 +1,8 @@
 /-
 Sorried copies (docs/design/04-architecture.md, "Sorried copies"): each of the library's modules with
-the proofs of its theorems replaced by `sorry`. A comparator challenge for some theorems carries the
-copies of the modules they need and requires what the library requires, not the library.
+the proofs of its theorems replaced by `sorry`, without its imports, which `status` lists. A
+comparator challenge for some theorems carries the copies of the modules they need, merged into one
+file, and requires what the library requires, not the library.
 
 A proof stays when the type of a library constant or the value of a library definition reaches its
 theorem, or something its elaboration made, such as a matcher (`kept`): with `sorry` there, `sorryAx`
@@ -75,8 +76,9 @@ def keptUses (keep : NameSet) (n : Name) (ci : ConstantInfo) : Array Name :=
   let value := if ci.isTheorem && !keep.contains n then none else ci.value? (allowOpaque := true)
   ci.type.getUsedConstants ++ (value.map (·.getUsedConstants)).getD #[]
 
-/-- A stored copy: the module's source with proofs replaced by `sorry`, and the module's constants
-that the copy lacks, other than those Lean makes again on demand. -/
+/-- A stored copy: the module after its imports, with proofs replaced by `sorry` (and an `end` for
+each scope it leaves open); and the module's constants that the copy lacks, other than those Lean
+makes again on demand. -/
 structure Copy where
   module : String
   text : String
@@ -185,7 +187,6 @@ def make (root : System.FilePath) (env : Environment) (byLib : Array (String × 
     (own : Std.HashMap Name ConstantInfo) (srcPath : SearchPath) (sysroot : System.FilePath)
     (leanPath : String) : IO (Array OwnModule) := do
   let mods := dedup (byLib.flatMap (·.2))
-  let ownMods : NameSet := mods.foldl (·.insert ·) {}
   let keep := kept own
   let moduleName (n : Name) : Option Name :=
     (env.getModuleIdxFor? n).bind fun i => env.header.modules[i.toNat]?.map (·.module)
@@ -232,9 +233,9 @@ def make (root : System.FilePath) (env : Environment) (byLib : Array (String × 
     for n in c.missing do
       let some n := Syntax.decodeNameLit ("`" ++ n) | fail s!"{path root j.key}: not a name: {n}"
       missing := missing.insert n
-    let imports := match env.getModuleIdx? j.module >>= (env.header.moduleData[·.toNat]?) with
-      | some d => dedup (d.imports.filterMap fun i => if ownMods.contains i.module then some (toString i.module) else none)
-      | none => #[]
+    let some d := env.getModuleIdx? j.module >>= (env.header.moduleData[·.toNat]?)
+      | fail s!"module {j.module} was not imported"
+    let imports := dedup (d.imports.filterMap fun i => if i.module == `Init then none else some (toString i.module))
     out := out.push { name := toString j.module, imports, key := j.key, text := mkHash (Sha256.hexOfString c.text) }
   unless missing.isEmpty do
     let mut problems := #[]

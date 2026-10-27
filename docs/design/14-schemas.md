@@ -122,7 +122,7 @@ every record. Viewers display it; they never need another source. With
   "generated": "2026-10-23T15:00:00Z",
   "modules": [
     { "name": "OpenPhysics", "imports": ["OpenPhysics.Ising"], "sorried": "sha256:…" },
-    { "name": "OpenPhysics.Ising", "imports": [], "sorried": "sha256:…" }
+    { "name": "OpenPhysics.Ising", "imports": ["Mathlib.Analysis.SpecialFunctions.Exp"], "sorried": "sha256:…" }
   ],
   "standard_axioms": ["propext", "Classical.choice", "Quot.sound"],
   "declarations": {
@@ -166,7 +166,7 @@ every record. Viewers display it; they never need another source. With
 | `commit` | the commit the export comes from; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `toolchain`, `deps` | the Lean version, and the commits of git dependencies |
 | `requires` | what the library's lakefile requires: the git URL, commit and subdirectory of each; `git` and `rev` are `null` for a path dependency |
-| `modules` | the library's own modules: the own modules each imports directly, and `sorried`, the hash of its sorried copy, which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
+| `modules` | the library's own modules: the modules each imports directly but `Init`, in its order, and `sorried`, the hash of its sorried copy (the module after its imports), which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
 | `standard_axioms` | the axioms every proof may rest on |
 | `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |

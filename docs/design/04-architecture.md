@@ -81,6 +81,12 @@ proofs of its `theorem`s and `lemma`s replaced by `sorry`. A challenge carries
 the copies of its theorems' modules and of the library modules they import, and
 requires what the library's lakefile requires (`requires` in `status --json`).
 
+- A copy is the module after its imports (`status --json` lists them), with an
+  `end` for each namespace or section it leaves open. So a challenge can merge
+  the copies into one file, as lean-eval does: every import that is not a copy,
+  then each copy in a section of its own, after the copies it imports. Text after
+  `#exit` is left out. `prelude` files are an error.
+
 - A proof stays when a definition's value or any type reaches its theorem, or
   something that proof made (a matcher, an auxiliary lemma). With `sorry` there,
   `sorryAx` would reach every statement that uses the definition, and the

@@ -521,7 +521,7 @@ structure StatusDecl where
   closureSize : Nat
   deriving Inhabited, Repr
 
-/-- One of the library's own modules: the own modules it imports directly, and its sorried copy
+/-- One of the library's own modules: the modules it imports (but `Init`), and its sorried copy
 (docs/design/04-architecture.md, "Sorried copies"): `text` hashes the copy, `key` what made it; the
 store keeps the copy under its key. -/
 structure OwnModule where

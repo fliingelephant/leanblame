@@ -6,8 +6,8 @@
 # Copies the sample library to a scratch directory, makes it a git repository,
 # and walks through: init -> export -> sign (records name declarations by id) ->
 # status (valid; --json complete, nothing on stderr) -> sorried copies (proofs
-# replaced by sorry but those a definition uses; they build without the
-# library; copied again only where a module changed) -> release -> edit a body ->
+# replaced by sorry but those a definition uses; merged into one file, they build
+# without the library; copied again only where a module changed) -> release -> edit a body ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
 # causes (untagged, own-text, dep-spec) -> withdraw -> status (withdrawn) ->
@@ -162,7 +162,7 @@ modules = {m["name"]: m for m in s["modules"]}
 assert sorted(modules) == ["Sample", "Sample.Basic", "Sample.Energy"], s["modules"]
 assert all(set(m) == {"name", "imports", "sorried"} and m["sorried"].startswith("sha256:") for m in s["modules"])
 assert modules["Sample"]["imports"] == ["Sample.Basic", "Sample.Energy"], modules["Sample"]
-assert modules["Sample.Energy"]["imports"] == ["Sample.Basic"] and modules["Sample.Basic"]["imports"] == []
+assert modules["Sample.Energy"]["imports"] == ["Sample.Basic"] and modules["Sample.Basic"]["imports"] == ["LeanBlame.Attr"]
 assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
 assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
 keys = {"id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
@@ -208,32 +208,49 @@ echo "== sorried: the library's modules with proofs replaced by sorry"
 sorried_of() { python3 -c 'import json, sys; print(next(m["sorried"] for m in json.load(open(sys.argv[1]))["modules"] if m["name"] == sys.argv[2]))' "$logs/status.json" "$1"; }
 run sorried "$(sorried_of Sample)" "$(sorried_of Sample.Basic)" "$(sorried_of Sample.Energy)"
 copies="$work-copies"
-mkdir -p "$copies/Sample"
+mkdir -p "$copies"
 printf '%s' "$out" > "$logs/sorried.json"
-python3 - "$logs/sorried.json" "$copies" "$(sorried_of Sample)" "$(sorried_of Sample.Basic)" "$(sorried_of Sample.Energy)" <<'PY' \
+python3 - "$logs/sorried.json" "$logs/status.json" "$copies" <<'PY' \
   || fail "sorried: the copies are not the modules with proofs replaced by sorry"
 import hashlib, json, sys
-printed, out, root, basic, energy = sys.argv[1:]
+printed, status, out = sys.argv[1:]
 texts = json.load(open(printed))
-assert set(texts) == {root, basic, energy}, set(texts)
+modules = {m["name"]: m for m in json.load(open(status))["modules"]}
+assert set(texts) == {m["sorried"] for m in modules.values()}, set(texts)
 for h, t in texts.items():
     assert h == "sha256:" + hashlib.sha256(t.encode()).hexdigest(), h
-assert texts[root] == open("Sample.lean").read()
-assert texts[basic] == open("Sample/Basic.lean").read(), "a definition uses two_pos, so its proof stays"
-e = texts[energy]
+text = {name: texts[m["sorried"]] for name, m in modules.items()}
+assert text["Sample"] == "", "a module of imports only"
+basic = open("Sample/Basic.lean").read()
+assert text["Sample.Basic"] == basic[basic.index("namespace Sample"):], "a definition uses two_pos, so its proof stays"
+e = text["Sample.Energy"]
+assert e.startswith("noncomputable section\n"), "the copy starts after the imports"
+assert e.endswith("\nend Sample\nend\n"), "the scopes left open are closed, innermost first"
 for kept in ["theorem second_site", "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry",
              "axiom energy_pos", "theorem one_site_pos : 0 < energy 1 := sorry"]:
     assert kept in e, (kept, e)
 assert "rfl" not in e and "energy_pos 0" not in e and e.count(":= sorry") == 3, e
 assert "(⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in e, "a proof inside a statement stays"
-for path, h in [("Sample.lean", root), ("Sample/Basic.lean", basic), ("Sample/Energy.lean", energy)]:
-    open(f"{out}/{path}", "w").write(texts[h])
+# Merged as a comparator package merges them: every import that is not a copy, then each copy in a
+# section of its own, after the copies it imports.
+order = []
+def visit(name):
+    if name in modules and name not in order:
+        for i in modules[name]["imports"]:
+            visit(i)
+        order.append(name)
+for name in sorted(modules):
+    visit(name)
+imports = [i for name in order for i in modules[name]["imports"] if i not in modules]
+assert imports == ["LeanBlame.Attr"], imports
+merged = "".join(f"import {i}\n" for i in imports) + "".join(f"\nsection\n{text[n]}end\n" for n in order)
+open(f"{out}/ChallengeDeps.lean", "w").write(merged)
 PY
-ok "sorried prints each copy by its hash: three theorem proofs are sorry; two_pos keeps its proof"
+ok "sorried prints each copy by its hash, without its imports, open scopes closed; three theorem proofs are sorry; two_pos keeps its proof"
 cp lean-toolchain "$copies/"
-printf 'name = "copies"\ndefaultTargets = ["Sample"]\n\n[[require]]\nname = "leanblame"\npath = "%s"\n\n[[lean_lib]]\nname = "Sample"\n' "$cli" > "$copies/lakefile.toml"
-(cd "$copies" && lake build) >"$logs/copies.log" 2>&1 || fail "the copies do not build without the library: $(cat "$logs/copies.log")"
-ok "the copies build on their own"
+printf 'name = "copies"\ndefaultTargets = ["ChallengeDeps"]\n\n[[require]]\nname = "leanblame"\npath = "%s"\n\n[[lean_lib]]\nname = "ChallengeDeps"\n' "$cli" > "$copies/lakefile.toml"
+(cd "$copies" && lake build) >"$logs/copies.log" 2>&1 || fail "the merged copies do not build without the library: $(cat "$logs/copies.log")"
+ok "the copies, merged into one file, build on their own"
 must_fail "is no module copy of the last export" -- "$lb" sorried "sha256:$(printf '0%.0s' {1..64})"
 ok "sorried refuses a hash the last export does not list"
 

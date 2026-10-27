@@ -1,5 +1,8 @@
 import Sample.Basic
 
+-- Left open, like the namespace: the sorried copy closes both.
+noncomputable section
+
 namespace Sample
 
 /-- The energy of a point: the energy of a chain as long as the point's norm. -/
@@ -18,5 +21,3 @@ namespace Sample
 
 /-- A one-site chain has positive energy. Proven from the postulate `energy_pos`. -/
 @[trusted] theorem one_site_pos : 0 < energy 1 := energy_pos 0
-
-end Sample

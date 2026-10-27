@@ -16,9 +16,11 @@ namespace so that no library name shadows them.
 Input, a JSON file: `module`, `source`, `olean`, `keep` (`[line, column]` where the declarations
 whose proofs stay begin, as Lean's declaration ranges have them), `keep_names` (their names: their
 proofs are compared too), `options` (the module's Lean options, as Lake gives them), `out`. Output,
-into `out`: `text` (the copy), `problems`, and `missing`: the module's constants that the copy lacks
-(the auxiliary lemmas of proofs that became `sorry`), except names that Lean makes again on demand
-(equation lemmas).
+into `out`: `text` (the copy: the module after its imports, ending in a line break, then an `end`
+for each namespace or section it leaves open, so that it can sit in a section of a file that merges
+modules), `problems`,
+and `missing`: the module's constants that the copy lacks (the auxiliary lemmas of proofs that became
+`sorry`), except names that Lean makes again on demand (equation lemmas).
 -/
 import Lean
 
@@ -140,15 +142,20 @@ def differs (c o : ConstantInfo) (proofToo : Bool) : Option String :=
       then some "its constructors differ" else none
     | _, _ => none
 
-/-- The source with each range replaced by `:= sorry`. -/
-def replace (input : String) (ranges : Array Range) : String := Id.run do
+/-- The commands that close the scopes left open, innermost first; the last scope is the file's. -/
+def closing (scopes : List Command.Scope) : String :=
+  String.join (scopes.dropLast.map fun s =>
+    if s.header.isEmpty then "end\n" else s!"end {Name.mkSimple s.header}\n")
+
+/-- The source from `start` to `stop`, with each range (all inside) replaced by `:= sorry`. -/
+def replace (input : String) (ranges : Array Range) (start stop : String.Pos.Raw) : String := Id.run do
   let bytes := input.toUTF8
   let mut out := ByteArray.empty
-  let mut pos := 0
+  let mut pos := start.byteIdx
   for (a, b) in ranges.qsort (·.1.byteIdx < ·.1.byteIdx) do
     out := out ++ bytes.extract pos a.byteIdx ++ ":= sorry".toUTF8
     pos := b.byteIdx
-  return String.fromUTF8! (out ++ bytes.extract pos bytes.size)
+  return String.fromUTF8! (out ++ bytes.extract pos stop.byteIdx)
 
 def run (i : Input) : IO Json := do
   let input ← IO.FS.readFile i.source
@@ -156,6 +163,9 @@ def run (i : Input) : IO Json := do
   let (header, ps, msgs) ← Parser.parseHeader ictx
   if HeaderSyntax.isModule header then
     throw (IO.userError s!"{i.module}: files of the module system are not supported yet")
+  -- Merged with other modules, it would import `Init` too.
+  unless header.raw[1].isNone do
+    throw (IO.userError s!"{i.module}: `prelude` files are not supported")
   -- As `lean` elaborates a file (`runFrontend`): a theorem's proof in a task of its own, which
   -- also decides the names of what the proof makes. Linters only print.
   let opts := Elab.async.setIfNotSet i.options true |>.setBool `linter.all false
@@ -186,7 +196,10 @@ def run (i : Input) : IO Json := do
     | none => problems := problems.push s!"{n} is in the copy but not in the library"
     | some o => if let some why := differs c o (keepNames.contains n) then problems := problems.push s!"{n}: {why}"
   let missing := data.constNames.filter fun n => !present.contains n && !isReservedName copy n
-  return Json.mkObj [("text", Json.str (replace input (← ranges.get))),
+  -- From the end of the imports to the command that ended the file: the end, or `#exit`.
+  let body := replace input (← ranges.get) ps.pos st.cmdPos
+  let body := if body.isEmpty || body.endsWith "\n" then body else body ++ "\n"
+  return Json.mkObj [("text", Json.str (body ++ closing st.commandState.scopes)),
     ("problems", toJson problems), ("missing", toJson (missing.map toString))]
 
 /-- Imports run the imported modules' initializers, as `lean` does for a file it compiles. -/
