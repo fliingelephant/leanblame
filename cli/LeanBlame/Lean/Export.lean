@@ -268,10 +268,13 @@ def segments (c : Name) : MetaM Json := do
   let code ← tagCodeInfos ctx infos (TaggedText.prettyTagged fmt (w := 100))
   return Json.arr (flatten none code #[])
 
-/-- `pp.tagAppFns`: the head of an application gets its own tag, so it becomes a segment. -/
+/-- `pp.tagAppFns`: the head of an application gets its own tag, so it becomes a segment. `plain`
+is for Lean to read again (a comparator challenge restates theorems with it): no notation, no field
+notation, and coercions as the functions they are, since `↑x` alone may not say its target. -/
 def statement (c : Name) : MetaM Json := do
   let pretty (o : Options) := o.setBool `pp.tagAppFns true
   let plain (o : Options) := pretty o |>.setBool `pp.notation false |>.setBool `pp.fieldNotation false
+    |>.setBool `pp.coercions false
   let under (f : Options → Options) (x : MetaM Json) : MetaM Json :=
     withTheReader Core.Context (fun ctx => { ctx with options := f ctx.options }) x
   return Json.mkObj [("pretty", ← under pretty (segments c)), ("plain", ← under plain (segments c))]

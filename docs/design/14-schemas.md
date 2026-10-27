@@ -45,7 +45,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
-| `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` with notation off; a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
+| `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` for the assistant to read again (notation off, coercions as the functions they are); a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
 
 ## 2. Record (storage, TOML)
 
