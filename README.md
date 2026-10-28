@@ -94,8 +94,8 @@ Records are TOML files in `records/`, named by the SHA-256 of their bytes,
 never edited. They name declarations by id, so a sign-off follows a rename.
 `leanblame.toml` sets the policy, every key required: `records` directories,
 `exclude` (records the library refuses to count), `required_signers`,
-`allowed_signers`. From the terminal, `sign` writes `local:` signer ids; a sign
-server with login-backed ids is not built yet.
+`allowed_signers`. From the terminal, `sign` writes `local:` signer ids; a service that
+writes records with login-backed ids (OpenVouch) is not built yet.
 
 `.leanblame/` holds the object store (exports, boundary lists, graphs, proofs, manifests). It is
 local and ignored by git.
