@@ -118,11 +118,18 @@ def moduleOf (env : Environment) (n : Name) : Except String Name :=
     | none => .error s!"{n}: no module {idx}"
   | none => .error s!"{n} is in no imported module"
 
-/-- The `@[trusted]` declarations, own and imported, with their ids and docstrings; and the problems. -/
+/-- The `@[trusted]` declarations, tagged in any module, own or imported, with their ids and
+docstrings; and the problems. Two modules that do not import each other can tag one declaration;
+that is refused here. -/
 def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
   let mut tags := #[]
   let mut errors := #[]
-  for (n, id) in (trustedDecls env).qsort (·.1.cmp ·.1 == .lt) do
+  let mut taggedIn : NameMap Name := {}
+  for (m, t) in (LeanBlame.tags env).qsort (·.2.decl.cmp ·.2.decl == .lt) do
+    let (n, id) := (t.decl, t.id)
+    if let some m' := taggedIn.find? n then
+      errors := errors.push s!"{n}: tagged in {m'} and in {m}; a declaration has one tag"; continue
+    taggedIn := taggedIn.insert n m
     let some doc ← findSimpleDocString? env n
       | errors := errors.push s!"{n}: tagged declarations need a docstring (the informal text)"; continue
     let informal := normalizeInformal doc

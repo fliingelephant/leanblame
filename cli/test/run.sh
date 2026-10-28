@@ -20,7 +20,10 @@
 # change proven (evidence shown by status, the record carries the proof, valid),
 # one that is not definitional, an own-body change refused -> ids, in another
 # copy made after the first signoff: a rename keeps the id and the history (diff
-# matches it by id), blame by id, a new id is a new declaration (diff: added and removed), a shared id and a malformed one refused.
+# matches it by id), blame by id, a new id is a new declaration (diff: added and removed), a shared id and a malformed one refused
+# -> tags written after the fact, `attribute [trusted] Name` in a library of their own: id writes
+# into the attribute, a second tag refused, a rename with a deprecated alias followed with the id
+# kept, a rename without one a build error.
 # Before the first export, `id` writes the ids (export refuses a tag without
 # one); after the first body edit, status fails out loud when a signed graph is
 # missing or broken. Also out loud: export outside git, sign without --signer, a
@@ -772,6 +775,61 @@ edit Sample/Energy.lean "s/$(id_of Sample.pointEnergy)/x/"
 must_fail "the id must be a UUID" -- "$lb" export
 git checkout -q -- Sample
 ok "a malformed id is a build error"
+
+echo "== tags written after the fact, in a library of their own"
+# As an instance tags a library it does not own: `attribute [trusted] Name` in a library of its own.
+printf '\n[[lean_lib]]\nname = "Tags"\n' >> lakefile.toml
+printf 'import Sample\n\nattribute [trusted] Sample.double\n' > Tags.lean
+commit "tags in a library of their own"
+libs=(--lib Sample --lib Tags)
+must_fail "Sample.double: tagged without an id" -- "$lb" export "${libs[@]}"
+ok "export refuses a tag written after the fact without an id"
+run id "${libs[@]}"
+double_id="$(awk '$2 == "Sample.double" {print $1}' <<<"$out")"
+[[ -n "$double_id" && "$(wc -l <<<"$out")" -eq 1 ]] || fail "id, attribute: want one new id, for Sample.double: $out"
+grep -qxF "attribute [trusted \"$double_id\"] Sample.double" Tags.lean || fail "id, attribute: $(cat Tags.lean)"
+ok "id writes the id into the attribute command, in the library that tags"
+commit "tags: an id"
+"$lb" export "${libs[@]}" >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export with Tags"; }
+run status --json
+python3 - "$out" "$double_id" <<'PY' || fail "tags: $out"
+import json, sys
+d = {x["name"]: x for x in json.loads(sys.argv[1])["declarations"]}
+t = d["Sample.double"]
+assert t["id"] == sys.argv[2] and t["state"] == "unsigned", t
+PY
+ok "a declaration tagged from another library is on the boundary list, with its id"
+printf 'attribute [trusted] Sample.energy\n' >> Tags.lean
+must_fail "Sample.energy\` is already tagged" -- "$lb" export "${libs[@]}"
+git checkout -q -- Tags.lean
+ok "a second tag on one declaration is a build error"
+python3 - <<'PY'
+p = "Sample/Basic.lean"
+s = open(p).read()
+s = s.replace("def double (n : Nat) : Nat := n + n", "def twice (n : Nat) : Nat := n + n\n\n"
+  "/-- Twice a natural number. -/\n@[deprecated twice (since := \"2026-10-28\")] def double := @twice", 1)
+open(p, "w").write(s.replace(":= double n", ":= twice n"))
+PY
+commit "double renamed twice, with a deprecated alias"
+(lake build Tags 2>&1 || true) | grep -q "deprecated alias of \`Sample.twice\`" || fail "rename: no warning in the build of Tags"
+"$lb" export "${libs[@]}" >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export, rename"; }
+run status --json
+python3 - "$out" "$double_id" <<'PY' || fail "rename with an alias: $out"
+import json, sys
+d = {x["name"]: x for x in json.loads(sys.argv[1])["declarations"]}
+assert "Sample.double" not in d, d.keys()
+assert d["Sample.twice"]["id"] == sys.argv[2], d["Sample.twice"]
+PY
+ok "a rename marked by a deprecated alias keeps the tag and its id, with a warning to update the name"
+python3 - <<'PY'
+p = "Sample/Basic.lean"
+s = open(p).read()
+s = s.replace('\n\n/-- Twice a natural number. -/\n@[deprecated twice (since := "2026-10-28")] def double := @twice', "", 1)
+open(p, "w").write(s)
+PY
+commit "the alias removed"
+must_fail "Tags.lean" "Unknown constant \`Sample.double\`" -- "$lb" export "${libs[@]}"
+ok "a rename without an alias stops the build at the tag"
 
 rm -rf "$work" "$logs"
 echo "PASS ($pass checks)"

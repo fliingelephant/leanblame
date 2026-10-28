@@ -1,12 +1,12 @@
 /-
-`leanblame id [--lib NAME]...`: give each `@[trusted]` declaration of the library that has no id a new
-one, written into its source as `@[trusted "id"]` (docs/design/02-concepts.md, "Id"). An id is a
-random UUID, version 4. It is never hashed, so writing one changes no claim. Imported libraries are
-not touched.
+`leanblame id [--lib NAME]...`: give each tag written in the library without an id a new one,
+written into its source just after `trusted`: `@[trusted "id"]` on a declaration, or `attribute
+[trusted "id"] Name` for one tagged after the fact, also a declaration of another library
+(docs/design/02-concepts.md, "Id"). An id is a random UUID, version 4. It is never hashed, so writing
+one changes no claim. Tags written in imported libraries are not touched.
 
-The attribute is found through Lean's declaration ranges: between the start of the declaration
-(its docstring) and its name, outside comments and string literals, inside `@[…]`. A tag added
-later by `attribute [trusted] X` is not there; the command prints the id to write by hand.
+Where to write is where the attribute recorded that `trusted` ends (`Tag.pos`), in the module that
+wrote the tag; the library was just built from that source.
 -/
 import LeanBlame.Lean.Export
 
@@ -21,47 +21,6 @@ def newId : IO String := do
   let cs := (Sha256.toHex b).toList
   let group (start len : Nat) := String.ofList ((cs.drop start).take len)
   return s!"{group 0 8}-{group 8 4}-{group 12 4}-{group 16 4}-{group 20 12}"
-
-/-- The index after the block comment that opens at `i` (docstrings too); comments nest. -/
-def skipComment (cs : Array Char) (i : Nat) : Nat := Id.run do
-  let mut j := i + 2
-  let mut depth := 1
-  while j < cs.size && depth > 0 do
-    if cs[j]! == '/' && cs[j + 1]? == some '-' then depth := depth + 1; j := j + 2
-    else if cs[j]! == '-' && cs[j + 1]? == some '/' then depth := depth - 1; j := j + 2
-    else j := j + 1
-  return j
-
-/-- The index after the string literal that opens at `i`. -/
-def skipString (cs : Array Char) (i : Nat) : Nat := Id.run do
-  let mut j := i + 1
-  while j < cs.size && cs[j]! != '"' do
-    j := j + if cs[j]! == '\\' then 2 else 1
-  return j + 1
-
-/-- The index just after the attribute name `trusted` inside an `@[…]` between `start` and `stop`,
-outside comments and string literals. -/
-def findTrusted (cs : Array Char) (start stop : Nat) : Option Nat := Id.run do
-  let mut i := start
-  -- `[` nesting inside `@[…]`; 0 outside.
-  let mut depth := 0
-  while i < stop do
-    let c := cs[i]!
-    let next := cs[i + 1]?
-    if c == '/' && next == some '-' then i := skipComment cs i
-    else if c == '-' && next == some '-' then
-      while i < stop && cs[i]! != '\n' do i := i + 1
-    else if c == '"' then i := skipString cs i
-    else if c == '@' && next == some '[' then depth := 1; i := i + 2
-    else if depth > 0 && c == '[' then depth := depth + 1; i := i + 1
-    else if depth > 0 && c == ']' then depth := depth - 1; i := i + 1
-    else if depth > 0 && isIdFirst c then
-      let mut j := i + 1
-      while j < stop && (isIdRest cs[j]! || cs[j]! == '.') do j := j + 1
-      if String.ofList (cs.extract i j).toList == "trusted" then return some j
-      i := j
-    else i := i + 1
-  return none
 
 /-- The character index of `pos` (line from 1, column in characters from 0) in `cs`. -/
 def offsetOf (cs : Array Char) (pos : Position) : Nat := Id.run do
@@ -85,8 +44,7 @@ def insertAll (cs : Array Char) (offsets : Array Nat) (texts : Array String) : S
 def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
   let l ← Export.load root libsGiven
   let own : NameSet := l.mods.foldl (·.insert ·) {}
-  let missing ← (trustedDecls l.env).filterM fun (n, id) => do
-    return id.isNone && own.contains (← IO.ofExcept (Export.moduleOf l.env n))
+  let missing := (tags l.env).filter fun (m, t) => t.id.isNone && own.contains m
   if missing.isEmpty then
     IO.eprintln "leanblame: every tagged declaration of this library has an id"
     return 0
@@ -95,19 +53,20 @@ def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
   let mut edits : Std.HashMap System.FilePath (Array (Name × Nat × String)) := {}
   let mut texts : Std.HashMap System.FilePath (Array Char) := {}
   let mut problems := #[]
-  for (n, _) in missing.qsort (·.1.cmp ·.1 == .lt) do
-    let id ← newId
-    let mod ← IO.ofExcept (Export.moduleOf l.env n)
-    let some file ← Lean.SearchPath.findWithExt l.srcPath "lean" mod
-      | problems := problems.push s!"{n}: cannot find the source of {mod}; write @[trusted \"{id}\"] by hand"
-    let some r := Sorried.declRange? l.env n
-      | problems := problems.push s!"{n}: Lean has no source position for it; write @[trusted \"{id}\"] by hand"
+  for (m, t) in missing.qsort (·.2.decl.cmp ·.2.decl == .lt) do
+    let (n, id) := (t.decl, ← newId)
+    let some file ← Lean.SearchPath.findWithExt l.srcPath "lean" m
+      | problems := problems.push s!"{n}: cannot find the source of {m}; write trusted \"{id}\" by hand"
+    let some pos := t.pos
+      | problems := problems.push s!"{n}: its tag in {m} has no source position; write trusted \"{id}\" by hand"
     let cs ← match texts[file]? with
       | some cs => pure cs
       | none => pure (← IO.FS.readFile file).toList.toArray
     texts := texts.insert file cs
-    let some k := findTrusted cs (offsetOf cs r.range.pos) (offsetOf cs r.selectionRange.pos)
-      | problems := problems.push s!"{n}: no @[trusted] at {shown file}:{r.range.pos.line}; where it is tagged, write: trusted \"{id}\""
+    let k := offsetOf cs pos
+    unless k ≥ 7 && String.ofList (cs.extract (k - 7) k).toList == "trusted" do
+      problems := problems.push s!"{n}: no `trusted` at {shown file}:{pos.line}:{pos.column}; write trusted \"{id}\" there"
+      continue
     edits := edits.insert file ((edits.getD file #[]).push (n, k, id))
   let mut written := #[]
   for (file, es) in edits do

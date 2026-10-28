@@ -168,6 +168,21 @@ and its name, `3f2b…/x` (owner: "Structure id + field name"), so a rename of t
 structure keeps the field's history. A blueprint label's other declarations get
 the label and their names the same way.
 
+### Tags written after the fact (owner, 2026-10-28)
+
+`attribute [trusted "id"] Name` tags a declaration of any module, also of a library
+one does not own (a fork with a library of tags; OpenVouch `docs/decisions.md` §8).
+One mechanism: Lean writes every attribute both ways, `@[simp]` and `attribute
+[simp]`. Lean's parametric attributes refuse declarations of imported modules, so
+`trusted` keeps its own store: each tag with its id and where `trusted` ends in the
+module that wrote it, where `leanblame id` writes the id, for both forms. A
+declaration has one tag; a second, also from another module, is an error. A tag on
+a deprecated alias whose value is another constant (a rename, `@[deprecated] alias
+old := new`) is on that constant, with a warning to write its name; the id stays.
+A deprecated declaration with a value of its own is not a rename. A rename without
+an alias is Lean's unknown-constant error at the tag. Blueprints and Mathlib users
+follow renames the same way; only tags in the author's code are cleaner.
+
 ### Fail out loud (owner, 2026-10-26)
 
 "I want things break out loud if not expected." An unexpected state is an
