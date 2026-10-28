@@ -9,7 +9,6 @@ Every command of [04-architecture.md](04-architecture.md), tested end to end by
 
 | Item | Size |
 |------|------|
-| Tiers in `leanblame.toml`: who may sign which declarations, and how many | medium |
 | OpenPhysics: first tagged modules, conventions module, memo text | content |
 
 Pages, logins and records written with login-backed ids belong to a service
