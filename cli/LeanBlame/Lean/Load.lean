@@ -13,10 +13,12 @@ what an inductive block, the `Quot` package or a checked declaration needs. For 
 types in (`Erase`), declarations are added with `addDeclWithoutChecking` (the kernel that wrote the
 export checked them); for `equiv`'s `Old.` constants, which LeanBlame writes itself, the kernel checks
 each one. Unlike `Replay`, the constructors and recursors the kernel generates for an inductive are
-not compared with the exported ones.
+not compared with the exported ones. `moduleConstants` reads what one module declares from its
+compiled files, without importing it (`Challenge.check`).
 -/
 import Lean.AddDecl
 import Lean.Message
+import Lean.Util.Path
 import LeanExport.Parse
 
 namespace LeanBlame.Load
@@ -60,6 +62,15 @@ def addConstants (env : Kernel.Environment) (consts : Std.HashMap Name ConstantI
     | .ok env' => env := env'
     | .error ex => throw <| .userError s!"{n}: {← (ex.toMessageData {}).toString}"
   return env
+
+/-- The constants module `mod` declares, read from its compiled files on the search path without
+importing it: all of them, as the private part of a module in the module system holds them. -/
+def moduleConstants (mod : Name) : IO (Array ConstantInfo) := do
+  let file ← findOLean mod
+  let (data, _) ← readModuleData file
+  unless data.isModule do return data.constants
+  let parts ← readModuleDataParts (#[.exported, .server, .private].map (OLeanLevel.adjustFileName file))
+  return ((parts.back?.map (·.1.constants)).getD data.constants)
 
 /-- The constants of an export in an `Environment`. Unsafe and partial constants are left out, as
 `Kernel.Environment.replay` leaves them out. -/

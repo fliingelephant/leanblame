@@ -5,16 +5,19 @@ Authors: Henrik Böving
 -/
 /-
 The Lean frontend (docs/design/04-architecture.md, "Beyond Lean"): a parsed export served to the core as a
-`Core.Source`, and `backend`, what Lean contributes to the commands. `declOf` is adapted from
-comparator's `runForUsedConsts`, which ships in the Lean toolchain as `Lake/Check/Util.lean`; the
-licence text is in `cli/LICENSES/Apache-2.0.txt`.
+`Core.Source`, the constants of an environment in memory served as the same facts (`declsIn`), and
+`backend`, what Lean contributes to the commands. `declOf` is adapted from comparator's
+`runForUsedConsts`, which ships in the Lean toolchain as `Lake/Check/Util.lean`; the licence text is
+in `cli/LICENSES/Apache-2.0.txt`.
 
 The core keys constants by their printed name (`Lean.Name.toString`); `nameMap` maps those back and
 refuses an export in which two constants print the same. Per constant the core gets its kind label,
 role, number of universe parameters, the hashes of its canonical type and body with proofs erased
 (`Erase`, `Canon`; docs/design/03-trust-model.md, "The hash, precisely") and the dependencies the
 claim follows. All constants of one export are hashed in one `Meta` state, so that its caches serve
-every constant.
+every constant. That state sees the constants alone: the environment an export rebuilds has no
+environment extensions, an environment in memory is imported without them, and smart unfolding,
+which depends on helpers an export may leave out, is off.
 -/
 import Lean.Util.FoldConsts
 import Lean.Util.Path
@@ -47,12 +50,10 @@ def roleOf : ConstantInfo → Role
   | .thmInfo _ => .proved
   | _ => .defined
 
-/-- The constants of an export by printed name, as `rename` names them. Fails if two of them print
-the same. -/
-def nameMap (exported : LeanExport.ExportedEnv) (rename : Name → Name := id) :
-    IO (Std.HashMap String Name) :=
+/-- The constants of an export by printed name. Fails if two of them print the same. -/
+def nameMap (exported : LeanExport.ExportedEnv) : IO (Std.HashMap String Name) :=
   exported.constOrder.foldlM (init := {}) fun m n => do
-    let s := (rename n).toString
+    let s := n.toString
     if m[s]?.any (· != n) then
       fail s!"two constants of the export print as '{s}'; LeanBlame needs printed names to be distinct"
     return m.insert s n
@@ -67,21 +68,22 @@ def MetaRunner.new (env : Environment) : IO MetaRunner :=
 
 /-- Run `x`, continuing from the states the previous run left. -/
 def MetaRunner.run (r : MetaRunner) (x : MetaM α) : IO α := do
-  let (a, coreState, metaState) ← x.toIO { fileName := "", fileMap := default, maxHeartbeats := 0 }
+  let options := ({} : Options).setBool `smartUnfolding false
+  let (a, coreState, metaState) ← x.toIO { fileName := "", fileMap := default, options, maxHeartbeats := 0 }
     (← r.coreState.get) {} (← r.metaState.get)
   r.coreState.set coreState
   r.metaState.set metaState
   return a
 
 /--
-The facts about one constant, its constants named by `rename?`. Like comparator's
-`runForUsedConsts`, the dependencies are the constants in the type and the value, plus constructors
-for inductives and the inductive for constructors; unlike it, a theorem's value, the value of an
-`opaque` or `partial` definition, proof subterms of types and definition bodies, and recursor rules
-are skipped.
+The facts about one constant, its constants named by `rename?` and its dependencies printed by
+`print`. Like comparator's `runForUsedConsts`, the dependencies are the constants in the type and the
+value, plus constructors for inductives and the inductive for constructors; unlike it, a theorem's
+value, the value of an `opaque` or `partial` definition, proof subterms of types and definition
+bodies, and recursor rules are skipped.
 -/
-def declOf (ci : ConstantInfo) (module : String) (rename? : Option (Name → Name) := none) :
-    MetaM Core.Decl := do
+def declOf (ci : ConstantInfo) (module : String) (print : Name → IO String)
+    (rename? : Option (Name → Name) := none) : MetaM Core.Decl := do
   if ci.isUnsafe then
     throwError s!"'{ci.name}' is unsafe: unsafe declarations cannot be tagged or hashed"
   let rename := rename?.getD id
@@ -89,28 +91,26 @@ def declOf (ci : ConstantInfo) (module : String) (rename? : Option (Name → Nam
     | some f => e.replace fun | .const n us => some (.const (f n) us) | _ => none
     | none => e
   let ups := ci.levelParams
-  let type := renamed (← Erase.eraseProofs ci.type)
+  let type ← Erase.eraseProofs ci.type
   let mut deps := type.getUsedConstants
   let mut bodyHash : Option String := none
   match ci with
   | .defnInfo d =>
     if d.safety == .safe then
-      let body := renamed (← Erase.eraseProofs d.value)
-      bodyHash := some (Canon.exprHash ups body)
+      let body ← Erase.eraseProofs d.value
+      bodyHash := some (Canon.exprHash ups (renamed body))
       deps := deps ++ body.getUsedConstants
   | .inductInfo iv =>
-    let (ctors, all) := (iv.ctors.map rename, iv.all.map rename)
     bodyHash := some <| Hash.hashFields "leanblame.inductive"
       ([toString iv.numParams, toString iv.numIndices] ++
-        ctors.map (Canon.name "" ·) ++ ["all"] ++ all.map (Canon.name "" ·))
-    deps := deps ++ ctors.toArray ++ all.toArray
-  | .ctorInfo cv => deps := deps.push (rename cv.induct)
+        iv.ctors.map (Canon.name "" <| rename ·) ++ ["all"] ++ iv.all.map (Canon.name "" <| rename ·))
+    deps := deps ++ iv.ctors.toArray ++ iv.all.toArray
+  | .ctorInfo cv => deps := deps.push cv.induct
   | _ => pure ()
-  let name := rename ci.name
+  let printed ← (deps.filter (· != ci.name)).mapM (print ·)
   return {
-    name := name.toString, module, kind := kindOf ci, role := roleOf ci, uparams := ups.length
-    typeHash := Canon.exprHash ups type, bodyHash
-    deps := (Core.sortNames ((deps.filter (· != name)).map toString)).eraseReps }
+    name := (rename ci.name).toString, module, kind := kindOf ci, role := roleOf ci, uparams := ups.length
+    typeHash := Canon.exprHash ups (renamed type), bodyHash, deps := (Core.sortNames printed).eraseReps }
 
 /-- What `Lean.collectAxioms` follows from a constant: the constants of its type and value, proofs
 included, and the constructors of an inductive. -/
@@ -120,23 +120,40 @@ def usesOf : ConstantInfo → Array Name
   | ci => ci.type.getUsedConstants ++
     ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
 
-/-- A parsed export as the core sees it; `moduleOf` names the module of a constant, and `rename?`
-names constants as another export does (`Challenge.check`). `decl` erases proofs in the environment
-`Load` builds; `uses` and `isAssumed` follow what `Lean.collectAxioms` follows in that environment,
-which leaves out unsafe and partial constants. -/
-def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name)
-    (rename? : Option (Name → Name) := none) : IO Core.Source := do
-  let rename := rename?.getD id
-  let names ← nameMap exported rename
+/-- A parsed export as the core sees it; `moduleOf` names the module of a constant. `decl` erases
+proofs in the environment `Load` builds; `uses` and `isAssumed` follow what `Lean.collectAxioms`
+follows in that environment, which leaves out unsafe and partial constants. -/
+def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) : IO Core.Source := do
+  let names ← nameMap exported
   let find? (s : String) : Option ConstantInfo := names[s]? >>= (exported.constMap[·]?)
   let inEnv? (s : String) := (find? s).filter fun ci => !ci.isUnsafe && !ci.isPartial
   let runner ← MetaRunner.new (← Load.environmentOfExport exported)
   return {
     decl := fun s => do
       let some ci := find? s | fail s!"Const not found in export '{s}'"
-      runner.run (declOf ci (← moduleOf ci.name).toString rename?)
-    uses := fun s => (((inEnv? s).map usesOf).getD #[]).map (toString ∘ rename)
+      runner.run (declOf ci (← moduleOf ci.name).toString (pure ·.toString))
+    uses := fun s => (((inEnv? s).map usesOf).getD #[]).map toString
     isAssumed := fun s => inEnv? s matches some (.axiomInfo _) }
+
+/-- `Source.decl` for the constants of `env`, imported without its environment extensions, as an
+export of them would serve it, without writing the export (`Challenge.check`); `rename?` names
+constants as another export does. A printed name maps back to the constant it was printed from:
+`roots`, and each dependency once reported; two constants that print the same are an error. -/
+def declsIn (env : Environment) (roots : Array Name) (moduleOf : Name → IO Name)
+    (rename? : Option (Name → Name) := none) : IO (String → IO Core.Decl) := do
+  let rename := rename?.getD id
+  let names ← IO.mkRef ({} : Std.HashMap String Name)
+  let print (n : Name) : IO String := do
+    let s := (rename n).toString
+    match (← names.get)[s]? with
+    | some m => unless m == n do fail s!"two constants print as '{s}'; LeanBlame needs printed names to be distinct"
+    | none => names.modify (·.insert s n)
+    return s
+  for r in roots do discard <| print r
+  let runner ← MetaRunner.new env
+  return fun s => do
+    let some ci := (← names.get)[s]? >>= env.find? | fail s!"'{s}' is not a constant here"
+    runner.run (declOf ci (← moduleOf ci.name).toString print rename?)
 
 /-- The export file at `path`, parsed. -/
 def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do

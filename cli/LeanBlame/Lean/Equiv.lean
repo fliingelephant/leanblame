@@ -8,10 +8,11 @@ as the only cause (the named ones, else all), compared with X's last live approv
    of the current export, and so does a definition X itself; the kernel checks each. Not shared: an
    untagged hashed constant whose claim changed, or a constant used only in proofs (so not hashed)
    that the current export lacks or states differently. Tagged constants are always shared.
-2. Goals. For X and for each changed definition C still present with the same type text, one kernel
-   call decides whether old and new are definitionally equal:
+2. Goals. For X and for each changed definition C still present, one kernel call decides whether
+   old and new are definitionally equal:
    `theorem LeanBlame.Equiv.C : Old.C = C := Eq.refl C`, or for a theorem X
-   `<old statement> ↔ <new statement>`, proved by the identity both ways.
+   `<old statement> ↔ <new statement>`, proved by the identity both ways. Steps 1 and 2 are
+   `prove`, which `challenge --check` runs too, with the library as the old version.
 3. The accepted theorems, with what they use, go to the object store as the solution export, which
    `leanchecker` replays (the kernel check `release` runs): a file anyone can check again.
 4. For each X whose own theorem was accepted, an evidence file (`Store.evidencePath`) names the
@@ -34,17 +35,20 @@ def oldName (n : Name) : Name := `Old ++ n
 
 def thmName (n : Name) : Name := `LeanBlame.Equiv ++ n
 
-/-- `e` with references to the constants of `dup`, and projections out of them, renamed to `Old.`. -/
-partial def renameExpr (dup : NameSet) (e : Expr) : Expr :=
+/-- `e` with references to the constants of `dup`, and projections out of them, renamed to `Old.`;
+the other constants named as the current environment names them (`toNew`). -/
+partial def renameExpr (dup : NameSet) (toNew : Name → Name) (e : Expr) : Expr :=
+  let rename (n : Name) := if dup.contains n then oldName n else toNew n
   e.replace fun
-    | .const n us => if dup.contains n then some (.const (oldName n) us) else none
-    | .proj s i b => if dup.contains s then some (.proj (oldName s) i (renameExpr dup b)) else none
+    | .const n us => some (.const (rename n) us)
+    | .proj s i b => some (.proj (rename s) i (renameExpr dup toNew b))
     | _ => none
 
-/-- An old constant as the `Old.` constant: its name and references to `dup` renamed. -/
-def renameConst (dup : NameSet) (ci : ConstantInfo) : ConstantInfo :=
-  let e := renameExpr dup
-  let n (x : Name) := if dup.contains x || x == ci.name then oldName x else x
+/-- An old constant as the `Old.` constant: its name and references to `dup` renamed, the other
+references named by `toNew`. -/
+def renameConst (dup : NameSet) (toNew : Name → Name) (ci : ConstantInfo) : ConstantInfo :=
+  let e := renameExpr dup toNew
+  let n (x : Name) := if dup.contains x || x == ci.name then oldName x else toNew x
   match ci with
   | .defnInfo v => .defnInfo { v with name := n v.name, type := e v.type, value := e v.value, all := v.all.map n }
   | .thmInfo v => .thmInfo { v with name := n v.name, type := e v.type, value := e v.value, all := v.all.map n }
@@ -56,10 +60,10 @@ def renameConst (dup : NameSet) (ci : ConstantInfo) : ConstantInfo :=
                                     rules := v.rules.map fun r => { r with ctor := n r.ctor, rhs := e r.rhs } }
   | .quotInfo v => .quotInfo v
 
-/-- Whether old constant `o`, with `dup` renamed, is the current constant `n`: the same type, and
-for anything but a theorem (proof irrelevance) the same value. -/
-def sameDecl (dup : NameSet) (o n : ConstantInfo) : Bool :=
-  let e (x : Expr) := (renameExpr dup x).instantiateLevelParams o.levelParams (n.levelParams.map .param)
+/-- Whether old constant `o`, renamed, is the current constant `n`: the same type, and for anything
+but a theorem (proof irrelevance) the same value. -/
+def sameDecl (dup : NameSet) (toNew : Name → Name) (o n : ConstantInfo) : Bool :=
+  let e (x : Expr) := (renameExpr dup toNew x).instantiateLevelParams o.levelParams (n.levelParams.map .param)
   o.levelParams.length == n.levelParams.length && e o.type == n.type &&
     (o matches .thmInfo _ || (o.value? (allowOpaque := true)).map e == n.value? (allowOpaque := true))
 
@@ -80,25 +84,149 @@ def pp (env : Kernel.Environment) (e : Expr) : IO String := do
   return toString (← runMeta env (PrettyPrinter.ppExpr e))
 
 /-- The statement that old and current `c` mean the same, with its proof: `Old.c = c` for a safe
-definition whose type text and universe parameters are unchanged, `<old type> ↔ <type>` for a
-theorem; or why there is none. -/
-def goal (env : Kernel.Environment) (dup : NameSet) (c : Name) (o n : ConstantInfo)
-    (oldNode newNode : Core.Node) : IO (Except String (Expr × Expr)) := do
+definition with the same number of universe parameters, `<old type> ↔ <type>` for a theorem; or why
+there is none. The kernel accepts it exactly when the two are definitionally equal. -/
+def goal (env : Kernel.Environment) (dup : NameSet) (toNew : Name → Name) (c : Name) (o n : ConstantInfo) :
+    IO (Except String (Expr × Expr)) := do
   let us := n.levelParams.map Level.param
   unless o.levelParams.length == us.length do return .error "its universe parameters changed"
   match o, n with
   | .defnInfo ov, .defnInfo nv =>
     unless ov.safety == .safe && nv.safety == .safe do return .error "it is not a safe definition"
-    unless oldNode.decl.typeHash == newNode.decl.typeHash do return .error "its type changed"
     let u ← runMeta env (Meta.getLevel n.type)
-    return .ok (mkApp3 (.const ``Eq [u]) n.type (.const (oldName c) us) (.const c us),
-                mkApp2 (.const ``Eq.refl [u]) n.type (.const c us))
+    let new := Expr.const (toNew c) us
+    return .ok (mkApp3 (.const ``Eq [u]) n.type (.const (oldName c) us) new, mkApp2 (.const ``Eq.refl [u]) n.type new)
   | .thmInfo _, .thmInfo _ =>
-    let a := (renameExpr dup o.type).instantiateLevelParams o.levelParams us
+    let a := (renameExpr dup toNew o.type).instantiateLevelParams o.levelParams us
     let b := n.type
     return .ok (mkIff a b,
                 mkApp4 (.const ``Iff.intro []) a b (.lam `h a (.bvar 0) .default) (.lam `h b (.bvar 0) .default))
   | _, _ => return .error s!"no goal for a changed {Source.kindOf n}"
+
+/-- Two versions of the same declarations, for the kernel to compare: each one's graph, and its
+constants by the names the old graph gives them (`none`: not at hand). `toNew` names a constant as
+the current environment has it; `oldPos` orders old constants dependency-first. -/
+structure Sides where
+  old : Core.Hashed
+  new : Core.Hashed
+  oldConst? : Name → Option ConstantInfo
+  newConst? : Name → Option ConstantInfo
+  toNew : Name → Name := id
+  oldPos : Name → Nat
+
+/-- What the kernel accepted. -/
+structure Proven where
+  /-- The current environment with the `Old.` constants and the accepted theorems. -/
+  env : Kernel.Environment
+  /-- The accepted theorems. -/
+  theorems : Array Name
+  /-- The targets whose own theorem was accepted. -/
+  targets : Array Name
+  /-- Why the others were not, from the root causes: a line each, with the old and new values of a
+  definition that is not definitionally equal. -/
+  notes : Array (String × Array String)
+
+/--
+Ask the kernel whether the targets of `sides` mean the same in both versions, in `base`, the current
+environment. What an old meaning uses that is not shared goes under `Old.`, references renamed: an
+untagged hashed constant whose claim changed, or a constant used only in proofs (so not hashed) that
+the current version lacks or states differently; tagged constants and constants not at hand are
+shared. The kernel checks each `Old.` constant, then decides, one call each, whether every changed
+definition and every target is definitionally equal to its old version.
+-/
+def prove (base : Kernel.Environment) (sides : Sides) (targets : Array Name) : IO Proven := do
+  let ⟨old, new, oldConst?, newConst?, toNew, oldPos⟩ := sides
+  let targetSet : NameSet := targets.foldl (·.insert ·) {}
+  let isTarget := targetSet.contains
+  -- What an old meaning uses: of a target theorem only its statement.
+  let uses (c : Name) : Array Name := match oldConst? c with
+    | some ci => if isTarget c && ci matches .thmInfo _ then ci.type.getUsedConstants
+      else ci.getUsedConstantsAsSet.toArray
+    | none => #[]
+  -- The constants to duplicate, until nothing is added.
+  let needs (dup : NameSet) (r : Name) : Bool :=
+    let s := r.toString
+    !old.isTagged s && match old.nodes[s]? with
+    | some o => (new.nodes[s]?.map (·.claim)) != some o.claim
+    | none => match oldConst? r, newConst? r with
+      | some o, some n => !sameDecl dup toNew o n
+      | some _, none => true
+      | none, _ => false
+  let seeds := targets.flatMap uses
+  let mut dup : NameSet := {}
+  repeat
+    let size := dup.size
+    let mut todo := seeds ++ dup.toArray.flatMap uses
+    while h : todo.size > 0 do
+      let r := todo[todo.size - 1]
+      todo := todo.pop
+      if !dup.contains r && needs dup r then
+        dup := dup.insert r
+        todo := todo ++ uses r
+    if dup.size == size then break
+  -- `Old.` constants: the duplicated ones, and each target definition.
+  let consts : Std.HashMap Name ConstantInfo :=
+    (dup.toArray ++ targets).foldl (init := {}) fun m c =>
+      match oldConst? c with
+      | some ci => if isTarget c && !(ci matches .defnInfo _) then m else m.insert (oldName c) (renameConst dup toNew ci)
+      | none => m
+  let succ (c : Name) := (uses c).filter dup.contains
+  -- In dependency order: rebuild each component, then check its goals. `taint` holds, per constant,
+  -- the failures at or below it that its goal may rest on.
+  let mut env := base
+  let mut broken : NameSet := {}
+  let mut taint : Std.HashMap Name (Array Name) := {}
+  let mut theorems : Array Name := #[]
+  let mut notes : Array (String × Array String) := #[]
+  for comp in Walk.tarjan (dup.toArray ++ targets) succ do
+    let deps := (comp.flatMap succ).filter (!comp.contains ·)
+    let below := dedup (deps.flatMap (taint.getD · #[]))
+    -- `Old.` constants are added in the old order, which is dependency-first.
+    let names := (comp.filter (consts.contains <| oldName ·)).qsort (oldPos · < oldPos ·) |>.map oldName
+    let rebuilt ← if deps.any broken.contains then pure false else
+      try
+        env ← Load.addConstants env consts names true
+        pure true
+      catch e =>
+        notes := notes.push (s!"cannot rebuild {e}", #[])
+        pure false
+    for c in comp do
+      unless rebuilt do
+        broken := broken.insert c
+        taint := taint.insert c (dedup (below.push c))
+        continue
+      -- A failure is a root cause when nothing below it failed.
+      let rootCause := below.isEmpty
+      let failed := if rootCause then #[c] else below
+      match oldConst? c, newConst? c, old.nodes[c.toString]?, new.nodes[c.toString]? with
+      | some o, some n, some oldNode, some newNode =>
+        match ← goal env dup toNew c o n with
+        | .error why =>
+          if rootCause then notes := notes.push (s!"{c}: {why}", #[])
+          taint := taint.insert c failed
+        | .ok (stmt, proof) =>
+          let decl : Declaration :=
+            .thmDecl { name := thmName c, levelParams := n.levelParams, type := stmt, value := proof }
+          match ← addChecked env decl with
+          | .ok env' =>
+            env := env'
+            theorems := theorems.push (thmName c)
+            taint := taint.insert c #[]
+          | .error msg =>
+            if rootCause then
+              if oldNode.own != newNode.own then
+                notes := notes.push (s!"{c}: not definitionally equal",
+                  #[s!"  old: {← pp env (o.value?.getD o.type)}", s!"  new: {← pp env (n.value?.getD n.type)}"])
+              else notes := notes.push (s!"{c}: not definitionally equal to its old version ({msg})", #[])
+            taint := taint.insert c failed
+      -- Used only in proofs, or gone: nothing to state.
+      | _, _, _, _ => taint := taint.insert c below
+  let proven := targets.filter (theorems.contains <| thmName ·)
+  for t in targets do
+    let causes := (taint.getD t #[]).filter (· != t)
+    unless proven.contains t || causes.isEmpty do
+      notes := notes.push (s!"{t}: not proven, because of {", ".intercalate (causes.toList.map toString)}", #[])
+  return { env, theorems, targets := proven, notes }
 
 /-- One eligible declaration: its id, the approve record it is compared with and its current claim. -/
 structure Target where
@@ -114,97 +242,17 @@ proven, with the hash of the solution export.
 def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : Core.Hashed)
     (newExp oldExp : LeanExport.ExportedEnv) (targets : Array Target) :
     IO (Array Target × String) := do
-  let oldCi (c : Name) := oldExp.constMap[c]?
-  let targetSet : NameSet := targets.foldl (·.insert ·.name) {}
-  let isTarget := targetSet.contains
-  -- What an old meaning uses: of a target theorem only its statement.
-  let uses (c : Name) : Array Name := match oldCi c with
-    | some ci => if isTarget c && ci matches .thmInfo _ then ci.type.getUsedConstants
-      else ci.getUsedConstantsAsSet.toArray
-    | none => #[]
-  -- The constants to duplicate, until nothing is added.
-  let needs (dup : NameSet) (r : Name) : Bool :=
-    let s := r.toString
-    !old.isTagged s && match old.nodes[s]? with
-    | some o => (new.nodes[s]?.map (·.claim)) != some o.claim
-    | none => match oldCi r, newExp.constMap[r]? with
-      | some o, some n => !sameDecl dup o n
-      | some _, none => true
-      | none, _ => false
-  let seeds := targets.flatMap (uses ·.name)
-  let mut dup : NameSet := {}
-  repeat
-    let size := dup.size
-    let mut todo := seeds ++ dup.toArray.flatMap uses
-    while h : todo.size > 0 do
-      let r := todo[todo.size - 1]
-      todo := todo.pop
-      if !dup.contains r && needs dup r then
-        dup := dup.insert r
-        todo := todo ++ uses r
-    if dup.size == size then break
-  -- `Old.` constants: the duplicated ones, and each target definition.
-  let consts : Std.HashMap Name ConstantInfo :=
-    (dup.toArray ++ targets.map (·.name)).foldl (init := {}) fun m c =>
-      match oldCi c with
-      | some ci => if isTarget c && !(ci matches .defnInfo _) then m else m.insert (oldName c) (renameConst dup ci)
-      | none => m
-  let succ (c : Name) := (uses c).filter dup.contains
-  -- `Old.` constants are added in the old export's order, which is dependency-first.
-  let pos : Std.HashMap Name Nat := oldExp.constOrder.foldl (init := {}) fun m c => m.insert (oldName c) m.size
-  -- In dependency order: rebuild each component, then check its goals. `taint` holds, per constant,
-  -- the failures at or below it that its goal may rest on.
-  let mut env := base
-  let mut broken : NameSet := {}
-  let mut taint : Std.HashMap Name (Array Name) := {}
-  let mut proved : Array Name := #[]
-  for comp in Walk.tarjan (dup.toArray ++ targets.map (·.name)) succ do
-    let deps := (comp.flatMap succ).filter (!comp.contains ·)
-    let below := dedup (deps.flatMap (taint.getD · #[]))
-    let names := (comp.map oldName |>.filter consts.contains).qsort fun a b => pos.getD a 0 < pos.getD b 0
-    let rebuilt ← if deps.any broken.contains then pure false else
-      try
-        env ← Load.addConstants env consts names true
-        pure true
-      catch e =>
-        IO.eprintln s!"cannot rebuild {e}; a human reads"
-        pure false
-    for c in comp do
-      unless rebuilt do
-        broken := broken.insert c
-        taint := taint.insert c (dedup (below.push c))
-        continue
-      let report (msg : String) : IO (Array Name) := do
-        if below.isEmpty then IO.eprintln msg
-        return if below.isEmpty then #[c] else below
-      match oldCi c, newExp.constMap[c]?, old.nodes[c.toString]?, new.nodes[c.toString]? with
-      | some o, some n, some oldNode, some newNode =>
-        match ← goal env dup c o n oldNode newNode with
-        | .error why => taint := taint.insert c (← report s!"{c}: {why}; a human reads")
-        | .ok (stmt, proof) =>
-          let decl : Declaration :=
-            .thmDecl { name := thmName c, levelParams := n.levelParams, type := stmt, value := proof }
-          match ← addChecked env decl with
-          | .ok env' =>
-            env := env'
-            proved := proved.push (thmName c)
-            taint := taint.insert c #[]
-          | .error msg =>
-            let why ← if oldNode.own != newNode.own then
-                pure s!"{c}: not definitionally equal; a human reads\n  old: {← pp env (o.value?.getD o.type)}\n  new: {← pp env (n.value?.getD n.type)}"
-              else pure s!"{c}: not definitionally equal to its approved version ({msg}); a human reads"
-            taint := taint.insert c (← report why)
-      -- Used only in proofs, or gone: nothing to state.
-      | _, _, _, _ => taint := taint.insert c below
-  let proven := targets.filter fun t => proved.contains (thmName t.name)
-  for t in targets do
-    let causes := (taint.getD t.name #[]).filter (· != t.name)
-    unless proven.any (·.name == t.name) || causes.isEmpty do
-      IO.eprintln s!"{t.name}: not proven, because of {", ".intercalate (causes.toList.map toString)}; a human reads"
+  let pos : Std.HashMap Name Nat := oldExp.constOrder.foldl (init := {}) fun m c => m.insert c m.size
+  let p ← prove base { old, new, oldConst? := (oldExp.constMap[·]?), newConst? := (newExp.constMap[·]?)
+                       oldPos := (pos.getD · 0) } (targets.map (·.name))
+  for (line, detail) in p.notes do
+    IO.eprintln s!"{line}; a human reads"
+    for d in detail do IO.eprintln d
+  let proven := targets.filter (p.targets.contains ·.name)
   if proven.isEmpty then return (#[], "")
   -- The solution export: the accepted theorems and what they use, replayed by `leanchecker`.
   let tmp ← Store.tmpPath root "solution"
-  let solution ← Store.putFile root .proofs tmp (← Export.dumpToFile (.ofKernelEnv env) proved tmp)
+  let solution ← Store.putFile root .proofs tmp (← Export.dumpToFile (.ofKernelEnv p.env) p.theorems tmp)
   unless ← Source.kernelAccepts (Store.objectPath root .proofs solution) do
     fail s!"leanchecker rejected the solution export {solution}"
   return (proven, solution)

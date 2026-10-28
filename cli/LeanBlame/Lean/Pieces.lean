@@ -330,8 +330,9 @@ def readModule (env : Environment) (options : Options) (library : NameSet) (m : 
     let opens := if role != .opens then #[]
       else if d.isOfKind ``Parser.Command.namespace then headers d[1].getId
       else match d[2].getOptional? with | some i => headers i.getId | none => #[""]
-    let closes := if role != .closes then 0 else match d[1].getOptional? with
-      | some i => i.getId.components.length | none => 1
+    -- `end A.B` closes two scopes; its name is `identWithPartialTrailingDot`, two nodes.
+    let closes := if role != .closes then 0 else if d[1].getNumArgs == 0 then 1
+      else d[1][0].getId.components.length
     cmds := cmds.push { stx, start, stop, role, ns, openDecls, opens, closes, opened }
   let some idx := env.getModuleIdx? m | fail s!"module {m} was not imported"
   let some data := env.header.moduleData[idx.toNat]? | fail s!"module {m} has no data"

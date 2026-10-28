@@ -37,9 +37,10 @@ needs a human to read.
    between them and X are **duplicated** under `Old.`, with references renamed.
    Constants used only in proofs are not hashed; they are shared when the new
    export states them the same way.
-3. State the goal by kind. Def with unchanged type: `Old.X = X`. Theorem:
-   `type(Old.X) ↔ type(X)`. Def whose type itself changed, or a structure:
-   no goal; a human reads.
+3. State the goal by kind. Def: `Old.X = X`, stated at X's type, so the kernel
+   accepts it only if the types are definitionally equal too. Theorem:
+   `type(Old.X) ↔ type(X)`. A structure or another inductive: no goal; a
+   human reads.
 4. The kernel decides, mechanically: no build, no tactics. At the frontier of
    change, each changed definition C gets `Old.C = C`, and the kernel is asked
    whether the two are definitionally equal: one kernel call per changed
@@ -50,6 +51,9 @@ needs a human to read.
 5. `status` shows the proof as X's `evidence`. The reviewer approves the new
    hash with one click; X's entry in the record carries the proof hash as
    `evidence`.
+
+`challenge --check` runs steps 2 to 4 too, with the library as the old version
+and the challenge, built against it, as the new one; it stores no proof.
 
 Mechanism: `equiv` reads the old and the new export. It adds the duplicated
 constants to the new export's environment, the kernel checking each, then the

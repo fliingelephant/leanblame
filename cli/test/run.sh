@@ -250,20 +250,29 @@ run challenge --check "$work-challenge"
 [[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
 ok "the check builds the challenge against the library: its 10 tagged declarations have the library's claims"
 edit "$work-challenge/ChallengeDeps.lean" 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
-must_fail "does not mean what the library means" "Sample.energy change=untagged:Sample.double" -- "$lb" challenge --check "$work-challenge"
-ok "a challenge whose helper differs fails the check, with the cause status would give"
+must_fail "does not mean what the library means" "Sample.energy change=untagged:Sample.double" \
+  "^  Sample.double: not definitionally equal$" -- "$lb" challenge --check "$work-challenge"
+ok "a challenge whose helper differs fails the check, with the cause status would give and the kernel's answer"
+edit "$work-challenge/ChallengeDeps.lean" 's/def double (n : Nat) : Nat := 2 \* n/def double (n : Nat) : Nat := Nat.add n n/'
+run challenge --check "$work-challenge"
+[[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do, 1 of them by definitional equality" ]] \
+  || fail "check: $out"
+ok "a helper written differently, Nat.add n n for n + n, has another claim but passes: the kernel finds it definitionally equal"
 must_fail "Sample.energy is not a theorem" -- "$lb" challenge Sample.energy --out "$work-challenge-x"
 must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge --out "$work-challenge"
 ok "challenge refuses a declaration that is not a theorem, and a directory that exists"
 python3 - <<'PY'
 basic = open("Sample/Basic.lean").read()
-open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n"
+open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- One less, or zero. -/\ndef down : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n"
+    "/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n"
     "namespace Extra\n/-- Nothing tagged uses this. -/\ndef unused : Nat := 0\nend Extra\n\n"
-    "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := secret\n\nend More\n\nend Sample"))
+    "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := secret\n\nend More\n\n"
+    "namespace Far.Away\n/-- One, far away. -/\ndef one : Nat := 1\nend Far.Away\n\nend Sample"))
 energy = open("Sample/Energy.lean").read()
 at = energy.index("/-- The energy of a point")
-energy = energy[:at] + "open Extra\n\n/-- Zero, kept to this file too. -/\nprivate def secret : Nat := 0\n\n" + energy[at:]
-energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero\n")
+energy = (energy[:at] + "open Extra\n\n/-- Zero, kept to this file too. -/\nprivate def secret : Nat := 0\n\n"
+          "/-- One less, or zero, matched as `down` matches. -/\ndef below : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n" + energy[at:])
+energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero + 0 * Far.Away.one + down 0 + below 0\n")
 at = energy.index("/-- The energy of every chain is even.")
 energy = (energy[:at] + "/-- Site two, as a number proven to be two. -/\n"
           '@[trusted "5f0c6a8e-2d1b-4c3a-9e7f-1a2b3c4d5e6f"] def siteTwo : {n : Nat // n = 2} := ⟨_, second_site⟩\n\n' + energy[at:])
@@ -275,7 +284,8 @@ deps="$(cat "$work-challenge-two/ChallengeDeps.lean")"
 for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := rfl" \
             "private def «secret (Sample.Basic)» : Nat := 0" "def zero : Nat := «secret (Sample.Basic)»" \
             "private def «secret (Sample.Energy)» : Nat := 0" "+ «secret (Sample.Energy)» + More.zero" \
-            $'namespace Sample.Extra\nend Sample.Extra' "open Extra" "namespace More.Inner" "end Inner" "end More"; do
+            $'namespace Sample.Extra\nend Sample.Extra' "open Extra" "namespace More.Inner" "end Inner" "end More" \
+            $'namespace Far.Away\n\n/-- One, far away. -/\ndef one : Nat := 1\n\nend Far.Away\n\nend Sample\n\nend\n\nsection'; do
   [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
 done
 for left in "def unused" "def hidden" "variable (late"; do
@@ -284,11 +294,12 @@ done
 must_fail "this challenge cannot be made" "Sample.second_site: a declaration that every challenge holds uses it" \
   -- "$lb" challenge Sample.second_site --out "$work-challenge-three"
 run challenge --check "$work-challenge-two"
+[[ "$out" == *", 1 of them by definitional equality" ]] || fail "below shares down's match in one file: $out"
 [[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
   || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
 git checkout -q -- Sample
 export_lib
-ok "two_pos and second_site come with their proofs, and second_site has no challenge of its own; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner; a variable after the last kept command stays out; the check leaves no files"
+ok "two_pos and second_site come with their proofs, and second_site has no challenge of its own; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the last kept command stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"

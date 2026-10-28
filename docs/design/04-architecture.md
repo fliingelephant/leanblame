@@ -51,7 +51,7 @@ Eleven commands (`challenge` has two forms):
 | `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal, with a `local:` signer id. Ids backed by a login come from a service that writes records. |
 | `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
 | `challenge [X...] --out DIR` | Write the comparator challenge of the tagged theorems `X` (names or ids) into the new directory DIR, from the last export (see Challenges). Without names: only `ChallengeDeps.lean`, which every challenge of the library shares. |
-| `challenge --check DIR` | Build the challenge in DIR against the library's build and hash it as `export` does: each tagged declaration in it must have the claim hash of the last export. A difference fails with the cause `status` would give. |
+| `challenge --check DIR` | Build the challenge in DIR against the library's build and hash it as `export` does: each tagged declaration in it must have the claim hash of the last export, or the kernel must find it definitionally equal to the library's, as `equiv` does. Any other difference fails with the cause `status` would give and the kernel's answer. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
 ## Records
@@ -124,12 +124,20 @@ piece per command a challenge needs, as written. Nothing is elaborated again.
   no Lean options: each module's section does. `lean-toolchain` is the
   library's.
 - `challenge --check DIR` builds the challenge with `lean` against the
-  library's build, exports it and hashes it as `export` hashes the library. Each
-  tagged declaration it holds must have the claim hash of the last export, and
-  every tagged declaration but the theorems must be there: the challenge then
-  means what the signers signed. A private name holds the module it is written
-  in, so the challenge's private constants are hashed under the library's names:
-  by their names, or by the module a name written with its module gives.
+  library's build, imports it and hashes its own declarations as `export`
+  hashes the library, in memory; what it imports from outside the library is
+  the library's build, so those declarations keep the last export's hashes.
+  Each tagged declaration it holds must have the claim hash of the last export,
+  or the kernel must find it definitionally equal to the library's, and every
+  tagged declaration but the theorems must be there: the challenge then means
+  what the signers signed, and a solution of it proves the library's theorem.
+  Lean can write the same source as other terms in one file (a `match` shares
+  the helper Lean made for another module's); the kernel decides as `equiv`
+  does, against the library's versions of what differs, read from the compiled
+  files of the modules that declare them. A private name holds the module it is
+  written in, so the challenge's private constants are hashed under the
+  library's names: by their names, or by the module a name written with its
+  module gives.
 
 ## Config: `leanblame.toml`
 

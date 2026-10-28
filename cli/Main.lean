@@ -138,8 +138,9 @@ def cmdChallenge (args : List String) : IO UInt32 := do
     return 0
   | none, some dir =>
     unless a.positional.isEmpty do fail "challenge --check DIR takes no names"
-    let n ← Challenge.check Source.backend root dir
-    IO.println s!"challenge {dir}: the {n} tagged declarations it holds mean what the library's do"
+    let (n, k) ← Challenge.check root dir
+    IO.println (s!"challenge {dir}: the {n} tagged declarations it holds mean what the library's do" ++
+      if k == 0 then "" else s!", {k} of them by definitional equality")
     return 0
   | _, _ => fail "usage: leanblame challenge [THEOREM|ID...] --out DIR, or leanblame challenge --check DIR"
 

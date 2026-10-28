@@ -97,35 +97,39 @@ def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Ar
     for n in comp do axioms := axioms.insert n sorted
   return roots.foldl (init := {}) fun m n => m.insert n (axioms.getD n #[])
 
-/-- Hash every declaration reachable from the boundary list in the export `src` serves; the export
-and the boundary list are stored as `exportHash` and `boundaryHash`. The graph keeps what the other
-commands need from `backend`. -/
-def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : BoundaryList)
-    (exportHash boundaryHash : String) : IO Core.Hashed := do
+/-- Hash every declaration reachable from the boundary list, with the facts `decl` reports. A
+declaration `known` gives is taken as it is, hashed already, with everything it reaches, which must be
+known too (`Challenge.check`: what the challenge imports from outside the library). -/
+def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList)
+    (known : String → Option Core.Node := fun _ => none) : IO (Std.HashMap String Core.Node) := do
   -- Tagged declarations with their informal text.
   let tagged : Std.HashMap String String :=
     boundary.declarations.foldl (init := {}) fun m d => m.insert d.name d.informal
   let isTagged := tagged.contains
-  let order := boundary.declarations.map (·.name)
   -- comparator's worklist loop, cut at tagged declarations (each is a seed of its own).
   let mut nodes : Std.HashMap String Core.Node := {}
-  let mut worklist := order.reverse
+  let mut hashed : Std.HashSet String := {}
+  let mut worklist := (boundary.declarations.map (·.name)).reverse
   while h : worklist.size > 0 do
     let target := worklist[worklist.size - 1]
     worklist := worklist.pop
     if nodes.contains target then continue
-    let d ← src.decl target
+    if let some node := known target then
+      nodes := nodes.insert target node
+      worklist := worklist ++ node.decl.deps.filter (!nodes.contains ·)
+      continue
+    let d ← decl target
     for dep in d.deps do
       unless isTagged dep || nodes.contains dep do worklist := worklist.push dep
     let informal := tagged[target]?
     nodes := nodes.insert target
       { decl := d, informal, own := Hash.own d informal, spec := informal.map (Hash.spec d ·)
         claim := "" }
-  let axioms := axiomsOf src order
+    hashed := hashed.insert target
+  -- Claims, for what was hashed here; a known declaration reaches known ones only.
   let succ (n : String) : Array String :=
-    (nodes[n]?.map (·.decl.deps) |>.getD #[]).filter fun d => !isTagged d && nodes.contains d
-  let roots := Core.sortNames (nodes.fold (init := #[]) fun acc n _ => acc.push n)
-  let comps := tarjan roots succ
+    (nodes[n]?.map (·.decl.deps) |>.getD #[]).filter fun d => !isTagged d && hashed.contains d
+  let comps := tarjan (Core.sortNames hashed.toArray) succ
   let entry (nodes : Std.HashMap String Core.Node) (d : String) : IO Hash.DepEntry := do
     let some dn := nodes[d]? | fail s!"dependency '{d}' was not hashed"
     if isTagged d then
@@ -152,7 +156,15 @@ def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : Boundary
       for m in members do
         let node := nodes[m]!
         nodes := nodes.insert m { node with claim := Hash.member g m }
-  return { nodes, axioms, boundary, exportHash, boundaryHash, standard := backend.standard
+  return nodes
+
+/-- Hash every declaration reachable from the boundary list in the export `src` serves; the export
+and the boundary list are stored as `exportHash` and `boundaryHash`. The graph keeps what the other
+commands need from `backend`. -/
+def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : BoundaryList)
+    (exportHash boundaryHash : String) : IO Core.Hashed :=
+  return { nodes := ← hashNodes src.decl boundary, axioms := axiomsOf src (boundary.declarations.map (·.name))
+           boundary, exportHash, boundaryHash, standard := backend.standard
            incomplete := backend.incomplete, checker := backend.checker }
 
 /--
