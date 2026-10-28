@@ -97,12 +97,13 @@ stop.
 ## Storage
 
 - One file per record in a records directory (`records/` by default).
-  Filename = sha256 of the file bytes as the sign server wrote them.
+  Filename = sha256 of the file bytes as they were written.
 - Terminal `sign` writes `local:` records. Provider identities (OpenReview,
-  ORCID, GitHub) come through the sign server, which is not built yet.
+  ORCID, GitHub) come from a service that logs the signer in and writes the
+  record (OpenVouch; not built yet).
 - `validate` gates every record, wherever the adopter runs it: schema, authority rules, and no
   modification or deletion of an existing record.
-- The party you trust is whoever holds the sign server's push credential,
+- The party you trust is whoever holds that service's push credential,
   normally the hosting institution. Name it in the library's README.
 
 A library lists its records directories in `leanblame.toml` (local

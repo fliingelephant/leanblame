@@ -2,7 +2,7 @@
 `leanblame status [--json]` and `leanblame blame NAME|ID`
 (docs/design/03-trust-model.md "Validity", docs/design/06-versioning.md, docs/design/14-schemas.md §4).
 
-Status reads the graphs `export` stored and never hashes (docs/design/15-generic-core.md, §9).
+Status reads the graphs `export` stored and never hashes (docs/design/04-architecture.md, "Storage").
 Records name declarations by id, so an approval follows its declaration through a rename. Per
 tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve records carrying

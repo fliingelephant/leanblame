@@ -20,7 +20,7 @@ as the only cause (the named ones, else all), compared with X's last live approv
 What is left is for a human to read: equiv prints the root causes, with the old and new values of
 each changed definition that is not definitionally equal.
 
-The hashes come from the graphs `export` stored (docs/design/15-generic-core.md, §9), keyed by
+The hashes come from the graphs `export` stored (docs/design/04-architecture.md, "Storage"), keyed by
 printed name; the terms from the old and current exports.
 -/
 import LeanBlame.Core.Status

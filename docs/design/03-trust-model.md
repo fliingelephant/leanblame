@@ -106,8 +106,7 @@ Hashes are not. Hashes depend only on the code.
 
 Rule: hash everything that changes meaning, nothing else.
 
-Every declaration has a **role**, which says what its body is to a signer
-([15-generic-core.md](15-generic-core.md)):
+Every declaration has a **role**, which says what its body is to a signer:
 
 | Role | The body | Lean kinds |
 |------|----------|------------|

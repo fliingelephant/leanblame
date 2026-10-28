@@ -8,7 +8,7 @@ Adapted for LeanBlame from comparator's closure walk, which ships in the Lean to
 `Lake/Check/Compare.lean`. The licence text is in `cli/LICENSES/Apache-2.0.txt`.
 
 Changes: the worklist loop is kept, but it walks one export, which a frontend serves as a
-`Core.Source` (docs/design/15-generic-core.md), instead of comparing a challenge with a solution.
+`Core.Source` (docs/design/04-architecture.md, "Beyond Lean"), instead of comparing a challenge with a solution.
 It seeds from the boundary list, cuts at tagged declarations, and hashes every declaration it
 reaches from the facts the frontend reports, proofs already left out (docs/design/03-trust-model.md,
 "The hash, precisely"). Cycles are found with Tarjan's algorithm and hashed as groups. Instead of

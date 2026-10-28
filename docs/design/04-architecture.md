@@ -1,15 +1,16 @@
 # 4. Architecture
 
-## Two repositories
+## Who owns what
 
-| Repo | Owns | Contains no |
+| Part | Owns | Contains no |
 |------|------|-------------|
-| `leanblame` | CLI (Lean package), web (sign server + page), schemas | physics, or any field content |
-| `openphysics` (first user) | Lean library, `records/`, `leanblame.toml` | auth code, page code |
+| `leanblame` | the CLI (a Lean package) and its schemas | field content, service code |
+| a library (first: OpenPhysics) | its Lean code, `records/`, `leanblame.toml` | LeanBlame code |
+| a service (first: OpenVouch) | pages, logins, writing records; it calls the CLI | validity rules |
 
-## Three parts
+LeanBlame knows nothing about any service.
 
-### 1. `cli` (Lean package)
+## The CLI
 
 Two Lake targets users see. A tiny library with the `@[trusted]` attribute and
 nothing else, so user modules never import Lake. And the executable, whose own
@@ -17,7 +18,7 @@ modules sit in an internal third library: Lake builds an executable's imports
 only from library targets.
 
 The executable reads a **boundary list**, an **export**, and **records**. Its
-modules form two layers ([15-generic-core.md](15-generic-core.md)):
+modules form two layers:
 
 - `Core/`, the generic tool: schemas, hashes, the closure walk, records,
   validity, the object store, git. It knows declarations only by printed name,
@@ -29,9 +30,12 @@ modules form two layers ([15-generic-core.md](15-generic-core.md)):
 - `Lean/`, the Lean frontend: `export` and its blueprint reader, `id`, the toolchain's export
   parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
   `equiv`, sorried copies. The export is turned back into a kernel environment by an
-  adaptation of core's `Replay.lean`.
+  adaptation of core's `Replay.lean`. It maps printed names back to its constants and
+  fails if two constants of one export print the same.
 
-`Main` passes the Lean frontend to the core commands.
+A module under `Core/` imports only `Init`, `Std`, `Lean.Data.*`, `Lake.Toml`,
+`Lake.Util.*` and other `Core/` modules: nothing in it knows what a Lean term,
+environment or kernel is. `Main` passes the Lean frontend to the core commands.
 
 Eleven commands:
 
@@ -44,24 +48,15 @@ Eleven commands:
 | `blame X` | Who signed `X` (a name or an id), when, at which claim hash, and what each approval is worth now. |
 | `diff --from RECORD [--to RECORD] [--json] [X...]` | What changed between the export an approve record names and another's, or the last export: the comparison `status` makes against the last live approval, for two points the caller picks, with both readable versions ([14-schemas.md](14-schemas.md) §6). Reads graphs from the store; a point whose export the store lacks is an error. |
 | `equiv [X...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
-| `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal. Dev path: `local:` ids; provider identities come through the sign server. |
+| `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal, with a `local:` signer id. Ids backed by a login come from a service that writes records. |
 | `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
 | `sorried HASH...` | Print the sorried copies of the last export by the hashes `status --json` lists, as one JSON object: hash to pieces. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
-### 2. `records` (git)
+## Records
 
 One TOML file per signoff in the library's records directories (`records/` by
 default). Schema and validator in `leanblame`. See [05-records.md](05-records.md).
-
-### 3. `web` (TypeScript)
-
-- **Sign server.** Logs the reviewer in (OpenID Connect for OpenReview and
-  ORCID, OAuth 2.0 for GitHub, `local` for dev), shows the declaration with its
-  informal text, kernel-level type with notation off, dependencies and their
-  signers, the cause of any pending change, and on approval writes one record.
-- **Page.** doc-gen4 output plus an overlay from `status --json`: signers,
-  state, cause, blocked-by, history. Any other viewer reads the same JSON.
 
 ## Blueprints
 
@@ -124,7 +119,7 @@ allowed_signers = "any"         # or a list of provider:id
 ```
 
 Every key is required; `init` writes them all. Validity is a rule over records.
-The two signer knobs are the whole policy; `status` reads them. Who gets *asked* to review is a queue in the web, not
+The two signer knobs are the whole policy; `status` reads them. Who gets *asked* to review is a service's queue, not
 part of validity.
 
 No axiom list. Permitted axioms are the three standard ones plus any tagged,
@@ -146,7 +141,9 @@ signed `axiom` in the library or its tagged dependencies.
   made from. `export` deletes what nothing names any more: exports and boundary
   lists named by no record and not current, the graphs of deleted exports, copies
   that are not current, evidence whose claim is no longer current, proofs named by
-  no evidence and no record.
+  no evidence and no record. Validity compares the records' claims with the graph
+  of the current code, which whoever judges makes with `export`. Graphs of old
+  exports only explain causes and show diffs; they never change a state.
 - `equiv` evidence: `.leanblame/equiv/evidence/<claim>.json`, one file per claim
   hash, naming the declaration's id, the proof and the record it was compared
   with. Every JSON file here has a schema id and is read strictly.
@@ -163,7 +160,7 @@ object store, and records.
 
 | Used as is | Copied and changed | New |
 |------------|--------------------|-----|
-| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, doc-gen4, OIDC/OAuth libraries, git | comparator's closure walk; core's `Replay.lean` | claim hash, cause analysis, records and validator, `status`/`blame`/`release`, sign server, `Old.` reconstruction, page overlay |
+| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, git | comparator's closure walk; core's `Replay.lean` | claim hash, cause analysis, records and validator, `status`/`blame`/`diff`/`release`, `Old.` reconstruction, sorried copies |
 
 No forks.
 
@@ -172,25 +169,23 @@ No forks.
 ```
 author tags declarations
   -> cli export
-  -> web shows declaration to reviewer
-  -> reviewer approves
-  -> record committed, validate passes
-  -> cli status --json -> page
+  -> a reviewer reads the declaration (in a service's page, or the terminal)
+  -> a record is written (cli sign), validated and committed
+  -> cli status --json -> any viewer
 ```
 
-On change, `status` reports state and causes and `equiv` may add evidence; who
-acts is the table in [03-trust-model.md](03-trust-model.md).
+On change, `status` reports state and causes, `diff` shows what changed, and
+`equiv` may add evidence; who acts is the table in [03-trust-model.md](03-trust-model.md).
 
-## Interfaces
+## Formats
 
-Boundary list, record, release manifest, `status --json`. Exact fields in
-[14-schemas.md](14-schemas.md).
+Boundary list, record, release manifest, `status --json`, sorried copies,
+`diff --json`. Exact fields in [14-schemas.md](14-schemas.md).
 
 ## Language
 
-Lean for the CLI, TypeScript for the web. Lean FRO writes core tools in Lean
-and web tools in TypeScript. Rust was considered and dropped: it would need a
-second export parser or an orchestration-only binary.
+Lean. The CLI reuses the toolchain's export parser, kernel and Lake; another
+language would need a second export parser.
 
 ## Beyond Lean
 
@@ -201,6 +196,6 @@ its dependencies, and what it rests on for the axiom report. And `Backend`:
 the `Source` of a stored export, a replay by the assistant's own checker and
 that checker's name, its standard axioms, and the axioms that stand for a
 missing proof. `export` keeps the names in the graph. Exact fields in
-[15-generic-core.md](15-generic-core.md). `export` and `equiv` belong to the
-frontend too. The core, records, the validity rules, `status`, `blame`, `sign`,
-`validate`, `release` and the web are unchanged.
+`cli/LeanBlame/Core/Graph.lean`. `export` and `equiv` belong to the frontend too.
+The core, records, the validity rules, `status`, `blame`, `diff`, `sign`,
+`validate`, `release`, and every service on the CLI stay as they are.

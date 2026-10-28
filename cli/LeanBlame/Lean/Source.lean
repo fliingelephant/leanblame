@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving
 -/
 /-
-The Lean frontend of docs/design/15-generic-core.md: a parsed export served to the core as a
+The Lean frontend (docs/design/04-architecture.md, "Beyond Lean"): a parsed export served to the core as a
 `Core.Source`, and `backend`, what Lean contributes to the commands. `declOf` is adapted from
 comparator's `runForUsedConsts`, which ships in the Lean toolchain as `Lake/Check/Util.lean`; the
 licence text is in `cli/LICENSES/Apache-2.0.txt`.

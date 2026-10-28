@@ -7,7 +7,7 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 `module`, `kind`, `role` and the printed statement. Exports the library's constants and the
 boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
-(docs/design/15-generic-core.md). Makes the sorried copy of each module (`Sorried`). Then points
+(docs/design/04-architecture.md, "Storage"). Makes the sorried copy of each module (`Sorried`). Then points
 `.leanblame/current` at them, with the commit, toolchain and dependencies they were made from.
 Prints the two hashes.
 -/

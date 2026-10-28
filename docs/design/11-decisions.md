@@ -1,6 +1,6 @@
 # 11. Decisions
 
-Each entry: the decision, the reason, what was rejected. All 2026-10-23.
+Each entry: the decision, the reason, what was rejected.
 
 ### What a signature covers
 
@@ -24,11 +24,10 @@ Everything that changes meaning, nothing else. In: kind, role, name, universe
 parameters, type and body with proof subterms erased, informal text of
 tagged declarations. Out: proofs (wherever they occur: proof irrelevance),
 binder names, implicitness, kernel hints, recursor rules. Cycles hashed as groups. `unsafe` cannot be tagged.
-Since 2026-10-24 the role (`assumed`, `defined`, `proved`) replaces safety:
-the rules read the role, so they hold for any proof assistant; `kind` is the
-assistant's own label, and a body the kernel does not see has no body hash.
-Rejected: Lean's kinds and safety as fixed lists in the hash
-([15-generic-core.md](15-generic-core.md)).
+The rules read the role (`assumed`, `defined`, `proved`), so they hold for
+any proof assistant; `kind` is the assistant's own label, and a body the kernel
+does not see has no body hash. Rejected: Lean's kinds and safety as fixed lists
+in the hash.
 
 ### `equiv` says why, and only for untagged causes
 
@@ -64,18 +63,18 @@ manifest. Keeps LeanBlame independent of how a project plans or displays its
 work: a blueprint project can sign statements before they are proved. An id is
 how a declaration is cited and followed (owner, 2026-10-26): from a blueprint,
 a label is the id of the first declaration it names, the parent of the others.
-The hand-written TOML list was dropped: it had no ids.
+Rejected: a hand-written list, which has no ids.
 
 ### `status --json` is the output
 
-Any page can read it. Our page is doc-gen4 plus this overlay. Rejected:
-building on verso-blueprint, which would force every library to author Verso
-documents.
+It carries everything a viewer shows, so no viewer computes it again.
+Rejected: building on verso-blueprint, which would force every library to
+author Verso documents.
 
 ### One record type, no delta records
 
-`action = approve | withdraw`. Richer kinds and cargo-vet-style delta records
-were tried and dropped as harder to explain than useful. Can be added later.
+`action = approve | withdraw`. Not now: richer kinds and cargo-vet-style
+delta records, harder to explain than useful.
 
 ### No merge or rebase
 
@@ -104,29 +103,28 @@ the old meaning can be found.
 
 ### Notation is not on the boundary
 
-It never reaches the kernel. Conventions are declarations. The sign server
-shows types with notation off.
+It never reaches the kernel. Conventions are declarations. Statements are
+printed with notation (`pretty`) and without (`plain`).
 
 ### Formats and commands
 
-TOML for records and config, JSON for machine output. Eight commands: `init`,
-`export`, `status`, `blame`, `equiv`, `sign`, `validate`, `release`.
+TOML for what humans read in git (records, config), JSON for what programs
+read. The commands are in [04-architecture.md](04-architecture.md).
 
 ### No forks
 
 Adapt two Apache-2.0 files, comparator's closure walk and core's `Replay.lean`
 (export to kernel environment). Use `leanexport`,
-`leanchecker`, Lake's TOML reader, doc-gen4 as is. Rejected: forking the
+`leanchecker` and Lake's TOML reader as is. Rejected: forking the
 archived comparator (it lacks `--from-export`), running `lake comparator` on
 `equiv`'s proofs (the kernel has already checked them in-process; `leanchecker`
 replays the stored export), comparator-live (no role in the data flow),
 verso-blueprint (see above).
 
-### Lean CLI, TypeScript web
+### Lean CLI
 
-The CLI reuses the toolchain's export parser and data types. Rust would need a
-second parser or an orchestration-only binary. TypeScript matches
-comparator-live.
+The CLI reuses the toolchain's export parser and data types. Another language
+would need a second parser or an orchestration-only binary.
 
 ### Delta replay deferred
 
@@ -135,7 +133,7 @@ pinned kernel version. Add only if throughput forces it.
 
 ### Distributed storage, no distributed build
 
-Records repos per institution, exports in an object store, one stateless page.
+Records repos per institution, exports in an object store, any viewer.
 Mathlib's cache and Reservoir already work this way.
 
 ### Identity
@@ -152,9 +150,9 @@ nothing).
 
 ### Who may sign, and how many
 
-Per library, in `leanblame.toml`: `allowed_signers` (any, a list, or a repo)
-and `required_signers` (`init` writes 1). Pure rule over records, no Lean in it.
-Reviewer assignment is a web queue and never affects validity.
+Per library, in `leanblame.toml`: `allowed_signers` (any, or a list) and
+`required_signers` (`init` writes 1). Pure rule over records, no Lean in it.
+Reviewer assignment is a service's queue and never affects validity.
 
 ### Declaration ids (owner, 2026-10-26)
 
@@ -186,19 +184,17 @@ data is made again.
 
 ### Root causes (owner, 2026-10-26: "Fix the three in root causes")
 
-Three root causes behind most review findings, fixed at the root:
-
-1. **The viewers computed again what LeanBlame knows** (record files, the
-   standing of approvals, the toolchain, the standard axioms). Now
-   `status --json` carries all of it; a viewer only displays it.
-2. **Defaults on errors.** Every JSON file has a schema id and is read strictly:
+1. **Viewers compute nothing.** `status --json` carries what LeanBlame knows:
+   the record files, the standing of approvals, the toolchain, the standard
+   axioms. A viewer only displays it.
+2. **No defaults on errors.** Every JSON file has a schema id and is read strictly:
    a missing or an unknown key is an error. Every `leanblame.toml` key is
    required. No fallback on a failure: proof erasure, the statement printer,
    the mathlib cache, Lake's output. A withdraw that breaks the rules, an
    `exclude` entry that names no approve record, and a record in two
    directories stop every command but `validate`, which lists them. `export`
    builds exactly the libraries it exports.
-3. **Records stored names.** Records name declarations by id
+3. **Records name declarations by id**
    (`leanblame.record.2`), so an approval follows a rename: the declaration is
    `outdated`, not `unsigned`. A new id is a new declaration: the old approvals
    stay with the old id.
@@ -210,5 +206,4 @@ is git's; the service displays it. `status` compares each declaration with its l
 `diff` compares two points the caller picks (approve records, or the last export), with the same
 comparison (`Walk.compare`): each part of the claim, by hash, so a difference is one the kernel sees,
 not a change of the printer. It reads the stored graphs and never hashes; a declaration whose claim did
-not move is not walked. Before, OpenVouch compared printed statements, and a printer change looked like
-a change of meaning.
+not move is not walked.

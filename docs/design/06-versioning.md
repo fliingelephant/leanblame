@@ -94,8 +94,8 @@ convention's spec is part of their claim hash. Changing a convention's text
 re-signs everyone who uses it, which is correct.
 
 Notation and macros are not conventions. They never reach the kernel, so they
-cannot be hashed or signed. The sign server shows types with notation off, so
-the reviewer sees what the kernel sees.
+cannot be hashed or signed. The `plain` statement prints without them, closer
+to what the kernel sees.
 
 ## Revert and withdraw
 

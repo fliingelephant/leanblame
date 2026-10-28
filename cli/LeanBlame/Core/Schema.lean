@@ -6,7 +6,7 @@ docs/design/05; JSON key order is not part of the schema.
 
 Declaration names are kept as strings, exactly as the frontend prints them (Lean:
 `Lean.Name.toString`); only the frontend maps them back to its constants
-(docs/design/15-generic-core.md). A name identifies a declaration within one export; its id
+(docs/design/04-architecture.md, "Beyond Lean"). A name identifies a declaration within one export; its id
 identifies it across exports.
 -/
 import Lake.Toml
@@ -68,7 +68,7 @@ def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
 
 Each value prints as the string the schemas use; `Role` enters the hash as that string. -/
 
-/-- What a signer reads of a declaration's body (docs/design/15-generic-core.md): `assumed`, there
+/-- What a signer reads of a declaration's body (docs/design/03-trust-model.md): `assumed`, there
 is none and the statement is taken as true; `defined`, the body is the meaning; `proved`, the body
 is a proof, which the kernel checks and nobody reads. -/
 inductive Role where

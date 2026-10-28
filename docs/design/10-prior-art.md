@@ -13,7 +13,7 @@ Read on 2026-10-23 unless marked otherwise.
 | **verso-blueprint** (Lean FRO) | Prose, Lean declarations and dependency graph in one document; `@[blueprint]`; `blueprint-manifest.json` with labels, statuses, ownership; custom clients documented (the repo notes the manifest is not yet a stable interface) | Signoff, hash binding. A natural consumer of `status --json`. |
 | **LeanArchitect** (Hanwen Zhu) | `@[blueprint]` generating blueprint nodes from Lean declarations, for the Python leanblueprint; used by PNT+ and infinity-cosmos | Review, hashes. Precedent for `@[trusted]`. |
 | **leaff** (alexjbest) | Diff of two Lean environments: all added, removed, renamed, changed declarations | Closure walk, hash binding |
-| **doc-gen4** | Per-declaration HTML with docstrings for any Lake package | Nothing; it is our page base |
+| **doc-gen4** | Per-declaration HTML with docstrings for any Lake package | Nothing |
 | **Mathlib review** | Reviewer plus maintainer merge is an implicit attestation | Record is only GitHub history |
 | **formal-conjectures** (Google DeepMind) | Registry of formal statements of open conjectures; version bump when a misformalization is fixed | Named signer per statement, hash binding |
 | **hex** libraries (Lean FRO) | Mathlib-free executable definitions plus separate `-theory` correspondence packages | Not review; the slim-dependency pattern reduces cascades |

@@ -8,7 +8,7 @@ Two gates and a report, on the current export:
 3. axioms: no tagged theorem rests on an axiom that is neither standard nor a tagged, signed
    axiom (from `status`; open theorems are counted, not failed).
 Then the manifest goes to the object store, and to FILE with `--out`. Its theorems are the tagged
-declarations with role `proved` (docs/design/15-generic-core.md).
+declarations with role `proved` (docs/design/03-trust-model.md).
 -/
 import LeanBlame.Core.Status
 
