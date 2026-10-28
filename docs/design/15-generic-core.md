@@ -376,10 +376,10 @@ Decided with the owner; it supersedes §1–§9 where they differ.
 - The boundary list holds the declarations only (`leanblame.boundary.4`);
   `.leanblame/current` holds the commit, toolchain and dependencies. A graph is
   keyed by the store hashes of its export and boundary list (`leanblame.graph.2`).
-- `status --json` (`leanblame.status.5`, [14-schemas.md](14-schemas.md)) carries
+- `status --json` (`leanblame.status.6`, [14-schemas.md](14-schemas.md)) carries
   everything a viewer needs, so no viewer computes it again: toolchain,
   dependencies, what the lakefile requires, modules with their imports and
-  sorried copies, standard axioms, every record, each approval's
+  the hash of each sorried copy, standard axioms, every record, each approval's
   standing, each declaration's untagged dependencies with their modules, the
   untagged declarations of the library that tagged ones use, and the unpermitted
   axioms. `change` is `null` when the graph of the last live approval is not in
