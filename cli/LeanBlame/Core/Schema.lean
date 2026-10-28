@@ -209,7 +209,8 @@ structure BoundaryDecl where
   first. -/
   parent : Option String := none
   module : String
-  /-- The proof assistant's own label (Lean: `def`, `theorem`, …); never interpreted. -/
+  /-- What it is, in the proof assistant's own words (Lean: as its documentation names it, `def`,
+  `theorem`, `structure`, `field`, …); never interpreted, never hashed. -/
   kind : String
   role : Role
   /-- The docstring (a member without one: its parent's), as `normalizeInformal` leaves it. -/
@@ -217,14 +218,15 @@ structure BoundaryDecl where
   statement : Statement
   deriving Inhabited, Repr
 
-/-- The declarations of the trusted boundary, sorted by name. Commit, toolchain and dependencies
-are not part of it: they change while the declarations stay (`Store.Current` holds them). -/
+/-- The declarations of the trusted boundary, in source order (a module after the modules it
+imports, then by position). Commit, toolchain and dependencies are not part of it: they change while
+the declarations stay (`Store.Current` holds them). -/
 structure BoundaryList where
   library : String
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.4"
+def BoundaryList.schemaId : String := "leanblame.boundary.5"
 
 instance : ToJson BoundaryDecl where
   toJson d := Json.mkObj [("name", d.name), ("id", d.id), ("parent", toJson d.parent),
@@ -576,7 +578,7 @@ structure StatusReport where
   modules : Array OwnModule
   /-- The assumptions every proof may rest on (`Core.Backend.standard`). -/
   standard : Array String
-  /-- Sorted by name. -/
+  /-- In the boundary list's order: source order. -/
   declarations : Array StatusDecl
   /-- Every record of the records directories. -/
   records : Array LoadedRecord
@@ -584,16 +586,15 @@ structure StatusReport where
   untaggedInLibrary : Array (String × Array String)
   deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.6"
+def StatusReport.schemaId : String := "leanblame.status.7"
 
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
     ("date", h.date.toIso), ("name", h.name), ("claim", h.claim), ("note", toJson h.note),
     ("standing", toJson h.standing)]
 
-/-- Keyed by name in the report, so the name is not repeated. -/
 instance : ToJson StatusDecl where
-  toJson d := Json.mkObj [("id", d.decl.id), ("parent", toJson d.decl.parent), ("module", d.decl.module),
+  toJson d := Json.mkObj [("name", d.decl.name), ("id", d.decl.id), ("parent", toJson d.decl.parent), ("module", d.decl.module),
     ("kind", d.decl.kind), ("role", toJson d.decl.role), ("informal", d.decl.informal),
     ("statement", toJson d.decl.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
@@ -612,7 +613,7 @@ instance : ToJson StatusReport where
     ("modules", Json.arr (s.modules.map fun m =>
       Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("sorried", m.copy)])),
     ("standard_axioms", toJson s.standard),
-    ("declarations", Json.mkObj (s.declarations.toList.map fun d => (d.decl.name, toJson d))),
+    ("declarations", toJson s.declarations),
     ("records", toJson s.records),
     ("untagged_in_library", Json.arr (s.untaggedInLibrary.map fun (n, users) =>
       Json.mkObj [("name", n), ("used_by", toJson users)]))]

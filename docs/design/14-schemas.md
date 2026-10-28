@@ -12,12 +12,14 @@ identifies it across exports.
 Produced by `export` from `@[trusted "id"]`, including tags found in imported
 libraries, or from a verso-blueprint manifest (`--boundary FILE`,
 [04-architecture.md](04-architecture.md), Blueprints). Read by `status`, from
-the object store. It holds the declarations only. The commit, toolchain and
+the object store. It holds the declarations only, in source order: a module
+after the modules it imports, then by position in the file (a member without a
+position of its own at its parent's), ties by name. The commit, toolchain and
 dependencies they come from are in `.leanblame/current` and in each record.
 
 ```json
 {
-  "schema": "leanblame.boundary.4",
+  "schema": "leanblame.boundary.5",
   "library": "OpenPhysics",
   "declarations": [
     {
@@ -42,7 +44,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `name` | fully qualified constant name, after structure expansion |
 | `id` | stays when the declaration is renamed or edited; never hashed. Its own: the UUID in `@[trusted "id"]`, or, from a blueprint, the label of its first declaration. Else the parent's id, `/`, and its name under the parent: `3f2b…/x` for the field `x` of a tagged structure, `def:point/norm` for another declaration of the label `def:point`. A tag without an id stops `export`. No two declarations share an id |
 | `parent` | the declaration whose id stands for this one: the first declaration of its blueprint label, else the tagged structure or inductive it is a constructor or projection of; a parent without an id of its own is passed over for its own parent; else `null` |
-| `kind` | the proof assistant's own label, non-empty, never interpreted. Lean: `def`, `theorem`, `axiom`, `inductive`, `ctor`, `opaque`, `quot`, `rec` (`rec` is never on the list). A definition the export marks partial would be labelled `partial def`; Lean 4.35 exports them as `opaque` |
+| `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [03-trust-model.md](03-trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
 | `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` for the assistant to read again (notation off, coercions as the functions they are); a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
@@ -111,7 +113,7 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "schema": "leanblame.status.6",
+  "schema": "leanblame.status.7",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
@@ -125,8 +127,9 @@ every record. Viewers display it; they never need another source. With
     { "name": "OpenPhysics.Ising", "imports": ["Mathlib.Analysis.SpecialFunctions.Exp"], "sorried": "sha256:…" }
   ],
   "standard_axioms": ["propext", "Classical.choice", "Quot.sound"],
-  "declarations": {
-    "OpenPhysics.Ising.groundEnergy_le": {
+  "declarations": [
+    {
+      "name": "OpenPhysics.Ising.groundEnergy_le",
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
       "parent": null,
       "module": "OpenPhysics.Ising",
@@ -149,7 +152,7 @@ every record. Viewers display it; they never need another source. With
       "untagged_deps": [{ "name": "Finset.sum", "module": "Mathlib.Algebra.BigOperators.Group.Finset.Defs" }],
       "closure_size": 3412
     }
-  },
+  ],
   "records": [
     { "record": "sha256:…", "path": "records/….toml", "action": "approve", "signer": "openreview:~Jane_Doe1",
       "date": "2026-10-23T14:02:11Z", "note": null, "module": "OpenPhysics.Ising", "commit": "1a2b3c…",
@@ -168,7 +171,8 @@ every record. Viewers display it; they never need another source. With
 | `requires` | what the library's lakefile requires: the git URL, commit and subdirectory of each; `git` and `rev` are `null` for a path dependency |
 | `modules` | the library's own modules: the modules each imports directly but `Init`, in its order, and `sorried`, the hash of its sorried copy (the module after its imports, in pieces), which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
 | `standard_axioms` | the axioms every proof may rest on |
-| `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
+| `declarations` | one entry per tagged declaration, in the boundary list's order (source order) |
+| `name`, `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
 | `state` | `valid` (enough live approvals carry `claim`), `outdated` (live approvals exist, not enough carry `claim`), `unsigned` (none) |
 | `change` | causes since the last live approval: `own-text`, `own-body`, `dep-spec`, `cut-moved`, `untagged`, each with the names involved; `[]` when the claim did not move or there is no live approval; `null` when unknown, because this store lacks the export that approval names |
 | `signers` | signers of live approvals carrying `claim` |
@@ -219,7 +223,7 @@ stderr.
 
 ```json
 {
-  "schema": "leanblame.diff.1",
+  "schema": "leanblame.diff.2",
   "library": "OpenPhysics",
   "from": { "record": "sha256:…", "commit": "1a2b3c…", "export": "sha256:…", "boundary": "sha256:…" },
   "to": { "record": null, "commit": "9f8e7d…", "export": "sha256:…", "boundary": "sha256:…" },

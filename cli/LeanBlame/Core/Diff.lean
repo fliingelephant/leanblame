@@ -13,7 +13,7 @@ namespace LeanBlame.Diff
 
 open Lean (Json toJson)
 
-def schemaId : String := "leanblame.diff.1"
+def schemaId : String := "leanblame.diff.2"
 
 /-- One end of a diff: the graph of the export an approve record names, or of the last `export`. -/
 structure Point where

@@ -156,18 +156,38 @@ structure Entry where
   ownId : Option String
   parent : Option Name
 
+/-- What `n` is, in the words of Lean's documentation (doc-gen4): `def`, `theorem`, `axiom`,
+`opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's
+projection. Not hashed: the hash takes the kernel's kind (`Source.kindOf`). -/
+def kindWord (env : Environment) (n : Name) (ci : ConstantInfo) : String :=
+  if env.isProjectionFn n then "field" else
+  match ci with
+  | .inductInfo _ =>
+    if isClass env n then "class" else if isStructure env n then "structure" else "inductive"
+  | .ctorInfo _ => "constructor"
+  | .defnInfo _ => if Meta.isInstanceCore env n then "instance" else Source.kindOf ci
+  | _ => Source.kindOf ci
+
+/-- Where `n` stands in the source: its module's place in the import order (after every module it
+imports), then the line and column where it starts. -/
+def sourcePlace (env : Environment) (n : Name) : Option (Nat × Nat × Nat) := do
+  let idx ← env.getModuleIdxFor? n
+  let r ← Sorried.declRange? env n
+  return (idx.toNat, r.range.pos.line, r.range.pos.column)
+
 /-- The name of `n` under `root`, the declaration whose id stands for it: `x` for `Sample.Point.x`
 under `Sample.Point`; all of `n` when it is not under `root`. -/
 def relativeName (root n : Name) : String :=
   if root.isPrefixOf n && root != n then (n.replacePrefix root .anonymous).toString else n.toString
 
-/-- The boundary list's declarations, sorted by name, with their constants: the tagged ones, and the
+/-- The boundary list's declarations in source order, with their constants: the tagged ones, and the
 constructors and projections of tagged inductives and structures that are not tagged themselves, with
 their own docstring or else the parent's text. `parent` names the declaration whose id stands for
 this one: the first declaration of its blueprint label, else the tagged inductive or structure it is
 a constructor or projection of; a parent without an id of its own is passed over for its own
 parent. A declaration without an id of its own has the id `<parent's id>/<name under the parent>`.
-`module`, `kind` and `role` come from `env`; the statement is filled in by `withStatements`. Also the
+`module`, `kind` and `role` come from `env`; the statement is filled in by `withStatements`. Source
+order is `sourcePlace`'s, a member without a place of its own at its parent's, ties by name. Also the
 problems. -/
 def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryDecl) × Array String) := do
   let tagged : NameSet := tags.foldl (·.insert ·.name) {}
@@ -212,11 +232,17 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       errors := errors.push s!"{other} and {e.name} have the same id {id}; remove it from one of them and run `leanblame id`"
     owner := owner.insert id e.name
     let module ← IO.ofExcept (moduleOf env e.name)
+    let some place := sourcePlace env e.name <|> parent.bind (sourcePlace env)
+      | errors := errors.push s!"{e.name}: Lean has no source position for it"; continue
     let d : BoundaryDecl := {
       name := e.name.toString, id, parent := parent.map (·.toString), module := module.toString
-      kind := Source.kindOf e.ci, role := Source.roleOf e.ci, informal := e.informal, statement := default }
-    out := out.push (e.name, d)
-  return (out.qsort (·.2.name < ·.2.name), errors)
+      kind := kindWord env e.name e.ci, role := Source.roleOf e.ci, informal := e.informal, statement := default }
+    out := out.push (place, e.name, d)
+  let before (a b : (Nat × Nat × Nat) × Name × BoundaryDecl) : Bool :=
+    let ((m, l, c), (m', l', c')) := (a.1, b.1)
+    if m != m' then m < m' else if l != l' then l < l' else if c != c' then c < c'
+    else a.2.2.name < b.2.2.name
+  return ((out.qsort before).map (·.2), errors)
 
 /-- The Lean script that prints the statements (docs/design/14-schemas.md §1) of the constants named
 in `names`, one per line, as JSON into `out`. It runs in the library with `lake env lean`, so the

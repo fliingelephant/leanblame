@@ -5,7 +5,7 @@
 | **mathlib** | The main Lean 4 mathematics library. |
 | **physlib** | An existing Lean physics library. Any upstream library is treated the same way. |
 | **declaration / constant** | One named thing in a Lean environment: def, theorem, structure, axiom, instance. |
-| **kind** | The proof assistant's own label for a declaration (Lean: `def`, `theorem`, `axiom`, …). Hashed as text, never interpreted. |
+| **kind** | What a declaration is. The hash takes the kernel's kind (Lean: `def`, `theorem`, `inductive`, …); the boundary list and `status` show the documentation's word (`structure`, `field`, `instance`, …). Never interpreted. |
 | **role** | What a declaration's body is to a signer: `assumed` (none), `defined` (the meaning, read), `proved` (a proof, never read). The hash rules read it. |
 | **export** | Output of `leanexport`: every constant with its type and body, as the kernel sees it. |
 | **frontend** | The part of LeanBlame that knows one proof assistant: reads its exports, prints its terms, asks its kernel. Lean's is the only one. See [04-architecture.md](04-architecture.md), "Beyond Lean". |

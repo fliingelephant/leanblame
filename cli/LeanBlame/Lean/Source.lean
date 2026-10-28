@@ -27,8 +27,9 @@ namespace LeanBlame.Source
 
 open Lean
 
-/-- The kind label of a constant, as the boundary list, status and the hash name it. A definition
-the export marks partial would be `partial def`; Lean 4.35 exports a `partial def` as `opaque`. -/
+/-- The kernel's kind of a constant, as the hash takes it (the boundary list names it in words:
+`Export.kindWord`). A definition the export marks partial would be `partial def`; Lean 4.35 exports
+a `partial def` as `opaque`. -/
 def kindOf : ConstantInfo → String
   | .defnInfo d => if d.safety == .safe then "def" else "partial def"
   | .thmInfo _ => "theorem"

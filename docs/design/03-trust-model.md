@@ -114,10 +114,12 @@ Every declaration has a **role**, which says what its body is to a signer:
 | `defined` | is the meaning; the signer reads it | `def`, `opaque`, `inductive`, `ctor`, `quot`, `rec` |
 | `proved` | is a proof; the kernel checks it, nobody reads it | `theorem` |
 
-The **kind** is the proof assistant's own label, as in the table. It is hashed
-as text and never interpreted; the rules below read the role. A definition the
+The **kind** the hash takes is the kernel's, as in the table. It is hashed as
+text and never interpreted; the rules below read the role. A definition the
 export marks partial would be labelled `partial def`; Lean 4.35 exports them as
-`opaque`.
+`opaque`. The boundary list names each declaration in the documentation's words
+instead (`structure`, `field`, `instance`, …); those words are not hashed, as
+they add nothing the kernel's kind and the type do not already fix.
 
 **In:** kind, role, name, ordered universe parameters, type, the body of a
 `defined` declaration when the kernel sees it, informal text (tagged

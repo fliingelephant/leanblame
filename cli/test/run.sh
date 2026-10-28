@@ -155,7 +155,7 @@ python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not matc
 import json, sys
 s = json.load(open(sys.argv[1]))
 ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
-assert s["schema"] == "leanblame.status.6"
+assert s["schema"] == "leanblame.status.7"
 assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "requires", "export", "boundary", "generated",
                   "modules", "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
 assert len(s["commit"]) == 40, s["commit"]
@@ -168,10 +168,20 @@ assert modules["Sample"]["imports"] == ["Sample.Basic", "Sample.Energy"], module
 assert modules["Sample.Energy"]["imports"] == ["Sample.Basic"] and modules["Sample.Basic"]["imports"] == ["LeanBlame.Attr"]
 assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
 assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
-keys = {"id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
+keys = {"name", "id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
         "history", "blocked_by", "proof", "evidence", "tagged_deps", "untagged_deps", "closure_size"}
 members = {"Sample.Point.mk": "mk", "Sample.Point.x": "x", "Sample.Point.y": "y"}
-for name, d in s["declarations"].items():
+order = [d["name"] for d in s["declarations"]]
+assert order == ["Sample.energy", "Sample.Point", "Sample.Point.mk", "Sample.Point.x", "Sample.Point.y",
+                 "Sample.Point.norm", "Sample.pointEnergy", "Sample.second_site", "Sample.energy_even",
+                 "Sample.energy_pos", "Sample.one_site_pos"], order
+decls = {d["name"]: d for d in s["declarations"]}
+kinds = {n: d["kind"] for n, d in decls.items()}
+assert kinds == {"Sample.energy": "def", "Sample.Point": "structure", "Sample.Point.mk": "constructor",
+                 "Sample.Point.x": "field", "Sample.Point.y": "field", "Sample.Point.norm": "def",
+                 "Sample.pointEnergy": "def", "Sample.second_site": "theorem", "Sample.energy_even": "theorem",
+                 "Sample.energy_pos": "axiom", "Sample.one_site_pos": "theorem"}, kinds
+for name, d in decls.items():
     assert set(d) == keys, (name, set(d) ^ keys)
     assert d["state"] == "valid" and d["signers"] == ["local:alice"] and d["change"] == [], name
     want_id = ids["Sample.Point"] + "/" + members[name] if name in members else ids[name]
@@ -183,20 +193,20 @@ for name, d in s["declarations"].items():
     h = d["history"]
     assert len(h) == 1 and h[0]["action"] == "approve" and h[0]["claim"] == d["claim"], (name, h)
     assert h[0]["name"] == name and h[0]["standing"] == "current", (name, h)
-assert s["declarations"]["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
-assert {"name": "Sample.double", "module": "Sample.Basic"} in s["declarations"]["Sample.energy"]["untagged_deps"]
+assert decls["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
+assert {"name": "Sample.double", "module": "Sample.Basic"} in decls["Sample.energy"]["untagged_deps"]
 text = lambda segs: "".join(seg["text"] for seg in segs)
-even = s["declarations"]["Sample.energy_even"]["statement"]
+even = decls["Sample.energy_even"]["statement"]
 assert text(even["pretty"]) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even["pretty"])
 assert "HMod.hMod" in text(even["plain"]), text(even["plain"])
 assert {"const": "Sample.energy", "text": "Sample.energy"} in even["pretty"], even["pretty"]
 assert all(set(seg) == {"text", "const"} for seg in even["pretty"]), even["pretty"]
-assert text(s["declarations"]["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
-assert s["declarations"]["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
-assert s["declarations"]["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
-assert s["declarations"]["Sample.energy"]["role"] == "defined"
-assert s["declarations"]["Sample.energy_even"]["role"] == "proved"
-assert s["declarations"]["Sample.energy_pos"]["role"] == "assumed"
+assert text(decls["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
+assert decls["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
+assert decls["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
+assert decls["Sample.energy"]["role"] == "defined"
+assert decls["Sample.energy_even"]["role"] == "proved"
+assert decls["Sample.energy_pos"]["role"] == "assumed"
 records = s["records"]
 assert len(records) == 2 and all(r["action"] == "approve" and r["signer"] == "local:alice" for r in records), records
 basic = next(r for r in records if r["module"] == "Sample.Basic")
@@ -274,7 +284,7 @@ order = closure(sorted(modules))
 write(whole, {"ChallengeDeps.lean": merge(order, {(m, k) for m in order for k in range(len(pieces[m]))})})
 # Cut to what energy_even needs: what its piece uses, the pieces those use, and the pieces kept always.
 theorem = "Sample.energy_even"
-order = closure([s["declarations"][theorem]["module"]])
+order = closure([next(d["module"] for d in s["declarations"] if d["name"] == theorem)])
 assert order == ["Sample.Basic", "Sample.Energy"], order
 where = {n: (m, k) for m in order for k, p in enumerate(pieces[m]) for n in p["declares"]}
 need = {(m, k) for m in order for k, p in enumerate(pieces[m]) if p["keep"]}
@@ -481,7 +491,7 @@ run diff --from "$basic_record" --json Sample.energy Sample.second_site
 python3 - "$out" "$basic_record" <<'PY2' || fail "diff --json: $out"
 import json, sys
 d = json.loads(sys.argv[1])
-assert d["schema"] == "leanblame.diff.1" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
+assert d["schema"] == "leanblame.diff.2" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
 energy, site = d["declarations"]
 assert energy["to"]["name"] == "Sample.energy" and energy["from"]["claim"] != energy["to"]["claim"], energy
 c = energy["changes"]
@@ -531,7 +541,7 @@ edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$energy_record\"]|"
 run status --json
 python3 - "$out" "$energy_record" <<'PY' || fail "status --json: an excluded approval"
 import json, sys
-d = json.loads(sys.argv[1])["declarations"]["Sample.second_site"]
+d = {x["name"]: x for x in json.loads(sys.argv[1])["declarations"]}["Sample.second_site"]
 assert d["state"] == "unsigned", d["state"]
 assert [(h["record"], h["standing"]) for h in d["history"]] == [(sys.argv[2], "excluded")], d["history"]
 PY
@@ -623,7 +633,7 @@ PY
 run status
 grep -q "^8 tagged: " <<<"$out" || fail "status on the blueprint boundary list: $out"
 run blame def:point
-grep -q "^Sample.Point  inductive  " <<<"$out" || fail "blame by label: $out"
+grep -q "^Sample.Point  structure  " <<<"$out" || fail "blame by label: $out"
 ok "a label is the id of its first declaration; the others and the structure's members name it as parent: def:point/x"
 mkdir "$logs/bp"
 cp "$here/blueprint/blueprint-html-cache.json" "$logs/bp/"
@@ -723,7 +733,7 @@ ok "diff matches a renamed declaration by its id and shows both statements"
 run status --json
 python3 - "$out" "$(id_of Sample.second_site)" <<'PY' || fail "rename: $out"
 import json, sys
-d = json.loads(sys.argv[1])["declarations"]
+d = {x["name"]: x for x in json.loads(sys.argv[1])["declarations"]}
 assert "Sample.second_site" not in d
 t = d["Sample.site_two"]
 assert t["id"] == sys.argv[2] and t["state"] == "outdated", t
