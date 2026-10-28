@@ -1,6 +1,6 @@
 # 14. Schemas
 
-The four interfaces LeanBlame commits to. TOML for what humans read in git
+The interfaces LeanBlame commits to. TOML for what humans read in git
 (records, config); JSON for what machines pass around. Hashes are `sha256:`
 plus 64 lowercase hex digits. Dates are UTC: native datetimes in TOML, ISO 8601
 strings in JSON. A JSON object has every key, `null` for none; readers fail on a
@@ -207,3 +207,52 @@ replaced by `:= sorry`, with a last piece that closes the scopes it leaves open.
 | `keep` | a challenge keeps the piece whatever its theorems need: it is not a declaration, or it is an instance written as one |
 | `declares` | the constants the command added |
 | `uses` | the constants of the library, declared by other pieces, that the command needs |
+
+## 6. Diff (output of `diff --json`)
+
+What changed between two points: the export an approve record names (`--from`), and another approve
+record's (`--to`) or the last export. The comparison is the one `status` makes against the last live
+approval, part by part of each claim, by hash: a difference is one the kernel sees, and a change of
+the printer is none. Declarations are matched by id. With names or ids, those declarations; without,
+every declaration whose claim differs, and those only one point has. With `--json`, nothing goes to
+stderr.
+
+```json
+{
+  "schema": "leanblame.diff.1",
+  "library": "OpenPhysics",
+  "from": { "record": "sha256:…", "commit": "1a2b3c…", "export": "sha256:…", "boundary": "sha256:…" },
+  "to": { "record": null, "commit": "9f8e7d…", "export": "sha256:…", "boundary": "sha256:…" },
+  "declarations": [
+    {
+      "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
+      "from": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
+                "claim": "sha256:3b1f…", "informal": "…", "statement": { "pretty": [ "…" ], "plain": [ "…" ] } },
+      "to": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
+              "claim": "sha256:77c0…", "informal": "…", "statement": { "pretty": [ "…" ], "plain": [ "…" ] } },
+      "changes": {
+        "informal": false, "statement": false, "body": false,
+        "relies_on": { "added": [], "removed": [], "changed": ["OpenPhysics.Ising.Hamiltonian"] },
+        "cut_moved": [], "untagged": []
+      }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `from`, `to` (top) | the two points: the record (`null`: the last export), its commit (`null`: uncommitted changes), the export and the boundary list |
+| `from`, `to` (declaration) | the declaration at each point, as the boundary list has it, with its claim there; `null` where it does not exist (added, removed) |
+| `changes` | `null` when one side is `null` |
+| `informal` | its informal text differs |
+| `statement` | its kind, role, universe parameters or type differs |
+| `body` | its body differs |
+| `relies_on` | the tagged declarations its claim stops at: `added` (the old closure lacks them), `removed` (the new one lacks them), `changed` (in both, their spec differs: name, kind, type or informal text) |
+| `cut_moved` | dependencies in both closures that gained or lost their tag |
+| `untagged` | untagged declarations in both closures that differ |
+
+A renamed declaration has two names, and its claim moved, as the name is hashed. The text form
+prints one line per declaration: `NAME [renamed-from=OLD] change=cause:names;..
+[relies-on=+ADDED,-REMOVED]`, with the causes of `status`, or `NAME added`, `NAME removed`, `NAME
+unchanged`; then the old and the new informal text and statement where they differ.

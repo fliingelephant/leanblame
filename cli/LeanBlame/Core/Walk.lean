@@ -12,8 +12,9 @@ Changes: the worklist loop is kept, but it walks one export, which a frontend se
 It seeds from the boundary list, cuts at tagged declarations, and hashes every declaration it
 reaches from the facts the frontend reports, proofs already left out (docs/design/03-trust-model.md,
 "The hash, precisely"). Cycles are found with Tarjan's algorithm and hashed as groups. Instead of
-stopping at the first mismatch, `changes` collects every difference between two hashed exports under
-a declaration and charges it to a cause. Declarations are keyed by their printed name.
+stopping at the first mismatch, `compare` collects every difference between two hashed exports under
+a declaration, and `Comparison.changes` charges each to a cause. Declarations are keyed by their
+printed name.
 -/
 import LeanBlame.Core.Hash
 
@@ -176,37 +177,66 @@ def closureOf (h : Core.Hashed) (x : String) : Array String × Array String := I
   return (Core.sortNames cut.toArray, untagged.toArray)
 
 /--
-Why the claim of declaration `x` of `new`, named `oldName` in `old`, differs between them
-(docs/design/03, "Why a hash moved"). Collects every mismatch instead of stopping at the first:
-* `own-text`: the informal text of `x`;
-* `own-body`: kind, role, name, universe parameters, type or body of `x`;
-* `dep-spec`: tagged dependencies at the cut, in both closures, whose spec differs;
-* `cut-moved`: dependencies in both closures that gained or lost their tag;
-* `untagged`: untagged declarations in both closures whose own hash differs.
-Dependencies that appear or disappear are explained by the change of whatever references them. An
-error when either graph lacks `x`.
+What differs between two hashed exports under one declaration: each part of its claim
+(docs/design/03, "Why a hash moved"), compared by hash, so a difference is one the kernel sees.
+Dependencies are named as the graphs name them; `added` and `removed` are tagged dependencies at
+the cut that the other closure lacks entirely. Dependencies that appear or disappear elsewhere are
+explained by the change of whatever references them.
 -/
-def changes (old new : Core.Hashed) (oldName x : String)
-    (closure : Array String × Array String := closureOf new x) : Except String (Array Change) := do
+structure Comparison where
+  /-- The informal text. -/
+  informal : Bool := false
+  /-- The name. -/
+  renamed : Bool := false
+  /-- Kind, role, universe parameters or type. -/
+  statement : Bool := false
+  /-- The body. -/
+  body : Bool := false
+  /-- Tagged dependencies at the cut that only the new closure has. -/
+  added : Array String := #[]
+  /-- Tagged dependencies at the cut that only the old closure has. -/
+  removed : Array String := #[]
+  /-- Tagged dependencies at the cut, in both closures, whose spec differs. -/
+  depSpec : Array String := #[]
+  /-- Dependencies in both closures that gained or lost their tag. -/
+  cutMoved : Array String := #[]
+  /-- Untagged declarations in both closures whose own hash differs. -/
+  untagged : Array String := #[]
+  deriving Inhabited
+
+/-- Compare declaration `x` of `new` with the declaration named `oldName` in `old`; `closure` is
+`closureOf new x`. An error when either graph lacks it. -/
+def compare (old new : Core.Hashed) (oldName x : String)
+    (closure : Array String × Array String := closureOf new x) : Except String Comparison := do
   let some n := new.nodes[x]? | throw s!"{x} is not in the graph of export {new.exportHash}"
   let some o := old.nodes[oldName]? | throw s!"{oldName} is not in the graph of export {old.exportHash}"
-  let mut out : Array Change := #[]
-  if o.informal != n.informal then out := out.push { cause := .ownText, names := #[x] }
-  -- What enters `own` besides the informal text.
-  let fields (d : Core.Decl) := (d.kind, d.role, d.name, d.uparams, d.typeHash, d.bodyHash)
-  if fields o.decl != fields n.decl then out := out.push { cause := .ownBody, names := #[x] }
+  let statement (d : Core.Decl) := (d.kind, d.role, d.uparams, d.typeHash)
   let (cut0, unt0) := closureOf old oldName
   let (cut1, unt1) := closure
-  let cut0s : Std.HashSet String := cut0.foldl (·.insert ·) {}
-  let unt0s : Std.HashSet String := unt0.foldl (·.insert ·) {}
-  let depSpec := cut1.filter fun d => cut0s.contains d &&
-    (old.nodes[d]?.bind (·.spec)) != (new.nodes[d]?.bind (·.spec))
-  let cutMoved := Core.sortNames ((cut1.filter unt0s.contains) ++ (unt1.filter cut0s.contains))
-  let untagged := Core.sortNames <| unt1.filter fun u => unt0s.contains u &&
-    (old.nodes[u]?.map (·.own)) != (new.nodes[u]?.map (·.own))
-  unless depSpec.isEmpty do out := out.push { cause := .depSpec, names := depSpec }
-  unless cutMoved.isEmpty do out := out.push { cause := .cutMoved, names := cutMoved }
-  unless untagged.isEmpty do out := out.push { cause := .untagged, names := untagged }
-  return out
+  let set (xs : Array String) : Std.HashSet String := xs.foldl (·.insert ·) {}
+  let (cut0s, unt0s, cut1s, unt1s) := (set cut0, set unt0, set cut1, set unt1)
+  return {
+    informal := o.informal != n.informal, renamed := oldName != x
+    statement := statement o.decl != statement n.decl, body := o.decl.bodyHash != n.decl.bodyHash
+    added := cut1.filter fun d => !cut0s.contains d && !unt0s.contains d
+    removed := cut0.filter fun d => !cut1s.contains d && !unt1s.contains d
+    depSpec := cut1.filter fun d => cut0s.contains d &&
+      (old.nodes[d]?.bind (·.spec)) != (new.nodes[d]?.bind (·.spec))
+    cutMoved := Core.sortNames ((cut1.filter unt0s.contains) ++ (unt1.filter cut0s.contains))
+    untagged := Core.sortNames <| unt1.filter fun u => unt0s.contains u &&
+      (old.nodes[u]?.map (·.own)) != (new.nodes[u]?.map (·.own)) }
+
+/--
+Why the claim moved, charged to the declaration, now named `x` (docs/design/03, "Why a hash moved"):
+* `own-text`: its informal text;
+* `own-body`: its kind, role, name, universe parameters, type or body;
+* `dep-spec`, `cut-moved`, `untagged`: as `Comparison` lists them.
+-/
+def Comparison.changes (c : Comparison) (x : String) : Array Change :=
+  let own (b : Bool) (cause : Cause) : Array Change := if b then #[{ cause, names := #[x] }] else #[]
+  let deps (names : Array String) (cause : Cause) : Array Change :=
+    if names.isEmpty then #[] else #[{ cause, names }]
+  own c.informal .ownText ++ own (c.renamed || c.statement || c.body) .ownBody ++
+    deps c.depSpec .depSpec ++ deps c.cutMoved .cutMoved ++ deps c.untagged .untagged
 
 end LeanBlame.Walk

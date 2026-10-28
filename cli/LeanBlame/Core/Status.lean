@@ -153,8 +153,8 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
         unless olds.contains key do olds := olds.insert key (← recordGraph? root lastRec last)
         change := none
         if let some (some old) := olds[key]? then
-          match Walk.changes old new c.name d.name closure with
-          | .ok cs => change := some cs
+          match Walk.compare old new c.name d.name closure with
+          | .ok cmp => change := some (cmp.changes d.name)
           | .error e => fail s!"record {lastRec.path}: {e}"
     let (cut, untagged) := closure
     let mut untaggedDeps := #[]
@@ -216,6 +216,10 @@ def warnings (r : StatusReport) : Array String :=
   r.declarations.flatMap fun d => d.proof.unpermitted.map fun a =>
     s!"warning: theorem {d.decl.name} rests on axiom {a}, which is neither standard nor tagged and signed"
 
+/-- `change=cause:names;..`, as `status` and `diff` print causes. -/
+def changeText (cs : Array Change) : String :=
+  "change=" ++ ";".intercalate (cs.toList.map fun c => toString c.cause ++ ":" ++ ",".intercalate c.names.toList)
+
 /-- One line per declaration: `NAME STATE [evidence=..] [blocked-by=..] [change=cause:names;..]`;
 the evidence is shown while there is something to sign. -/
 def textLine (d : StatusDecl) : String :=
@@ -224,9 +228,7 @@ def textLine (d : StatusDecl) : String :=
     (if d.blockedBy.isEmpty then #[] else #[s!"blocked-by={",".intercalate d.blockedBy.toList}"]) ++
     (match d.change with
       | none => #["change=unknown"]
-      | some cs => if cs.isEmpty then #[] else
-        #["change=" ++ ";".intercalate (cs.toList.map fun c =>
-          toString c.cause ++ ":" ++ ",".intercalate c.names.toList)])
+      | some cs => if cs.isEmpty then #[] else #[changeText cs])
   " ".intercalate parts.toList
 
 def run (root : System.FilePath) (json : Bool) : IO UInt32 := do

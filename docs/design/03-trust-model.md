@@ -78,7 +78,8 @@ parts of the hash:
 | `untagged` | something untagged underneath changed | `equiv` may prove meaning unchanged |
 
 `equiv` runs only when `untagged` is the sole cause; a successful proof shows
-as X's `evidence`.
+as X's `evidence`. `diff` makes the same comparison between two points the
+caller picks, and shows the old and the new text.
 
 ## Validity
 

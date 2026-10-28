@@ -195,7 +195,7 @@ cli/Main.lean                    wires the Lean backend into the core commands
 | `Config`, `Records`, `Store` | the same files, moved |
 | `Hash` | the hash part of `Canon`: `netstr`, `hashFields`, `optField`, `own`, `spec`, `DepEntry`, `claim`, `group`, `member` |
 | `Graph` | `Role`, `Decl`, `Source`, `Backend`, `Node`, `Hashed`, `sortNames`; may live in `Schema`/`Walk` instead if that reads better; and, per §9, `Cache` as the `graphs` store objects, schema `leanblame.graph.1` |
-| `Walk` | `Walk` over strings: the worklist cut at tagged declarations, Tarjan, the footprint walk, `closureOf`, `changes` |
+| `Walk` | `Walk` over strings: the worklist cut at tagged declarations, Tarjan, the footprint walk, `closureOf`, `compare` |
 | `Status`, `Sign`, `Validate` | the same; per §9 no `Backend`: they read graphs from the store and never hash |
 | `Release` | the same, taking the `Backend` for the kernel gate |
 
@@ -364,7 +364,7 @@ Decided with the owner; it supersedes §1–§9 where they differ.
 
 - Records name declarations by id (`leanblame.record.2`, [05-records.md](05-records.md)).
   The ledger, `history`, `status` and `blame` go by id, so an approval follows a
-  rename; `changes` finds the old node by the name the record gives. A
+  rename; `compare` finds the old node by the name the record gives. A
   declaration without an id of its own (a structure's field, a blueprint label's
   other declarations) has its parent's id and its name under the parent.
 - Every JSON file LeanBlame writes has a schema id and is read strictly: a

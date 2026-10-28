@@ -1,8 +1,9 @@
 /-
-`leanblame`: command-line entry point (docs/design/04-architecture.md, ten commands). It passes
+`leanblame`: command-line entry point (docs/design/04-architecture.md, eleven commands). It passes
 the Lean frontend's backend to the two commands that need one (docs/design/15-generic-core.md):
 `export` hashes with it, `release` runs its kernel check.
 -/
+import LeanBlame.Core.Diff
 import LeanBlame.Core.Release
 import LeanBlame.Core.Sign
 import LeanBlame.Core.Status
@@ -26,6 +27,9 @@ commands:
                                          library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
   blame NAME|ID                          who signed it, when, at which claim hash
+  diff --from RECORD [--to RECORD] [--json] [NAME|ID...]
+                                         what changed between the export an approve record
+                                         names and another's (default: the last export)
   equiv [NAME|ID...]                     ask the kernel whether what changed under it (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
@@ -93,6 +97,12 @@ def cmdBlame (args : List String) : IO UInt32 := do
   let #[name] := a.positional | fail "usage: leanblame blame NAME|ID"
   Status.blame (← IO.currentDir) name
 
+def cmdDiff (args : List String) : IO UInt32 := do
+  let a ← parseArgs #["--from", "--to"] #["--json"] args (positional := true)
+  let some fromRef := a.get? "--from"
+    | fail "usage: leanblame diff --from RECORD [--to RECORD] [--json] [NAME|ID...]"
+  Diff.run (← IO.currentDir) fromRef (a.get? "--to") a.positional (a.has "--json")
+
 def cmdValidate (args : List String) : IO UInt32 := do
   let a ← parseArgs #["--base-ref"] #[] args
   Validate.run (← IO.currentDir) (a.get? "--base-ref")
@@ -146,6 +156,7 @@ def dispatch : List String → IO UInt32
   | "id" :: args => cmdId args
   | "status" :: args => cmdStatus args
   | "blame" :: args => cmdBlame args
+  | "diff" :: args => cmdDiff args
   | "sign" :: args => cmdSign args
   | "validate" :: args => cmdValidate args
   | "release" :: args => cmdRelease args

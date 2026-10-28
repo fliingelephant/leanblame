@@ -202,3 +202,13 @@ Three root causes behind most review findings, fixed at the root:
    (`leanblame.record.2`), so an approval follows a rename: the declaration is
    `outdated`, not `unsigned`. A new id is a new declaration: the old approvals
    stay with the old id.
+
+### Diff in LeanBlame (owner, 2026-10-27: "Proceed. Do the efficient clean way")
+
+LeanBlame is to OpenVouch what git is to a code host: the semantic diff is LeanBlame's, as `git diff`
+is git's; the service displays it. `status` compares each declaration with its last live approval;
+`diff` compares two points the caller picks (approve records, or the last export), with the same
+comparison (`Walk.compare`): each part of the claim, by hash, so a difference is one the kernel sees,
+not a change of the printer. It reads the stored graphs and never hashes; a declaration whose claim did
+not move is not walked. Before, OpenVouch compared printed statements, and a printer change looked like
+a change of meaning.

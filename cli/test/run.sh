@@ -11,14 +11,16 @@
 # needs; copied again only where a module changed) -> release -> edit a body ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
-# causes (untagged, own-text, dep-spec) -> withdraw -> status (withdrawn) ->
+# causes (untagged, own-text, dep-spec) -> diff since the first sign-off (the
+# causes status gives, both docstrings, --json; a missing export, an unknown name
+# and a withdraw record refused) -> withdraw -> status (withdrawn) ->
 # exclude (a withdraw record, no record, an approve record) -> blame -> validate
 # (and its append-only check) -> a boundary list from a verso-blueprint manifest,
 # labels as ids -> equiv, in a copy made after the first signoff: a definitional
 # change proven (evidence shown by status, the record carries the proof, valid),
 # one that is not definitional, an own-body change refused -> ids, in another
-# copy made after the first signoff: a rename keeps the id and the history, blame
-# by id, a new id is a new declaration, a shared id and a malformed one refused.
+# copy made after the first signoff: a rename keeps the id and the history (diff
+# matches it by id), blame by id, a new id is a new declaration (diff: added and removed), a shared id and a malformed one refused.
 # Before the first export, `id` writes the ids (export refuses a tag without
 # one); after the first body edit, status fails out loud when a signed graph is
 # missing or broken. Also out loud: export outside git, sign without --signer, a
@@ -458,12 +460,53 @@ expect_line Sample.energy \
 expect_line Sample.energy_even \
   "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
 
+echo "== diff: what changed since a sign-off, as the kernel sees it"
+run status
+status_out="$out"
+run diff --from "$basic_record"
+python3 - "$status_out" "$out" <<'PY2' || fail "diff and status disagree: $out"
+import sys
+status, diff = sys.argv[1].splitlines(), sys.argv[2].splitlines()
+# Every declaration was last approved on the first sign-off's export, so status compares with it too.
+want = {l.split()[0]: next(p for p in l.split() if p.startswith("change=")) for l in status if " outdated " in l}
+got = {l.split()[0]: l.split()[1] for l in diff if not l.startswith(" ") and " change=" in l}
+assert want and want == got, (want, got)
+assert diff[-1] == f"{len(want)} changed, 0 added, 0 removed", diff[-1]
+PY2
+grep -qxF "  - The energy of a chain of \`n\` sites: two units per site." <<<"$out" \
+  && grep -qxF "  + The energy of a chain of \`n\` sites: two units of energy per site." <<<"$out" \
+  || fail "diff does not show both docstrings: $out"
+ok "diff --from the first sign-off: what status calls outdated, with the same causes, and both docstrings"
+run diff --from "$basic_record" --json Sample.energy Sample.second_site
+python3 - "$out" "$basic_record" <<'PY2' || fail "diff --json: $out"
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["schema"] == "leanblame.diff.1" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
+energy, site = d["declarations"]
+assert energy["to"]["name"] == "Sample.energy" and energy["from"]["claim"] != energy["to"]["claim"], energy
+c = energy["changes"]
+assert (c["informal"], c["statement"], c["body"]) == (True, False, True), c
+assert c["untagged"] == ["Sample.double"] and c["relies_on"] == {"added": [], "removed": [], "changed": []}, c
+assert site["to"]["name"] == "Sample.second_site" and site["from"]["claim"] == site["to"]["claim"], site
+assert not any(site["changes"][k] for k in ("informal", "statement", "body")), site
+PY2
+ok "diff --json: energy's docstring and body, and the untagged double under it; second_site's proof edit is no change"
+mv "$signed_export" "$logs/signed-export"
+must_fail "which this store lacks; run .leanblame export. at commit" -- "$lb" diff --from "$basic_record"
+mv "$logs/signed-export" "$signed_export"
+must_fail "Sample.nothing is on neither boundary list" -- "$lb" diff --from "$basic_record" Sample.nothing
+run diff --from "$basic_record" --to "$energy_record"
+[[ "$out" == "0 changed, 0 added, 0 removed" ]] || fail "two records of one export: $out"
+ok "diff fails out loud without the signed export or for an unknown name; two records of one export differ in nothing"
+
 echo "== withdraw"
 run sign --withdraw "$basic_record" --signer local:alice --note "energy was wrong"
 grep -q "^withdraw sha256:" <<<"$out" || fail "no withdraw record: $out"
 withdraw_record="$(awk '/^withdraw /{print $2}' <<<"$out")"
 must_fail "only its signer can withdraw it" -- "$lb" sign --withdraw "$basic_record" --signer local:bob
 ok "only the signer can withdraw"
+must_fail "is a withdraw; compare with the approve record it withdraws, $basic_record" -- "$lb" diff --from "$withdraw_record"
+ok "diff refuses a withdraw record as a point"
 run validate
 ok "validate: $out"
 commit "withdraw Sample.Basic"
@@ -673,6 +716,10 @@ edit Sample/Energy.lean 's/theorem second_site /theorem site_two /'
 export_lib
 run status
 expect_line Sample.site_two "Sample.site_two outdated change=own-body:Sample.site_two"
+run diff --from "$basic_record" Sample.site_two
+expect_line Sample.site_two "Sample.site_two renamed-from=Sample.second_site change=own-body:Sample.site_two"
+grep -qxF "  statement:" <<<"$out" || fail "diff, rename: no statement lines: $out"
+ok "diff matches a renamed declaration by its id and shows both statements"
 run status --json
 python3 - "$out" "$(id_of Sample.second_site)" <<'PY' || fail "rename: $out"
 import json, sys
@@ -699,6 +746,10 @@ run status
 expect_line Sample.energy "Sample.energy unsigned"
 expect_line Sample.energy_even "Sample.energy_even valid blocked-by=Sample.energy"
 expect_line Sample.Point.x "Sample.Point.x valid"
+run diff --from "$basic_record"
+{ grep -qxF "Sample.energy added" <<<"$out" && grep -qxF "Sample.energy removed" <<<"$out"; } \
+  || fail "diff, a new id: $out"
+ok "diff: a new id is a new declaration; the old id's declaration is removed"
 run blame "$energy_id"
 grep -qxF "$energy_id  (not on the current boundary list)" <<<"$out" || fail "blame by the old id: $out"
 grep -q "approve  local:alice  as Sample.energy  claim " <<<"$out" || fail "blame by the old id: $out"
