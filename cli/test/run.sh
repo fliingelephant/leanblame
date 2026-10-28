@@ -161,8 +161,7 @@ python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not matc
 import json, sys
 s = json.load(open(sys.argv[1]))
 ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
-assert s["schema"] == "leanblame.status.8"
-assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "export", "boundary", "generated",
+assert set(s) == {"library", "commit", "toolchain", "deps", "export", "boundary", "generated",
                   "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
 assert len(s["commit"]) == 40, s["commit"]
 assert s["toolchain"].startswith("v4.") and s["deps"] == {}, (s["toolchain"], s["deps"])
@@ -234,16 +233,19 @@ for kept in ["def double (n : Nat) : Nat := n + n", "def energy (n : Nat) : Nat 
 for left in ["trusted", "two_pos", "def two", "theorem", "import"]:
     assert left not in deps, (left, deps)
 assert deps.count("section\n") == 3 and deps.rstrip().endswith("end Sample\nend\nend"), deps
+# Each module's section sets the Lean options Lake builds the module with; the lakefile sets none.
+for opt in ["set_option autoImplicit false", "set_option relaxedAutoImplicit false"]:
+    assert deps.count(opt) == 2 and opt in chal, (opt, deps, chal)
 # The theorems named, proofs sorry, among the scope commands of their module.
 assert "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry" in chal, chal
 assert "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in chal, "a proof inside a statement stays"
 assert chal.startswith("import ChallengeDeps\n") and "variable (q : Point)" in chal, chal
 assert "one_site_pos" not in chal and chal.count(":= sorry") == 2, chal
-assert "autoImplicit = false" in lake and "relaxedAutoImplicit = false" in lake and "require" not in lake, lake
+assert "leanOptions" not in lake and "require" not in lake, lake
 assert toolchain.startswith("leanprover/lean4:v4."), toolchain
 PY
 (cd "$work-challenge" && lake build) >"$logs/challenge.log" 2>&1 || fail "Lake does not build the challenge: $(cat "$logs/challenge.log")"
-ok "challenge writes what the tagged declarations need, the theorems named (by name or id) with proofs sorry, and the library's Lean options; Lake builds it"
+ok "challenge writes what the tagged declarations need, the theorems named (by name or id) with proofs sorry, each module with its Lean options; Lake builds it"
 run challenge --check "$work-challenge"
 [[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
 ok "the check builds the challenge against the library: its 10 tagged declarations have the library's claims"
@@ -255,30 +257,38 @@ must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge --o
 ok "challenge refuses a declaration that is not a theorem, and a directory that exists"
 python3 - <<'PY'
 basic = open("Sample/Basic.lean").read()
-open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\nnamespace Extra\n/-- Nothing tagged uses this. -/\ndef unused : Nat := 0\nend Extra\n\n"
-    "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := 0\n\nend More\n\nend Sample"))
+open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n"
+    "namespace Extra\n/-- Nothing tagged uses this. -/\ndef unused : Nat := 0\nend Extra\n\n"
+    "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := secret\n\nend More\n\nend Sample"))
 energy = open("Sample/Energy.lean").read()
 at = energy.index("/-- The energy of a point")
-energy = energy[:at] + "open Extra\n\n/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n" + energy[at:]
+energy = energy[:at] + "open Extra\n\n/-- Zero, kept to this file too. -/\nprivate def secret : Nat := 0\n\n" + energy[at:]
 energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero\n")
+at = energy.index("/-- The energy of every chain is even.")
+energy = (energy[:at] + "/-- Site two, as a number proven to be two. -/\n"
+          '@[trusted "5f0c6a8e-2d1b-4c3a-9e7f-1a2b3c4d5e6f"] def siteTwo : {n : Nat // n = 2} := ⟨_, second_site⟩\n\n' + energy[at:])
 open("Sample/Energy.lean", "w").write(energy + "\nvariable (late : Nat)\n")
 PY
 export_lib
 run challenge --out "$work-challenge-two"
 deps="$(cat "$work-challenge-two/ChallengeDeps.lean")"
-for kept in "theorem two_pos : 0 < 2 := by decide" "private def secret : Nat := 0" $'namespace Sample.Extra\nend Sample.Extra' "open Extra" \
-            "namespace More.Inner" "end Inner" "def zero : Nat := 0" "end More"; do
+for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := rfl" \
+            "private def «secret (Sample.Basic)» : Nat := 0" "def zero : Nat := «secret (Sample.Basic)»" \
+            "private def «secret (Sample.Energy)» : Nat := 0" "+ «secret (Sample.Energy)» + More.zero" \
+            $'namespace Sample.Extra\nend Sample.Extra' "open Extra" "namespace More.Inner" "end Inner" "end More"; do
   [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
 done
 for left in "def unused" "def hidden" "variable (late"; do
   [[ "$deps" != *"$left"* ]] || fail "'$left' is not needed: $deps"
 done
+must_fail "this challenge cannot be made" "Sample.second_site: a declaration that every challenge holds uses it" \
+  -- "$lb" challenge Sample.second_site --out "$work-challenge-three"
 run challenge --check "$work-challenge-two"
 [[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
   || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
 git checkout -q -- Sample
 export_lib
-ok "a tagged definition that uses two brings two_pos with its proof; a private helper means the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner; a variable after the last kept command stays out; the check leaves no files"
+ok "two_pos and second_site come with their proofs, and second_site has no challenge of its own; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner; a variable after the last kept command stays out; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"
@@ -291,7 +301,7 @@ path, h, export, basic, energy = sys.argv[1:]
 text = open(path).read()
 assert "sha256:" + hashlib.sha256(text.encode()).hexdigest() == h
 m = json.loads(text)
-assert m["schema"] == "leanblame.release.1" and m["tag"] == "2026.10" and m["export"] == export
+assert m["tag"] == "2026.10" and m["export"] == export
 assert m["kernel"] == {"checker": "leanchecker", "version": m["toolchain"], "passed": True}, m["kernel"]
 assert m["records"] == sorted([basic, energy]), m["records"]
 t = m["theorems"]
@@ -449,7 +459,7 @@ run diff --from "$basic_record" --json Sample.energy Sample.second_site
 python3 - "$out" "$basic_record" <<'PY2' || fail "diff --json: $out"
 import json, sys
 d = json.loads(sys.argv[1])
-assert d["schema"] == "leanblame.diff.3" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
+assert d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
 energy, site = d["declarations"]
 assert energy["to"]["name"] == "Sample.energy" and energy["from"]["claim"] != energy["to"]["claim"], energy
 c = energy["changes"]

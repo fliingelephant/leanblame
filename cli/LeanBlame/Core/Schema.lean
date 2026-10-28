@@ -212,15 +212,13 @@ structure BoundaryList where
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.6"
-
 instance : ToJson BoundaryDecl where
   toJson d := Json.mkObj [("name", d.name), ("id", d.id), ("parent", toJson d.parent),
     ("module", d.module), ("kind", d.kind), ("role", toJson d.role), ("informal", d.informal),
     ("statement", toJson d.statement)]
 
 instance : ToJson BoundaryList where
-  toJson b := Json.mkObj [("schema", BoundaryList.schemaId), ("library", b.library),
+  toJson b := Json.mkObj [("library", b.library),
     ("declarations", toJson b.declarations)]
 
 def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
@@ -239,8 +237,7 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   return d
 
 def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
-  let o ← JsonObj.read j "boundary list" ["schema", "library", "declarations"]
-  o.schema BoundaryList.schemaId
+  let o ← JsonObj.read j "boundary list" ["library", "declarations"]
   let decls ← (← o.get (Array Json) "declarations").mapM BoundaryDecl.fromJson?
   let names : Std.HashSet String := decls.foldl (·.insert ·.name) {}
   unless names.size == decls.size do throw "boundary list: a name is listed twice"
@@ -263,8 +260,6 @@ def BoundaryList.parse (contents : String) : Except String BoundaryList := do
   BoundaryList.fromJson? (← Json.parse contents)
 
 /-! ## 2. Record -/
-
-def Record.schemaId : String := "leanblame.record.2"
 
 /-- `provider:id` with a non-empty lowercase provider and a non-empty id. -/
 def isSignerId (s : String) : Bool :=
@@ -336,7 +331,7 @@ open Lake.Toml (Value ppTable) in
 declaration of an approve record is a line `"id" = { name = …, claim = …, evidence = … }`. -/
 def toToml (rec : Record) : String :=
   let head (action : Action) (signer : String) (date : Std.Time.Timestamp) : Table :=
-    Table.empty |>.insert `schema schemaId |>.insert `action (toString action) |>.insert `signer signer
+    Table.empty |>.insert `action (toString action) |>.insert `signer signer
       |>.insert `date (Value.dateTime .missing (Lake.Toml.DateTime.ofString? date.toIso).get!)
   let table (kvs : Array (String × String)) : Table :=
     kvs.foldl (init := Table.empty) fun t (k, v) => t.insert (.mkSimple k) v
@@ -358,7 +353,6 @@ def hashMsg (s : String) : String := s!"`{s}` is not sha256: plus 64 lowercase h
 /-- Decode a parsed TOML table as a record. Missing or bad fields log an error and decode to a
 default, so every problem is reported; a record with a logged error does not parse. -/
 def decode (t : Table) : DecodeM Record := do
-  discard <| decodeStr t `schema (· == schemaId) (s!"is `{·}`, expected `{schemaId}`")
   let signer ← decodeStr t `signer isSignerId (s!"`{·}` is not provider:id")
   let dt : Lake.Toml.DateTime ← t.tryDecode `date
   let date ← match Std.Time.Timestamp.ofToml? dt with
@@ -368,7 +362,7 @@ def decode (t : Table) : DecodeM Record := do
   let action ← decodeStr t `action (ofString? Action.all · |>.isSome) (s!"is `{·}`, not approve or withdraw")
   match ofString? Action.all action with
   | some .approve =>
-    checkKeys t #["schema", "action", "signer", "date", "module", "commit", "toolchain", "deps",
+    checkKeys t #["action", "signer", "date", "module", "commit", "toolchain", "deps",
       "export", "boundary", "note", "constants"] "an approve record"
     let deps ← decodeTable t `deps
     let ct ← decodeTable t `constants
@@ -387,7 +381,7 @@ def decode (t : Table) : DecodeM Record := do
                  evidence := ← if c.contains `evidence then some <$> decodeStr c `evidence isHash hashMsg
                    else pure none } }
   | some .withdraw =>
-    checkKeys t #["schema", "action", "signer", "date", "refers_to", "constants", "note"]
+    checkKeys t #["action", "signer", "date", "refers_to", "constants", "note"]
       "a withdraw record"
     let constants : Option (Array String) ← t.tryDecode? `constants
     if constants.any (·.isEmpty) then
@@ -449,13 +443,11 @@ structure ReleaseManifest where
   theorems : Array (String × ProofReport)
   deriving Inhabited, Repr
 
-def ReleaseManifest.schemaId : String := "leanblame.release.1"
-
 /-- A manifest is written only after `checker` replayed the export, so `passed` is true. -/
 instance : ToJson ReleaseManifest where
   toJson m :=
     let count (s : ProofStatus) := (m.theorems.filter (·.2.status == s)).size
-    Json.mkObj [("schema", ReleaseManifest.schemaId), ("library", m.library), ("tag", m.tag),
+    Json.mkObj [("library", m.library), ("tag", m.tag),
       ("commit", m.commit), ("toolchain", m.toolchain), ("deps", stringsJson m.deps),
       ("export", m.exportHash), ("boundary", m.boundary), ("records", toJson m.records),
       ("kernel", Json.mkObj [("checker", m.checker), ("version", m.toolchain), ("passed", true)]),
@@ -567,8 +559,6 @@ structure StatusReport where
   untaggedInLibrary : Array (String × Array String)
   deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.8"
-
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
     ("date", h.date.toIso), ("name", h.name), ("claim", h.claim), ("note", toJson h.note),
@@ -587,7 +577,7 @@ instance : ToJson StatusDecl where
     ("closure_size", d.closureSize)]
 
 instance : ToJson StatusReport where
-  toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
+  toJson s := Json.mkObj [("library", s.library),
     ("commit", toJson s.commit), ("toolchain", s.toolchain), ("deps", stringsJson s.deps),
     ("export", s.exportHash), ("boundary", s.boundary), ("generated", s.generated.toIso),
     ("standard_axioms", toJson s.standard),

@@ -65,18 +65,15 @@ def libraries (pkg : Lake.Package) (requested : Array String) : IO (Array Lake.L
     | some l => pure l
     | none => fail s!"the package declares no lean_lib {n}"
 
-/-- The Lean options Lake builds the modules of `lib` with: its `leanOptions`, then the `-D`
-options of its Lean arguments. -/
-def libraryOptions (lib : Lake.LeanLib) : IO Options :=
-  (lib.leanArgs ++ lib.weakLeanArgs).foldlM (init := lib.leanOptions.toOptions) fun opts a => do
+/-- The Lean options Lake builds the modules of `lib` with, as `lean` reads them
+(`Lean.Language.Lean.reparseOptions`, after the imports declare them): its `leanOptions`, then the
+`-D` options of its Lean arguments. -/
+def libraryOptions (lib : Lake.LeanLib) : IO Options := do
+  let opts ← (lib.leanArgs ++ lib.weakLeanArgs).foldlM (init := lib.leanOptions.toOptions) fun opts a => do
     let some kv := a.dropPrefix? "-D" | return opts
     let k :: v@(_ :: _) := kv.copy.splitOn "=" | fail s!"{lib.name}: Lean argument {a}"
-    let v := "=".intercalate v
-    return opts.insert k.toName <| match v, v.toNat? with
-      | "true", _ => .ofBool true
-      | "false", _ => .ofBool false
-      | _, some n => .ofNat n
-      | _, none => .ofString v
+    return opts.insert k.toName (.ofString ("=".intercalate v))
+  Lean.Language.Lean.reparseOptions opts
 
 /-- The commit of the git repository holding `root`; an error outside git: a record names the commit it
 signs. -/
@@ -290,20 +287,6 @@ def lakeEnvPaths (root : System.FilePath) : IO (System.FilePath × SearchPath ×
     return v
   return (⟨← var "LEAN_SYSROOT"⟩, .parse (← var "LEAN_PATH"), .parse (← var "LEAN_SRC_PATH"))
 
-/-- Lean options as Lake's `leanOptions` writes them: an object, its keys in order. -/
-def optionsJson (o : Options) : IO Json := do
-  let mut kvs := #[]
-  for (k, v) in o do
-    let j ← match v with
-      | .ofString s => pure (Json.str s)
-      | .ofBool b => pure (Json.bool b)
-      | .ofNat n => pure (toJson n)
-      | .ofInt i => pure (toJson i)
-      | .ofName n => pure (Json.str n.toString)
-      | .ofSyntax _ => fail s!"option {k}: a syntax value"
-    kvs := kvs.push (k.toString, j)
-  return Json.mkObj (kvs.qsort (·.1 < ·.1)).toList
-
 /-- A built library with its modules imported. -/
 structure Loaded where
   libs : Array String
@@ -391,9 +374,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   IO.eprintln "leanblame: challenge pieces"
   let tagged := declarations.filterMap fun (n, d) =>
     if d.kind == "field" || d.kind == "constructor" then none else some (n, d.kind == "theorem")
-  let (pieces, challengeOptions, problems) ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) tagged
-  unless problems.isEmpty do
-    fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
+  let (pieces, challengeProblems) ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) tagged
   let mut stored : NameMap String := {}
   for p in pieces do
     stored := stored.insert p.module.toName (← Store.putString root .pieces (jsonText p))
@@ -412,21 +393,16 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
   let exportHash := mkHash (← dumpToFile env roots tmp)
   let boundary ← Store.putString root .boundaries (jsonText boundaryList)
-  -- The graph: every claim hash, computed now, as the other commands only read it; a stored graph
-  -- of the same export and boundary list has already passed.
-  let hashed ← match ← Graph.load? root exportHash boundary boundaryList with
-    | some h => pure h
-    | none =>
-      let h ← try
-          let src ← Source.ofExport (← Source.parseFile tmp) fun n => IO.ofExcept (moduleOf env n)
-          Walk.hashExport backend src boundaryList exportHash boundary
-        catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
-      Graph.save root h
-      pure h
+  -- The graph: every claim hash, computed now by this LeanBlame, as the other commands only read it.
+  let hashed ← try
+      let src ← Source.ofExport (← Source.parseFile tmp) fun n => IO.ofExcept (moduleOf env n)
+      Walk.hashExport backend src boundaryList exportHash boundary
+    catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
+  Graph.save root hashed
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, owned := ownedHash, modules, leanOptions := ← optionsJson challengeOptions, commit,
+    { exportHash, boundary, owned := ownedHash, modules, challengeProblems, commit,
       toolchain, deps, requires }
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
   -- with their export; pieces while the current pointer names them; evidence while its claim is

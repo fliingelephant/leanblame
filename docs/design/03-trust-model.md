@@ -135,9 +135,9 @@ them. The kernel does not see the body of `opaque` and `partial`
 definitions, and `quot` and `rec` have none to read.
 
 ```
-own(c)   = H("leanblame.own.2",   kind, role, name, uparams, type, body?, informal?)
-spec(c)  = H("leanblame.spec.2",  kind, role, name, uparams, type, informal)
-claim(c) = H("leanblame.claim.2", own(c), sorted over direct dependencies d of c:
+own(c)   = H("leanblame.own",   kind, role, name, uparams, type, body?, informal?)
+spec(c)  = H("leanblame.spec",  kind, role, name, uparams, type, informal)
+claim(c) = H("leanblame.claim", own(c), sorted over direct dependencies d of c:
                tagged(d)   -> ("spec", spec(d))
                untagged(d) -> ("full", claim(d)))
 ```
@@ -159,8 +159,8 @@ hash is the group hash plus its name. Owns are sorted by member name; the
 external entries are those of `claim`, for dependencies outside the group.
 
 ```
-group     = H("leanblame.group.2",  count, member owns, external entries)
-member(c) = H("leanblame.member.2", group, name)
+group     = H("leanblame.group",  count, member owns, external entries)
+member(c) = H("leanblame.member", group, name)
 ```
 
 A record stores, for each declaration it covers, its id, its name and

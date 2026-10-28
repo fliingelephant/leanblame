@@ -105,8 +105,6 @@ namespace Graph
 
 open Lean (Json ToJson toJson FromJson)
 
-def schema : String := "leanblame.graph.2"
-
 def dir (root : System.FilePath) : System.FilePath := Store.kindDir root .graphs
 
 /-- Keyed by what the hashing reads: the export (first, so `sweep` can tell an export's graphs by
@@ -143,7 +141,7 @@ def nodeFromJson? (j : Json) : Except String Core.Node := do
 /-- Store graph `h`. -/
 def save (root : System.FilePath) (h : Core.Hashed) : IO Unit :=
   writeFileMkdirs (path root h.exportHash h.boundaryHash) <| Json.compress <| Json.mkObj [
-    ("schema", schema), ("export", h.exportHash), ("boundary", h.boundaryHash),
+    ("export", h.exportHash), ("boundary", h.boundaryHash),
     ("nodes", .arr (h.nodes.fold (init := #[]) fun acc _ n => acc.push (nodeToJson n))),
     ("axioms", Json.mkObj (h.axioms.toList.map fun (n, axs) => (n, toJson axs))),
     ("standard", toJson h.standard), ("incomplete", toJson h.incomplete), ("checker", h.checker)]
@@ -170,8 +168,7 @@ def load? (root : System.FilePath) (exportHash boundaryHash : String) (b : Bound
   let some text ← readFileIfExists p | return none
   let parsed : Except String Core.Hashed := do
     let o ← JsonObj.read (← Json.parse text) "graph"
-      ["schema", "export", "boundary", "nodes", "axioms", "standard", "incomplete", "checker"]
-    o.schema schema
+      ["export", "boundary", "nodes", "axioms", "standard", "incomplete", "checker"]
     unless (← o.get String "export") == exportHash && (← o.get String "boundary") == boundaryHash do
       throw "the graph of another export or boundary list"
     let mut nodes : Std.HashMap String Core.Node := {}

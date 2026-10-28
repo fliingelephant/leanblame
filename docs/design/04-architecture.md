@@ -89,8 +89,11 @@ piece per command a challenge needs, as written. Nothing is elaborated again.
   scope comes with it: the `namespace`, `section`, `open`, `variable`,
   `universe` and `set_option` commands before it, and their `end`s; a command
   that opens or closes several scopes (`namespace A.B`) comes for each. A module's
-  pieces start with a `section` of their own and end with a piece that closes
-  what the module leaves open, so that nothing one module opens reaches the next.
+  pieces start with a `section` of their own, which first sets the Lean options
+  Lake builds the module with (its `leanOptions` and the `-D` options of
+  `moreLeanArgs` and `weakLeanArgs`, as `lean` reads them), and end with a piece
+  that closes what the module leaves open, so that nothing one module opens or
+  sets reaches the next.
   Lean refuses an `open` of a namespace that does not exist yet: one that no
   piece before it makes, and no constant of the modules the challenge imports,
   is declared at the start of the module's `section` (`namespace N` `end N`);
@@ -101,11 +104,15 @@ piece per command a challenge needs, as written. Nothing is elaborated again.
   `.ilean` says refers to a constant, which in the library's whole environment,
   with the command's namespace and `open`s, reads as other constants too or
   instead. A challenge holds some of those constants, so a name that reads as
-  its constant alone, or as none (a local), reads the same there.
-- `export` stops on: a tagged declaration no command declares; a tagged theorem
-  that what its challenge holds uses (its proof would be in
-  `ChallengeDeps.lean`); two `private` declarations of one name in two modules;
-  two modules with pieces built with different Lean options.
+  its constant alone, or as none (a local), reads the same there. Lean names a
+  private declaration after its module: one whose name a kept declaration of
+  another module has too is written with its module (`«secret (Sample.Energy)»`),
+  and so is every name that refers to it.
+- What stops a challenge stops `challenge`, not `export`, which sign-offs need:
+  a tagged theorem that what every challenge holds uses (every challenge holds
+  its proof, so it has no challenge of its own); a declaration no command
+  declares; a module whose source does not read; a Lean option the library
+  itself declares, which a challenge file cannot set.
 - `challenge X... --out DIR` joins the pieces as lean-eval joins a challenge.
   `ChallengeDeps.lean` imports every module from outside the library that the
   library's modules import (through the library modules they import), then
@@ -114,15 +121,15 @@ piece per command a challenge needs, as written. Nothing is elaborated again.
   and holds, for each module with a named theorem, its scope pieces with the
   statements, proofs `sorry`. `lakefile.toml` requires what the library's
   lakefile requires, by git (LeanBlame left out; a path is an error), and sets
-  `[leanOptions]` to the options Lake builds those modules with: its
-  `leanOptions` and the `-D` options of `moreLeanArgs` and `weakLeanArgs`.
-  `lean-toolchain` is the library's.
+  no Lean options: each module's section does. `lean-toolchain` is the
+  library's.
 - `challenge --check DIR` builds the challenge with `lean` against the
   library's build, exports it and hashes it as `export` hashes the library. Each
   tagged declaration it holds must have the claim hash of the last export, and
   every tagged declaration but the theorems must be there: the challenge then
   means what the signers signed. A private name holds the module it is written
-  in, so the challenge's private constants are hashed under the library's names.
+  in, so the challenge's private constants are hashed under the library's names:
+  by their names, or by the module a name written with its module gives.
 
 ## Config: `leanblame.toml`
 
@@ -160,7 +167,7 @@ signed `axiom` in the library or its tagged dependencies.
   exports only explain causes and show diffs; they never change a state.
 - `equiv` evidence: `.leanblame/equiv/evidence/<claim>.json`, one file per claim
   hash, naming the declaration's id, the proof and the record it was compared
-  with. Every JSON file here has a schema id and is read strictly.
+  with. Every JSON file here is read strictly.
 
 ## Platform
 

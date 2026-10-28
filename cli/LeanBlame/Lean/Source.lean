@@ -100,7 +100,7 @@ def declOf (ci : ConstantInfo) (module : String) (rename? : Option (Name → Nam
       deps := deps ++ body.getUsedConstants
   | .inductInfo iv =>
     let (ctors, all) := (iv.ctors.map rename, iv.all.map rename)
-    bodyHash := some <| Hash.hashFields "leanblame.inductive.2"
+    bodyHash := some <| Hash.hashFields "leanblame.inductive"
       ([toString iv.numParams, toString iv.numIndices] ++
         ctors.map (Canon.name "" ·) ++ ["all"] ++ all.map (Canon.name "" ·))
     deps := deps ++ ctors.toArray ++ all.toArray

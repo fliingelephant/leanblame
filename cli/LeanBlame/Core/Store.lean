@@ -11,8 +11,8 @@ dependencies it was made from. `equiv` writes evidence files next to it,
 `.leanblame/equiv/evidence/<claim hex>.json`. `export` sweeps: an export, boundary list or listing
 that neither the current pointer nor a record names is deleted, so are the graphs of a deleted
 export, pieces the current pointer does not name, evidence for a claim that is no longer current,
-and a proof that neither evidence nor a record names. Every JSON file here has a schema id and is
-read strictly.
+and a proof that neither evidence nor a record names. Every JSON file here is read strictly: an
+unknown or missing key is an error.
 -/
 import LeanBlame.Core.Schema
 
@@ -81,39 +81,49 @@ def sweepDir (d : System.FilePath) (keep : Std.HashSet String) : IO Nat := do
 def sweep (root : System.FilePath) (k : Kind) (keep : Std.HashSet String) : IO Nat :=
   sweepDir (kindDir root k) keep
 
+/-- Why a challenge cannot be made: the tagged theorem whose challenge it stops (`name`), or every
+challenge (`none`). -/
+structure ChallengeProblem where
+  name : Option String
+  problem : String
+  deriving Inhabited, BEq, Repr
+
+instance : Lean.ToJson ChallengeProblem where
+  toJson p := Lean.Json.mkObj [("theorem", Lean.toJson p.name), ("problem", p.problem)]
+
+def ChallengeProblem.fromJson? (j : Lean.Json) : Except String ChallengeProblem := do
+  let o ← JsonObj.read j "challenge problem" ["theorem", "problem"]
+  return { name := ← o.get (Option String) "theorem", problem := ← o.get String "problem" }
+
 /-- The last `export`: its export, boundary list and listing of the constants the library defines;
-the library's own modules with their challenge pieces, and the Lean options of the challenge (an
-object, as Lake's `leanOptions`); and what it was made from: the commit (`none` with uncommitted
-changes, which cannot be signed), the toolchain, the commits of git dependencies and what the
-lakefile requires. -/
+the library's own modules with their challenge pieces, and why a challenge cannot be made; and what
+it was made from: the commit (`none` with uncommitted changes, which cannot be signed), the
+toolchain, the commits of git dependencies and what the lakefile requires. -/
 structure Current where
   exportHash : String
   boundary : String
   owned : String
   modules : Array OwnModule
-  leanOptions : Lean.Json
+  challengeProblems : Array ChallengeProblem
   commit : Option String
   toolchain : String
   deps : Array (String × String)
   requires : Array Require
 
-def Current.schemaId : String := "leanblame.current.4"
-
 instance : Lean.ToJson Current where
-  toJson c := Lean.Json.mkObj [("schema", Current.schemaId), ("export", c.exportHash),
+  toJson c := Lean.Json.mkObj [("export", c.exportHash),
     ("boundary", c.boundary), ("owned", c.owned), ("modules", Lean.toJson c.modules),
-    ("lean_options", c.leanOptions), ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps),
+    ("challenge_problems", Lean.toJson c.challengeProblems), ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps),
     ("requires", Lean.toJson c.requires)]
 
 def Current.fromJson? (j : Lean.Json) : Except String Current := do
   let o ← JsonObj.read j "current"
-    ["schema", "export", "boundary", "owned", "modules", "lean_options", "commit", "toolchain", "deps",
+    ["export", "boundary", "owned", "modules", "challenge_problems", "commit", "toolchain", "deps",
      "requires"]
-  o.schema Current.schemaId
   let c : Current := {
     exportHash := ← o.get String "export", boundary := ← o.get String "boundary"
     owned := ← o.get String "owned", modules := ← (← o.get (Array Lean.Json) "modules").mapM OwnModule.fromJson?
-    leanOptions := ← o.get Lean.Json "lean_options"
+    challengeProblems := ← (← o.get (Array Lean.Json) "challenge_problems").mapM ChallengeProblem.fromJson?
     commit := ← o.get (Option String) "commit", toolchain := ← o.get String "toolchain"
     deps := ← o.getStrings "deps", requires := ← (← o.get (Array Lean.Json) "requires").mapM Require.fromJson? }
   for (k, h) in [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned)] do
@@ -142,15 +152,12 @@ structure Evidence where
   oldRecord : String
   proof : String
 
-def Evidence.schemaId : String := "leanblame.evidence.1"
-
 instance : Lean.ToJson Evidence where
-  toJson e := Lean.Json.mkObj [("schema", Evidence.schemaId), ("id", e.id), ("claim", e.claim),
+  toJson e := Lean.Json.mkObj [("id", e.id), ("claim", e.claim),
     ("old_record", e.oldRecord), ("proof", e.proof)]
 
 def Evidence.fromJson? (j : Lean.Json) : Except String Evidence := do
-  let o ← JsonObj.read j "evidence" ["schema", "id", "claim", "old_record", "proof"]
-  o.schema Evidence.schemaId
+  let o ← JsonObj.read j "evidence" ["id", "claim", "old_record", "proof"]
   let e : Evidence := { id := ← o.get String "id", claim := ← o.get String "claim"
                         oldRecord := ← o.get String "old_record", proof := ← o.get String "proof" }
   for (k, h) in [("claim", e.claim), ("old_record", e.oldRecord), ("proof", e.proof)] do

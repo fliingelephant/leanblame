@@ -13,8 +13,6 @@ namespace LeanBlame.Diff
 
 open Lean (Json toJson)
 
-def schemaId : String := "leanblame.diff.3"
-
 /-- One end of a diff: the graph of the export an approve record names, or of the last `export`. -/
 structure Point where
   /-- `none`: the last `export`. -/
@@ -113,7 +111,7 @@ def pointJson (p : Point) : Json :=
     ("export", p.graph.exportHash), ("boundary", p.graph.boundaryHash)]
 
 def report (old new : Point) (entries : Array Entry) : Json :=
-  Json.mkObj [("schema", schemaId), ("library", new.graph.boundary.library),
+  Json.mkObj [("library", new.graph.boundary.library),
     ("from", pointJson old), ("to", pointJson new),
     ("declarations", Json.arr (entries.map fun e => Json.mkObj [("id", e.id),
       ("from", sideJson e.old), ("to", sideJson e.new),

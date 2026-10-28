@@ -17,7 +17,6 @@ Exact schema in [14-schemas.md](14-schemas.md). Two examples:
 ### Approve
 
 ```toml
-schema = "leanblame.record.2"
 action = "approve"
 signer = "openreview:~Jane_Doe1"
 date = 2026-10-23T14:02:11Z
@@ -43,7 +42,6 @@ declaration ([06-versioning.md](06-versioning.md)).
 ### Withdraw
 
 ```toml
-schema = "leanblame.record.2"
 action = "withdraw"
 signer = "openreview:~Jane_Doe1"
 date = 2027-01-05T09:30:00Z

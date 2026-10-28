@@ -73,11 +73,6 @@ def JsonObj.getStrings (o : JsonObj) (k : String) : Except String (Array (String
   let kvs ← ((← o.get Lean.Json k).getObj?).mapError (s!"{o.what}.{k}: " ++ ·)
   kvs.toList.toArray.mapM fun (k', v) => return (k', ← v.getStr?.mapError (s!"{o.what}.{k}.{k'}: " ++ ·))
 
-/-- Fail unless key `schema` is `id`. -/
-def JsonObj.schema (o : JsonObj) (id : String) : Except String Unit := do
-  let s ← o.get String "schema"
-  unless s == id do throw s!"{o.what}: schema is `{s}`, expected `{id}`"
-
 /-- The JSON object of `kvs`, a string to string map. -/
 def stringsJson (kvs : Array (String × String)) : Lean.Json :=
   Lean.Json.mkObj (kvs.toList.map fun (k, v) => (k, Lean.Json.str v))

@@ -19,7 +19,6 @@ dependencies they come from are in `.leanblame/current` and in each record.
 
 ```json
 {
-  "schema": "leanblame.boundary.6",
   "library": "OpenPhysics",
   "declarations": [
     {
@@ -53,7 +52,6 @@ bytes.
 
 | Field | Approve | Withdraw | Meaning |
 |-------|---------|----------|---------|
-| `schema` | ✓ | ✓ | `leanblame.record.2` |
 | `action` | ✓ | ✓ | `approve` or `withdraw` |
 | `signer` | ✓ | ✓ | `provider:id`, stable id |
 | `date` | ✓ | ✓ | TOML datetime, UTC |
@@ -79,7 +77,6 @@ never modified or deleted. Examples in [05-records.md](05-records.md).
 
 ```json
 {
-  "schema": "leanblame.release.1",
   "library": "OpenPhysics",
   "tag": "2027.04",
   "commit": "9f8e7d…",
@@ -110,7 +107,6 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "schema": "leanblame.status.8",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
@@ -188,7 +184,6 @@ stderr.
 
 ```json
 {
-  "schema": "leanblame.diff.3",
   "library": "OpenPhysics",
   "from": { "record": "sha256:…", "commit": "1a2b3c…", "export": "sha256:…", "boundary": "sha256:…" },
   "to": { "record": null, "commit": "9f8e7d…", "export": "sha256:…", "boundary": "sha256:…" },

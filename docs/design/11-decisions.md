@@ -202,15 +202,14 @@ data is made again.
 1. **Viewers compute nothing.** `status --json` carries what LeanBlame knows:
    the record files, the standing of approvals, the toolchain, the standard
    axioms. A viewer only displays it.
-2. **No defaults on errors.** Every JSON file has a schema id and is read strictly:
+2. **No defaults on errors.** Every JSON file is read strictly:
    a missing or an unknown key is an error. Every `leanblame.toml` key is
    required. No fallback on a failure: proof erasure, the statement printer,
    the mathlib cache, Lake's output. A withdraw that breaks the rules, an
    `exclude` entry that names no approve record, and a record in two
    directories stop every command but `validate`, which lists them. `export`
    builds exactly the libraries it exports.
-3. **Records name declarations by id**
-   (`leanblame.record.2`), so an approval follows a rename: the declaration is
+3. **Records name declarations by id**, so an approval follows a rename: the declaration is
    `outdated`, not `unsigned`. A new id is a new declaration: the old approvals
    stay with the old id.
 
@@ -231,10 +230,13 @@ statements (printed in-process, as doc-gen4 prints them) and the challenge piece
 not a copy of each module elaborated again in other `lean` processes: it is the commands of the
 library's source that its theorems need, found from the kernel terms and the `.ilean`, with their
 scope. `leanblame challenge` joins them into one `ChallengeDeps.lean` (owner: one file, not one per
-module) and `Challenge.lean`, with the library's Lean options and requires; a viewer does not join
+module) and `Challenge.lean`, with what the library requires; a viewer does not join
 pieces. Names are rewritten only where they would read differently in that file. Lake's own loader
 gives the libraries, their modules and their Lean options. `challenge --check` hashes the challenge
 with the claim hash, the rule a sign-off follows, so that "the challenge means what the library
-means" is the same question as "the claim did not move". Rejected: copying every module (416 `lean`
+means" is the same question as "the claim did not move". What stops a challenge stops `challenge`,
+not `export`: sign-offs do not wait on challenges. In the one file, each module's section sets the
+Lean options Lake builds that module with, and a private name that another module's kept declaration
+has too is written with its module (owner: "Fix the root causes from first principles"). Rejected: copying every module (416 `lean`
 processes for Lean-QIT, about 1.6 GB each, which ran a 16 GB machine out of memory twice), one
 challenge file per module, and comparing a challenge with its own hash of terms.

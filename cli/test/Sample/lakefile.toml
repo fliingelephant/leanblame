@@ -10,7 +10,7 @@ enableArtifactCache = true
 name = "leanblame"
 path = "../.."
 
-# Lean options, two ways: `leanblame challenge` writes them into a challenge's lakefile.
+# Lean options, two ways: a challenge sets them in each module's part of its files.
 [leanOptions]
 relaxedAutoImplicit = false
 
