@@ -19,7 +19,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 
 ```json
 {
-  "schema": "leanblame.boundary.5",
+  "schema": "leanblame.boundary.6",
   "library": "OpenPhysics",
   "declarations": [
     {
@@ -30,10 +30,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
       "kind": "def",
       "role": "defined",
       "informal": "Nearest-neighbour Ising Hamiltonian on a finite chain, H = -J Σ σᵢσᵢ₊₁, open boundary.",
-      "statement": {
-        "pretty": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }],
-        "plain": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "Real", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "Real", "const": "Real" }]
-      }
+      "statement": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }]
     }
   ]
 }
@@ -47,7 +44,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [03-trust-model.md](03-trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
-| `statement` | the signature (name, binders, type) as segments, `pretty` with the assistant's default printer and `plain` for the assistant to read again (notation off, coercions as the functions they are); a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
+| `statement` | the signature (name, binders, type) as segments, printed as the library's documentation (doc-gen4) prints it, with the notations of the library and what it imports; a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
 
 ## 2. Record (storage, TOML)
 
@@ -113,19 +110,14 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "schema": "leanblame.status.7",
+  "schema": "leanblame.status.8",
   "library": "OpenPhysics",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
   "deps": { "mathlib": "a1b2c3…", "physlib": "d4e5f6…" },
-  "requires": [{ "name": "physlib", "git": "https://github.com/leanprover-community/physlib", "rev": "d4e5f6…", "sub_dir": null }],
   "export": "sha256:…",
   "boundary": "sha256:…",
   "generated": "2026-10-23T15:00:00Z",
-  "modules": [
-    { "name": "OpenPhysics", "imports": ["OpenPhysics.Ising"], "sorried": "sha256:…" },
-    { "name": "OpenPhysics.Ising", "imports": ["Mathlib.Analysis.SpecialFunctions.Exp"], "sorried": "sha256:…" }
-  ],
   "standard_axioms": ["propext", "Classical.choice", "Quot.sound"],
   "declarations": [
     {
@@ -136,7 +128,7 @@ every record. Viewers display it; they never need another source. With
       "kind": "theorem",
       "role": "proved",
       "informal": "…",
-      "statement": { "pretty": [ "…" ], "plain": [ "…" ] },
+      "statement": [ "…" ],
       "claim": "sha256:77c0…",
       "state": "outdated",
       "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
@@ -168,8 +160,6 @@ every record. Viewers display it; they never need another source. With
 |-------|--------|
 | `commit` | the commit the export comes from; `null` when a file under the library root differs from it (tracked or untracked): such an export cannot be signed or released |
 | `toolchain`, `deps` | the Lean version, and the commits of git dependencies |
-| `requires` | what the library's lakefile requires: the git URL, commit and subdirectory of each; `git` and `rev` are `null` for a path dependency |
-| `modules` | the library's own modules: the modules each imports directly but `Init`, in its order, and `sorried`, the hash of its sorried copy (the module after its imports, in pieces), which `leanblame sorried` prints ([04-architecture.md](04-architecture.md), Sorried copies) |
 | `standard_axioms` | the axioms every proof may rest on |
 | `declarations` | one entry per tagged declaration, in the boundary list's order (source order) |
 | `name`, `id`, `parent`, `module`, `kind`, `role`, `informal`, `statement` | as in the boundary list |
@@ -187,32 +177,7 @@ every record. Viewers display it; they never need another source. With
 | `records` | every record of the records directories, with all its fields, its hash and its path |
 | `untagged_in_library` | untagged declarations of this library that tagged ones use, with those users; tag them so they get their own signer |
 
-## 5. Sorried copies (output of `sorried`)
-
-```json
-{
-  "sha256:…": [
-    { "text": "namespace OpenPhysics", "keep": true, "declares": [], "uses": [] },
-    { "text": "\n\n/-- The energy of a spin chain. -/\ndef energy (s : Chain) : ℝ := …",
-      "keep": false, "declares": ["OpenPhysics.energy"], "uses": ["OpenPhysics.Chain"] },
-    { "text": "\nend OpenPhysics", "keep": true, "declares": [], "uses": [] }
-  ]
-}
-```
-
-One key per hash asked for, as `status --json` lists them under `modules`; the
-pieces of that module's copy, in order ([04-architecture.md](04-architecture.md),
-Sorried copies). Joined, the texts are the module after its imports, proofs
-replaced by `:= sorry`, with a last piece that closes the scopes it leaves open.
-
-| Field | Meaning |
-|-------|---------|
-| `text` | the command, with the comments before it |
-| `keep` | a challenge keeps the piece whatever its theorems need: it is not a declaration, or it is an instance written as one |
-| `declares` | the constants the command added |
-| `uses` | the constants of the library, declared by other pieces, that the command needs |
-
-## 6. Diff (output of `diff --json`)
+## 5. Diff (output of `diff --json`)
 
 What changed between two points: the export an approve record names (`--from`), and another approve
 record's (`--to`) or the last export. The comparison is the one `status` makes against the last live
@@ -223,7 +188,7 @@ stderr.
 
 ```json
 {
-  "schema": "leanblame.diff.2",
+  "schema": "leanblame.diff.3",
   "library": "OpenPhysics",
   "from": { "record": "sha256:…", "commit": "1a2b3c…", "export": "sha256:…", "boundary": "sha256:…" },
   "to": { "record": null, "commit": "9f8e7d…", "export": "sha256:…", "boundary": "sha256:…" },
@@ -231,9 +196,9 @@ stderr.
     {
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
       "from": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
-                "claim": "sha256:3b1f…", "informal": "…", "statement": { "pretty": [ "…" ], "plain": [ "…" ] } },
+                "claim": "sha256:3b1f…", "informal": "…", "statement": [ "…" ] },
       "to": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
-              "claim": "sha256:77c0…", "informal": "…", "statement": { "pretty": [ "…" ], "plain": [ "…" ] } },
+              "claim": "sha256:77c0…", "informal": "…", "statement": [ "…" ] },
       "changes": {
         "informal": false, "statement": false, "body": false,
         "relies_on": { "added": [], "removed": [], "changed": ["OpenPhysics.Ising.Hamiltonian"] },

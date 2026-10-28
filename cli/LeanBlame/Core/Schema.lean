@@ -175,14 +175,6 @@ structure Segment where
   const : Option String := none
   deriving Inhabited, Repr, BEq
 
-/-- A tagged declaration's signature (name, binders, type), printed two ways: `pretty`, the
-assistant's default printer; `plain`, with notation and field notation off. Every constant
-reference is a segment of its own, so a page can link it. -/
-structure Statement where
-  pretty : Array Segment
-  plain : Array Segment
-  deriving Inhabited, Repr
-
 instance : ToJson Segment where
   toJson s := Json.mkObj [("text", s.text), ("const", toJson s.const)]
 
@@ -190,14 +182,6 @@ instance : FromJson Segment where
   fromJson? j := do
     let o ← JsonObj.read j "segment" ["text", "const"]
     return { text := ← o.get String "text", const := ← o.get (Option String) "const" }
-
-instance : ToJson Statement where
-  toJson s := Json.mkObj [("pretty", toJson s.pretty), ("plain", toJson s.plain)]
-
-instance : FromJson Statement where
-  fromJson? j := do
-    let o ← JsonObj.read j "statement" ["pretty", "plain"]
-    return { pretty := ← o.get (Array Segment) "pretty", plain := ← o.get (Array Segment) "plain" }
 
 structure BoundaryDecl where
   name : String
@@ -215,7 +199,9 @@ structure BoundaryDecl where
   role : Role
   /-- The docstring (a member without one: its parent's), as `normalizeInformal` leaves it. -/
   informal : String
-  statement : Statement
+  /-- Its signature (name, binders, type) as the proof assistant prints it, in segments: every
+  constant reference is one of its own, so a page can link it. -/
+  statement : Array Segment
   deriving Inhabited, Repr
 
 /-- The declarations of the trusted boundary, in source order (a module after the modules it
@@ -226,7 +212,7 @@ structure BoundaryList where
   declarations : Array BoundaryDecl
   deriving Inhabited, Repr
 
-def BoundaryList.schemaId : String := "leanblame.boundary.5"
+def BoundaryList.schemaId : String := "leanblame.boundary.6"
 
 instance : ToJson BoundaryDecl where
   toJson d := Json.mkObj [("name", d.name), ("id", d.id), ("parent", toJson d.parent),
@@ -245,7 +231,7 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   let d : BoundaryDecl := {
     name, id := ← o.get String "id", parent := ← o.get (Option String) "parent"
     module := ← o.get String "module", kind := ← o.get String "kind", role := ← o.get Role "role"
-    informal := ← o.get String "informal", statement := ← o.get Statement "statement" }
+    informal := ← o.get String "informal", statement := ← o.get (Array Segment) "statement" }
   for (k, v) in [("id", d.id), ("kind", d.kind), ("informal", d.informal)] do
     if v.isEmpty then throw s!"{o.what}: `{k}` is empty"
   unless normalizeInformal d.informal == d.informal do
@@ -523,26 +509,25 @@ structure StatusDecl where
   closureSize : Nat
   deriving Inhabited, Repr
 
-/-- One of the library's own modules: the modules it imports (but `Init`), and its sorried copy
-(docs/design/04-architecture.md, "Sorried copies"): `copy` hashes the copy's pieces, `key` what made
-it; the store keeps the copy under its key. -/
+/-- One of the library's own modules: the modules it imports (but `Init` and LeanBlame's), and the
+hash of its challenge pieces (docs/design/04-architecture.md, "Challenges") when it holds
+something a challenge needs. -/
 structure OwnModule where
   name : String
   imports : Array String
-  key : String
-  copy : String
+  pieces : Option String
   deriving Inhabited, Repr
 
 def OwnModule.fromJson? (j : Json) : Except String OwnModule := do
-  let o ← JsonObj.read j "module" ["name", "imports", "key", "copy"]
+  let o ← JsonObj.read j "module" ["name", "imports", "pieces"]
   let m : OwnModule := { name := ← o.get String "name", imports := ← o.get (Array String) "imports",
-                         key := ← o.get String "key", copy := ← o.get String "copy" }
-  for (k, h) in [("key", m.key), ("copy", m.copy)] do
-    unless isHash h do throw s!"module {m.name}.{k}: `{h}` is not a sha256: hash"
+                         pieces := ← o.get (Option String) "pieces" }
+  if let some h := m.pieces then
+    unless isHash h do throw s!"module {m.name}.pieces: `{h}` is not a sha256: hash"
   return m
 
 instance : ToJson OwnModule where
-  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("key", m.key), ("copy", m.copy)]
+  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("pieces", toJson m.pieces)]
 
 /-- A dependency the library's lakefile requires (Lake: a package of `lake-manifest.json` that is
 not inherited): its git URL, commit and subdirectory; `git` and `rev` are `none` for a path
@@ -569,13 +554,9 @@ structure StatusReport where
   commit : Option String
   toolchain : String
   deps : Array (String × String)
-  /-- What the library's lakefile requires. -/
-  requires : Array Require
   exportHash : String
   boundary : String
   generated : Std.Time.Timestamp
-  /-- The library's own modules. -/
-  modules : Array OwnModule
   /-- The assumptions every proof may rest on (`Core.Backend.standard`). -/
   standard : Array String
   /-- In the boundary list's order: source order. -/
@@ -586,7 +567,7 @@ structure StatusReport where
   untaggedInLibrary : Array (String × Array String)
   deriving Inhabited
 
-def StatusReport.schemaId : String := "leanblame.status.7"
+def StatusReport.schemaId : String := "leanblame.status.8"
 
 instance : ToJson HistoryEntry where
   toJson h := Json.mkObj [("record", h.record), ("action", toJson h.action), ("signer", h.signer),
@@ -609,9 +590,6 @@ instance : ToJson StatusReport where
   toJson s := Json.mkObj [("schema", StatusReport.schemaId), ("library", s.library),
     ("commit", toJson s.commit), ("toolchain", s.toolchain), ("deps", stringsJson s.deps),
     ("export", s.exportHash), ("boundary", s.boundary), ("generated", s.generated.toIso),
-    ("requires", toJson s.requires),
-    ("modules", Json.arr (s.modules.map fun m =>
-      Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("sorried", m.copy)])),
     ("standard_axioms", toJson s.standard),
     ("declarations", toJson s.declarations),
     ("records", toJson s.records),

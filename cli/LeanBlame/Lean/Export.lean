@@ -7,21 +7,27 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 `module`, `kind`, `role` and the printed statement. Exports the library's constants and the
 boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
-(docs/design/04-architecture.md, "Storage"). Makes the sorried copy of each module (`Sorried`). Then points
-`.leanblame/current` at them, with the commit, toolchain and dependencies they were made from.
-Prints the two hashes.
+(docs/design/04-architecture.md, "Storage"). Takes the challenge pieces of the modules that hold
+something the tagged declarations need (`Pieces`). Then points `.leanblame/current` at them, with
+the commit, toolchain and dependencies they were made from. Prints the two hashes.
+
+The library is imported once, with the environment extensions of everything it imports, as an
+editor or doc-gen4 loads it; every output comes from that one environment.
 -/
 import Lean
+import Lake.Config.InstallPath
+import Lake.Config.Module
 import Lake.Load.Manifest
-import Lake.Toml
+import Lake.Load.Package
 import Lake.Util.Git
 import LeanExport.Basic
 import LeanBlame.Attr
 import LeanBlame.Core.Records
 import LeanBlame.Core.Walk
 import LeanBlame.Lean.Blueprint
-import LeanBlame.Lean.Sorried
+import LeanBlame.Lean.Pieces
 import LeanBlame.Lean.Source
+import LeanBlame.Lean.Statements
 
 namespace LeanBlame.Export
 
@@ -36,48 +42,41 @@ structure Tag where
   parent : Option Name := none
   informal : String
 
-/-- Library names: `--lib` flags, else the default `lean_lib` targets of `lakefile.toml`. -/
-def libraryNames (root : System.FilePath) (requested : Array String) : IO (Array String) := do
-  unless requested.isEmpty do return requested
-  let path := root / "lakefile.toml"
-  unless ← path.pathExists do
-    fail "cannot find the library: no lakefile.toml here (for lakefile.lean, pass --lib NAME)"
-  let t ← match ← parseToml (← IO.FS.readFile path) path.toString pure with
-    | .ok t => pure t
-    | .error es => fail s!"{path}: {"; ".intercalate es.toList}"
-  let libs ← match t.find? `lean_lib with
-    | none => pure #[]
-    | some (.array _ vs) => vs.mapM fun
-      | .table _ lt => match lt.find? `name with
-        | some (.string _ n) => pure n
-        | _ => fail s!"{path}: a lean_lib without a name"
-      | _ => fail s!"{path}: lean_lib is not a list of tables"
-    | some _ => fail s!"{path}: lean_lib is not a list of tables"
-  let defaults ← match t.find? `defaultTargets with
-    | none => pure #[]
-    | some (.array _ vs) => vs.mapM fun
-      | .string _ n => pure n
-      | _ => fail s!"{path}: defaultTargets is not a list of strings"
-    | some _ => fail s!"{path}: defaultTargets is not a list of strings"
-  let chosen := if defaults.isEmpty then libs else libs.filter defaults.contains
-  if chosen.isEmpty then fail s!"{path} declares no default lean_lib; pass --lib NAME"
-  return chosen
+/-- The package in `root`, as Lake loads its `lakefile.toml` or `lakefile.lean`. -/
+def lakePackage (root : System.FilePath) : IO Lake.Package := do
+  -- Lake as the toolchain of `lean` holds it.
+  let (elan?, some lean, _) ← Lake.findInstall? | fail "cannot find Lean: no `lean` on PATH"
+  let lakeEnv ← match ← (Lake.Env.compute (.ofLean lean) lean elan?).toBaseIO with
+    | .ok e => pure e
+    | .error e => fail s!"Lake: {e}"
+  let (pkg?, log) ← (Lake.loadPackage { lakeEnv, wsDir := root }).run?
+  let some pkg := pkg? | fail s!"Lake cannot load the package:\n{log}"
+  return pkg
 
-/-- The modules of each library, from Lake (`lake query --json LIB:modules`). -/
-def libraryModules (root : System.FilePath) (libs : Array String) : IO (Array (String × Array Name)) := do
-  let out ← IO.Process.run
-    { cmd := "lake", args := #["query", "--json"] ++ libs.map (· ++ ":modules"), cwd := root }
-  let lines := (out.lines.toArray.map (·.copy)).filter (!·.trimAscii.isEmpty)
-  unless lines.size == libs.size do fail s!"unexpected output from `lake query`: {out}"
-  let mut byLib := #[]
-  for lib in libs, line in lines do
-    let .ok (.arr xs) := Json.parse line | fail s!"unexpected output from `lake query`: {line}"
-    let mods ← xs.mapM fun
-      | .str m => pure m.toName
-      | _ => fail s!"unexpected output from `lake query`: {line}"
-    byLib := byLib.push (lib, mods)
-  if byLib.all (·.2.isEmpty) then fail "`lake query` reported no modules"
-  return byLib
+/-- The libraries to export: the `--lib` names, else the package's default `lean_lib` targets, else
+all its `lean_lib`s. -/
+def libraries (pkg : Lake.Package) (requested : Array String) : IO (Array Lake.LeanLib) := do
+  if requested.isEmpty then
+    let defaults := pkg.leanLibs.filter (pkg.defaultTargets.contains ·.name)
+    let libs := if defaults.isEmpty then pkg.leanLibs else defaults
+    if libs.isEmpty then fail "the package declares no lean_lib"
+    return libs
+  requested.mapM fun n => match pkg.findLeanLib? n.toName with
+    | some l => pure l
+    | none => fail s!"the package declares no lean_lib {n}"
+
+/-- The Lean options Lake builds the modules of `lib` with: its `leanOptions`, then the `-D`
+options of its Lean arguments. -/
+def libraryOptions (lib : Lake.LeanLib) : IO Options :=
+  (lib.leanArgs ++ lib.weakLeanArgs).foldlM (init := lib.leanOptions.toOptions) fun opts a => do
+    let some kv := a.dropPrefix? "-D" | return opts
+    let k :: v@(_ :: _) := kv.copy.splitOn "=" | fail s!"{lib.name}: Lean argument {a}"
+    let v := "=".intercalate v
+    return opts.insert k.toName <| match v, v.toNat? with
+      | "true", _ => .ofBool true
+      | "false", _ => .ofBool false
+      | _, some n => .ofNat n
+      | _, none => .ofString v
 
 /-- The commit of the git repository holding `root`; an error outside git: a record names the commit it
 signs. -/
@@ -179,7 +178,7 @@ def kindWord (env : Environment) (n : Name) (ci : ConstantInfo) : String :=
 imports), then the line and column where it starts. -/
 def sourcePlace (env : Environment) (n : Name) : Option (Nat × Nat × Nat) := do
   let idx ← env.getModuleIdxFor? n
-  let r ← Sorried.declRange? env n
+  let r ← Pieces.declRange? env n
   return (idx.toNat, r.range.pos.line, r.range.pos.column)
 
 /-- The name of `n` under `root`, the declaration whose id stands for it: `x` for `Sample.Point.x`
@@ -251,100 +250,11 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
     else a.2.2.name < b.2.2.name
   return ((out.qsort before).map (·.2), errors)
 
-/-- The Lean script that prints the statements (docs/design/14-schemas.md §1) of the constants named
-in `names`, one per line, as JSON into `out`. It runs in the library with `lake env lean`, so the
-library's notations and other environment extensions are loaded as in an editor; this process
-cannot load them, since the library imports `LeanBlame.Attr`, which is linked into it. Its
-definitions live in their own namespace so that no library name shadows them. The
-signature is pretty-printed with every constant reference tagged (`Widget.tagCodeInfos`, the way
-doc-gen4 renders signatures) and flattened to segments; a reference prints with its surrounding
-spaces (` + ` for `HAdd.hAdd`), which stay outside its segment. A printer error stops `export`. -/
-def statementScript (mods : Array Name) (names out : System.FilePath) : String :=
-  "import Lean\n" ++ String.join (mods.toList.map fun m => s!"import {m}\n") ++ r#"
-open Lean Meta Widget
-
-namespace LeanBlameStatements
-
-def constOf (i : SubexprInfo) : Option Name :=
-  match i.info.val.info with
-  | .ofTermInfo t => match t.expr.consumeMData with
-    | .const n _ => some n
-    | _ => none
-  | _ => none
-
-def segment (text : String) (const : Option Name := none) : Json :=
-  Json.mkObj [("text", Json.str text), ("const", match const with | some c => Json.str c.toString | none => Json.null)]
-
-/-- The text directly under a tag belongs to the constant that tag refers to, if any: the name of a
-constant, or the symbol of a notation whose head it is (` = ` for `Eq`). Nested tags decide for
-their own text. -/
-partial def flatten (cur : Option Name) : CodeWithInfos → Array Json → Array Json
-  | .text s, acc =>
-    match cur with
-    | none => if s.isEmpty then acc else acc.push (segment s)
-    | some n =>
-      let chars := s.toList
-      let lead := chars.takeWhile Char.isWhitespace
-      let trail := (chars.reverse.takeWhile Char.isWhitespace).reverse
-      let core := String.ofList ((chars.drop lead.length).take (chars.length - lead.length - trail.length))
-      let acc := if lead.isEmpty then acc else acc.push (segment (String.ofList lead))
-      let acc := if core.isEmpty then acc else acc.push (segment core (some n))
-      if trail.isEmpty then acc else acc.push (segment (String.ofList trail))
-  | .append xs, acc => xs.foldl (fun acc x => flatten cur x acc) acc
-  | .tag i t, acc => flatten (constOf i) t acc
-
-def segments (c : Name) : MetaM Json := do
-  let ⟨fmt, infos⟩ ← PrettyPrinter.ppSignature c
-  let ctx : Elab.ContextInfo := {
-    env := ← getEnv, fileMap := default, mctx := ← getMCtx, options := ← getOptions
-    currNamespace := ← getCurrNamespace, openDecls := ← getOpenDecls, ngen := ← getNGen }
-  let code ← tagCodeInfos ctx infos (TaggedText.prettyTagged fmt (w := 100))
-  return Json.arr (flatten none code #[])
-
-/-- `pp.tagAppFns`: the head of an application gets its own tag, so it becomes a segment. `plain`
-is for Lean to read again (a comparator challenge restates theorems with it): no notation, no field
-notation, and coercions as the functions they are, since `↑x` alone may not say its target. -/
-def statement (c : Name) : MetaM Json := do
-  let pretty (o : Options) := o.setBool `pp.tagAppFns true
-  let plain (o : Options) := pretty o |>.setBool `pp.notation false |>.setBool `pp.fieldNotation false
-    |>.setBool `pp.coercions false
-  let under (f : Options → Options) (x : MetaM Json) : MetaM Json :=
-    withTheReader Core.Context (fun ctx => { ctx with options := f ctx.options }) x
-  return Json.mkObj [("pretty", ← under pretty (segments c)), ("plain", ← under plain (segments c))]
-
-def run (names out : System.FilePath) : MetaM Unit := do
-  let mut fields := #[]
-  for line in ← IO.FS.lines names do
-    let some c := Syntax.decodeNameLit ("`" ++ line) | throwError "not a constant name: {line}"
-    fields := fields.push (line, ← statement c)
-  IO.FS.writeFile out (Json.mkObj fields.toList).compress
-
-end LeanBlameStatements
-"# ++ s!"\n#eval LeanBlameStatements.run {repr names.toString} {repr out.toString}\n"
-
-/-- `declarations` with their statements, printed by `statementScript` in the library. -/
-def withStatements (root : System.FilePath) (mods : Array Name)
-    (declarations : Array (Name × BoundaryDecl)) : IO (Array (Name × BoundaryDecl)) := do
-  let names ← Store.tmpPath root "names"
-  let out ← Store.tmpPath root "statements"
-  let script ← Store.tmpPath root "statements.lean"
-  IO.FS.writeFile names (String.join (declarations.toList.map fun (n, _) => n.toString ++ "\n"))
-  IO.FS.writeFile script (statementScript mods names out)
-  let r ← IO.Process.output { cmd := "lake", args := #["env", "lean", script.toString], cwd := root }
-  let cleanup : IO Unit := do
-    for f in [names, out, script] do
-      if ← f.pathExists then IO.FS.removeFile f
-  if r.exitCode != 0 then
-    cleanup
-    fail s!"printing the statements failed (exit {r.exitCode}):\n{r.stdout}{r.stderr}"
-  let text ← IO.FS.readFile out
-  cleanup
-  let o ← IO.ofExcept (Json.parse text >>= (JsonObj.read · "printed statements"
-    (declarations.toList.map fun (n, _) => n.toString)))
-  declarations.mapM fun (n, d) => do
-    match o.get Statement n.toString with
-    | .ok st => pure (n, { d with statement := st })
-    | .error e => fail s!"printing the statements: {e}"
+/-- `declarations` with their statements (`Statements`). -/
+def withStatements (env : Environment) (declarations : Array (Name × BoundaryDecl)) :
+    IO (Array (Name × BoundaryDecl)) := do
+  let printed ← Statements.print env (declarations.map (·.1))
+  return declarations.zipWith (fun (n, d) st => (n, { d with statement := st })) printed
 
 /-- Whether a user could tag `n`, that is, Lean did not generate it (docs/design/03): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
@@ -371,25 +281,47 @@ def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath)
       (LeanExport.dumpEnv env (some roots.toList))
   return Sha256.toHex (← sha.get).finish
 
+/-- Lean's sysroot, `LEAN_PATH` and `LEAN_SRC_PATH`, as `lake env` has them in `root`. -/
+def lakeEnvPaths (root : System.FilePath) : IO (System.FilePath × SearchPath × SearchPath) := do
+  let vars := (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root }).lines.toArray
+  let var (k : String) : IO String := do
+    let some v := vars.findSome? fun l => (l.dropPrefix? (k ++ "=")).map (·.copy)
+      | fail s!"`lake env printenv` did not report {k}"
+    return v
+  return (⟨← var "LEAN_SYSROOT"⟩, .parse (← var "LEAN_PATH"), .parse (← var "LEAN_SRC_PATH"))
+
+/-- Lean options as Lake's `leanOptions` writes them: an object, its keys in order. -/
+def optionsJson (o : Options) : IO Json := do
+  let mut kvs := #[]
+  for (k, v) in o do
+    let j ← match v with
+      | .ofString s => pure (Json.str s)
+      | .ofBool b => pure (Json.bool b)
+      | .ofNat n => pure (toJson n)
+      | .ofInt i => pure (toJson i)
+      | .ofName n => pure (Json.str n.toString)
+      | .ofSyntax _ => fail s!"option {k}: a syntax value"
+    kvs := kvs.push (k.toString, j)
+  return Json.mkObj (kvs.qsort (·.1 < ·.1)).toList
+
 /-- A built library with its modules imported. -/
 structure Loaded where
   libs : Array String
-  /-- The modules of each library. -/
-  byLib : Array (String × Array Name)
   mods : Array Name
+  /-- The Lean options of each module, as Lake builds it. -/
+  options : NameMap Options
   deps : Array (String × String)
   requires : Array Require
   env : Environment
   /-- Where the sources are (`LEAN_SRC_PATH` of `lake env`). -/
   srcPath : System.SearchPath
-  /-- The toolchain (`LEAN_SYSROOT`) and where its `lean` finds the modules (`LEAN_PATH`). -/
-  sysroot : System.FilePath
-  leanPath : String
 
 /-- Build the libraries of `root` (with the mathlib cache when they depend on mathlib) and import
-their modules. -/
+their modules, running their initializers and loading the environment extensions of everything they
+import (`main` allows initializers). -/
 def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
-  let libs ← libraryNames root libsGiven
+  let libraries ← libraries (← lakePackage root) libsGiven
+  let libs := libraries.map (·.name.toString (escape := false))
   -- docs/design/04: build using the mathlib cache, when `lake-manifest.json` names mathlib.
   if (← Lake.Manifest.load? (root / "lake-manifest.json")).any (·.packages.any (·.name == `mathlib)) then
     IO.eprintln "leanblame: lake exe cache get"
@@ -399,20 +331,21 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
   -- leave them only in the cache unless Lake is asked to restore them.
   runToStderr "lake" (#["build"] ++ libs) root "`lake build`" (env := #[("LAKE_RESTORE_ARTIFACTS", some "true")])
   let (deps, requires) ← manifestDeps root
-  let byLib ← libraryModules root libs
-  let mods := dedup (byLib.flatMap (·.2))
-  let vars := (← IO.Process.run { cmd := "lake", args := #["env", "printenv"], cwd := root }).lines.toArray
-  let var (k : String) : IO String := do
-    let some v := vars.findSome? fun l => (l.dropPrefix? (k ++ "=")).map (·.copy)
-      | fail s!"`lake env printenv` did not report {k}"
-    return v
-  let sysroot := System.FilePath.mk (← var "LEAN_SYSROOT")
-  let leanPath ← var "LEAN_PATH"
-  initSearchPath sysroot (System.SearchPath.parse leanPath)
-  IO.eprintln s!"leanblame: importing {mods.size} modules of {", ".intercalate libs.toList}"
-  let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := false)
-  return { libs, byLib, mods, deps, requires, env, srcPath := System.SearchPath.parse (← var "LEAN_SRC_PATH"),
-           sysroot, leanPath }
+  let roots := (← libraries.flatMapM (·.getModuleArray)).map (·.name)
+  let (sysroot, leanPath, srcPath) ← lakeEnvPaths root
+  initSearchPath sysroot leanPath
+  IO.eprintln s!"leanblame: importing {", ".intercalate libs.toList}"
+  let env ← importModules (roots.map fun m => { module := m }) {} (loadExts := true)
+  -- The libraries' modules, in import order, as Lake has them: the imported ones local to a library
+  -- (a module of several belongs to the first), with its Lean options.
+  let libOptions ← libraries.mapM fun l => return (l, ← libraryOptions l)
+  let mut mods := #[]
+  let mut options : NameMap Options := {}
+  for m in env.header.moduleNames do
+    if let some (_, o) := libOptions.find? (·.1.isLocalModule m) then
+      mods := mods.push m
+      options := options.insert m o
+  return { libs, mods, options, deps, requires, env, srcPath }
 
 structure Result where
   exportHash : String
@@ -426,7 +359,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     (libsGiven : Array String) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
-  let { libs, byLib, mods, deps, requires, env, srcPath, sysroot, leanPath } ← load root libsGiven
+  let { libs, mods, options, deps, requires, env, srcPath } ← load root libsGiven
   -- Checked after the build, which may update `lake-manifest.json`.
   let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
@@ -438,7 +371,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   unless problems.isEmpty do
     fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
   IO.eprintln "leanblame: printing statements"
-  let declarations ← withStatements root mods declarations
+  let declarations ← withStatements env declarations
   let boundaryList : BoundaryList := { library := ", ".intercalate libs.toList, declarations := declarations.map (·.2) }
   -- The constants to export: the library's own non-internal constants and the boundary list.
   let mut roots : Array Name := #[]
@@ -455,7 +388,21 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
-  let modules ← Sorried.make root env byLib (.ofList own.toList) srcPath sysroot leanPath
+  IO.eprintln "leanblame: challenge pieces"
+  let tagged := declarations.filterMap fun (n, d) =>
+    if d.kind == "field" || d.kind == "constructor" then none else some (n, d.kind == "theorem")
+  let (pieces, challengeOptions, problems) ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) tagged
+  unless problems.isEmpty do
+    fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
+  let mut stored : NameMap String := {}
+  for p in pieces do
+    stored := stored.insert p.module.toName (← Store.putString root .pieces (jsonText p))
+  let modules : Array OwnModule := mods.filterMap fun m => do
+    let idx ← env.getModuleIdx? m
+    let d ← env.header.moduleData[idx.toNat]?
+    let imports := dedup (d.imports.filterMap fun i =>
+      if i.module == `Init || (`LeanBlame).isPrefixOf i.module then none else some (toString i.module))
+    return { name := toString m, imports, pieces := stored.find? m }
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     roots := roots.push n
@@ -479,9 +426,10 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, owned := ownedHash, modules, commit, toolchain, deps, requires }
+    { exportHash, boundary, owned := ownedHash, modules, leanOptions := ← optionsJson challengeOptions, commit,
+      toolchain, deps, requires }
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
-  -- with their export; copies while the current pointer names them; evidence while its claim is
+  -- with their export; pieces while the current pointer names them; evidence while its claim is
   -- current; a proof while evidence or a record names it.
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex exportHash)
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
@@ -496,7 +444,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     if n.informal.isSome then acc.insert s!"{hashHex n.claim}.json" else acc
   let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
   removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
-  removed := removed + (← Store.sweep root .sorried (.ofList (modules.toList.map (s!"{hashHex ·.key}.json"))))
+  removed := removed + (← Store.sweep root .pieces (.ofList (modules.toList.filterMap (·.pieces.map hashHex))))
   removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
   removed := removed + (← Store.sweep root .proofs (proofs.union (← Store.evidenceProofs root)))
   Graph.sweep root exports

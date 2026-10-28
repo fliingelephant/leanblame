@@ -27,6 +27,8 @@
 | **group hash** | Hash of a cycle (an inductive with its constructors, or mutual definitions) as one unit. |
 | **exclude** | A maintainer's decision in `leanblame.toml` to stop counting an approve record. The dispute mechanism. Withdrawals cannot be excluded. |
 | **comparator** | Lean FRO's checker for untrusted proofs against a trusted statement file. Source of the closure walk. |
+| **challenge** | What a comparator checks a solution against: `ChallengeDeps.lean`, what the statements need, and `Challenge.lean`, the statements with proofs `sorry`. `leanblame challenge` writes one from pieces and checks it. |
+| **piece** | One command of a library's source that a challenge needs, as written, with its scope commands. `export` stores each module's pieces. |
 | **nanoda, con-ron, con-leche** | Independent re-implementations of the Lean kernel, used as extra checkers. |
 | **AXLE, Kimina, Pantograph** | Fast proof-check services that trust the elaborator. Filters, not gates. |
 | **verso-blueprint, LeanArchitect** | Blueprint tools: prose, Lean declarations and dependency graph in one document. verso-blueprint's manifest is a boundary-list source; both are possible `status --json` consumers. |

@@ -8,10 +8,12 @@ defaultTargets = ["LeanBlameAttr", "leanblame"]
 name = "LeanBlameAttr"
 roots = ["LeanBlame.Attr"]
 
-# The command-line tool.
+# The command-line tool. It imports the libraries it reads with their environment extensions,
+# which runs their initializers in Lean's interpreter, as doc-gen4 does.
 [[lean_exe]]
 name = "leanblame"
 root = "Main"
+supportInterpreter = true
 
 # The executable's own modules: the generic core and the Lean frontend
 # (docs/design/04-architecture.md, "The CLI"). Lake builds an executable's imports only from

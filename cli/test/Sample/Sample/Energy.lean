@@ -1,6 +1,6 @@
 import Sample.Basic
 
--- Left open, like the namespace: the sorried copy closes both.
+-- Left open, like the namespace: the challenge closes both.
 noncomputable section
 
 namespace Sample

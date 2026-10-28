@@ -81,7 +81,8 @@ Run in the library root as `lake exe leanblame <command>`.
 | `sign --signer local:NAME [--module M] [--note TEXT] [NAME\|ID...]` | Write an approve record (default: one per module of the library). |
 | `sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its declarations (names or ids). |
 | `equiv [NAME\|ID...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
-| `sorried HASH...` | Print modules of the library with theorem proofs replaced by `sorry`, one piece per command, so a comparator challenge carries only what its theorems need. |
+| `challenge [NAME\|ID...] --out DIR` | Write a comparator challenge for these theorems: what they need from the library, and their statements with proofs `sorry`. |
+| `challenge --check DIR` | Check that each tagged declaration in the challenge has the library's hash. |
 | `validate [--base-ref REF]` | Check record files: schema, signer authority, no edits or deletions since `REF`. |
 | `release --tag TAG [--out FILE]` | Signoff and kernel gates, axiom report, manifest. |
 

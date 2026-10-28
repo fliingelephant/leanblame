@@ -5,10 +5,13 @@
 #
 # Copies the sample library to a scratch directory, makes it a git repository,
 # and walks through: init -> export -> sign (records name declarations by id) ->
-# status (valid; --json complete, nothing on stderr) -> sorried copies (proofs
-# replaced by sorry but those a definition uses; one piece per command; merged
-# into one file, they build without the library, whole or cut to what one theorem
-# needs; copied again only where a module changed) -> release -> edit a body ->
+# status (valid; --json complete, nothing on stderr) -> challenge (the commands the
+# tagged declarations need, @[trusted] dropped, the named theorems with proofs
+# `sorry`, the library's Lean options; Lake builds it without the library; the
+# check finds it means what the library means, and finds a changed body; a tagged
+# definition that uses a theorem brings its proof, a private one keeps its
+# meaning, an `open` of a namespace nothing kept is declared first; only the
+# pieces of an edited module change) -> release -> edit a body ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
 # causes (untagged, own-text, dep-spec) -> diff since the first sign-off (the
@@ -158,17 +161,11 @@ python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not matc
 import json, sys
 s = json.load(open(sys.argv[1]))
 ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
-assert s["schema"] == "leanblame.status.7"
-assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "requires", "export", "boundary", "generated",
-                  "modules", "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
+assert s["schema"] == "leanblame.status.8"
+assert set(s) == {"schema", "library", "commit", "toolchain", "deps", "export", "boundary", "generated",
+                  "standard_axioms", "declarations", "records", "untagged_in_library"}, set(s)
 assert len(s["commit"]) == 40, s["commit"]
 assert s["toolchain"].startswith("v4.") and s["deps"] == {}, (s["toolchain"], s["deps"])
-assert s["requires"] == [{"name": "leanblame", "git": None, "rev": None, "sub_dir": None}], s["requires"]
-modules = {m["name"]: m for m in s["modules"]}
-assert sorted(modules) == ["Sample", "Sample.Basic", "Sample.Energy"], s["modules"]
-assert all(set(m) == {"name", "imports", "sorried"} and m["sorried"].startswith("sha256:") for m in s["modules"])
-assert modules["Sample"]["imports"] == ["Sample.Basic", "Sample.Energy"], modules["Sample"]
-assert modules["Sample.Energy"]["imports"] == ["Sample.Basic"] and modules["Sample.Basic"]["imports"] == ["LeanBlame.Attr"]
 assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
 assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
 keys = {"name", "id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
@@ -200,11 +197,10 @@ assert decls["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 assert {"name": "Sample.double", "module": "Sample.Basic"} in decls["Sample.energy"]["untagged_deps"]
 text = lambda segs: "".join(seg["text"] for seg in segs)
 even = decls["Sample.energy_even"]["statement"]
-assert text(even["pretty"]) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even["pretty"])
-assert "HMod.hMod" in text(even["plain"]), text(even["plain"])
-assert {"const": "Sample.energy", "text": "Sample.energy"} in even["pretty"], even["pretty"]
-assert all(set(seg) == {"text", "const"} for seg in even["pretty"]), even["pretty"]
-assert text(decls["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
+assert text(even) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even)
+assert {"const": "Sample.energy", "text": "Sample.energy"} in even, even
+assert all(set(seg) == {"text", "const"} for seg in even), even
+assert text(decls["Sample.energy"]["statement"]) == "Sample.energy (n : Nat) : Nat"
 assert decls["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert decls["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 assert decls["Sample.energy"]["role"] == "defined"
@@ -220,113 +216,69 @@ assert all(set(c) == {"id", "name", "claim", "evidence"} and c["evidence"] is No
 PY
 ok "status --json has the docs/design/14 fields and nothing on stderr; members' ids come from their structure's"
 
-echo "== sorried: the library's modules with proofs replaced by sorry"
-sorried_of() { python3 -c 'import json, sys; print(next(m["sorried"] for m in json.load(open(sys.argv[1]))["modules"] if m["name"] == sys.argv[2]))' "$logs/status.json" "$1"; }
-run sorried "$(sorried_of Sample)" "$(sorried_of Sample.Basic)" "$(sorried_of Sample.Energy)"
-printf '%s' "$out" > "$logs/sorried.json"
-python3 - "$logs/sorried.json" "$logs/status.json" "$work-copies" "$work-cut" <<'PY' \
-  || fail "sorried: the copies are not the modules with proofs replaced by sorry, in pieces"
-import hashlib, json, os, sys
-printed, status, whole, cut = sys.argv[1:]
-copies = json.load(open(printed))
-s = json.load(open(status))
-modules = {m["name"]: m for m in s["modules"]}
-assert set(copies) == {m["sorried"] for m in modules.values()}, set(copies)
-pieces = {name: copies[m["sorried"]] for name, m in modules.items()}
-assert all(set(p) == {"text", "keep", "declares", "uses"} for ps in pieces.values() for p in ps)
-text = lambda name: "".join(p["text"] for p in pieces[name])
-assert pieces["Sample"] == [], "a module of imports only has no pieces"
-basic = open("Sample/Basic.lean").read()
-assert text("Sample.Basic") == basic[basic.index("namespace Sample"):].rstrip(), "a definition uses two_pos, so its proof stays"
-e = text("Sample.Energy")
-assert e.startswith("noncomputable section\n"), "the copy starts after the imports"
-assert e.endswith("\nend Sample\nend"), "a last piece closes the scopes left open, innermost first"
-for kept in ["theorem second_site", "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry",
-             "axiom energy_pos", "theorem one_site_pos : 0 < energy 1 := sorry"]:
-    assert kept in e, (kept, e)
-assert "rfl" not in e and "energy_pos 0" not in e and e.count(":= sorry") == 3, e
-assert "(⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in e, "a proof inside a statement stays"
-E = pieces["Sample.Energy"]
-assert [p["keep"] for p in E] == [True, True, True, False, False, False, False, False, True], [p["keep"] for p in E]
-assert E[2]["text"].endswith("variable (q : Point)") and E[2]["uses"] == ["Sample.Point"], E[2]
-assert E[3]["declares"] == ["Sample.pointEnergy"], E[3]
-assert E[3]["uses"] == ["Sample.Point", "Sample.Point.norm", "Sample.energy"], E[3]
-assert E[3]["text"].startswith("\n\n/-- The energy of a point"), "the docstring goes with its declaration"
-# Lean reads the section's `variable` again for each declaration after it, used or not.
-assert E[5]["declares"] == ["Sample.energy_even"] and E[5]["uses"] == ["Sample.Point", "Sample.energy"], E[5]
-assert pieces["Sample.Basic"][2]["uses"] == ["Sample.double"], pieces["Sample.Basic"][2]
-
-# Merged as a comparator package merges them: every import that is not a module of the library,
-# then each module after the ones it imports, in a section, with the pieces it needs.
-def merge(order, need):
-    imports = []
-    for m in order:
-        imports += [i for i in modules[m]["imports"] if i not in modules and i not in imports]
-    parts = ""
-    for m in order:
-        body = "".join(p["text"] for k, p in enumerate(pieces[m]) if (m, k) in need).lstrip()
-        if body:
-            parts += f"\n-- {m}\nsection\n{body}\nend\n"
-    return "".join(f"import {i}\n" for i in imports) + parts
-def closure(roots):
-    order = []
-    def visit(name):
-        if name in modules and name not in order:
-            for i in modules[name]["imports"]:
-                visit(i)
-            order.append(name)
-    for r in roots:
-        visit(r)
-    return order
-def write(directory, files):
-    os.makedirs(directory, exist_ok=True)
-    for name, content in files.items():
-        open(f"{directory}/{name}", "w").write(content)
-# Whole: every piece of every module.
-order = closure(sorted(modules))
-write(whole, {"ChallengeDeps.lean": merge(order, {(m, k) for m in order for k in range(len(pieces[m]))})})
-# Cut to what energy_even needs: what its piece uses, the pieces those use, and the pieces kept always.
-theorem = "Sample.energy_even"
-order = closure([next(d["module"] for d in s["declarations"] if d["name"] == theorem)])
-assert order == ["Sample.Basic", "Sample.Energy"], order
-where = {n: (m, k) for m in order for k, p in enumerate(pieces[m]) for n in p["declares"]}
-need = {(m, k) for m in order for k, p in enumerate(pieces[m]) if p["keep"]}
-todo = [where[u] for m, k in need for u in pieces[m][k]["uses"]]
-todo += [where[u] for p in pieces["Sample.Energy"] if theorem in p["declares"] for u in p["uses"]]
-while todo:
-    m, k = todo.pop()
-    if (m, k) not in need:
-        need.add((m, k))
-        todo += [where[u] for u in pieces[m][k]["uses"]]
-deps = merge(order, need)
-for kept in ["def double", "def energy", "structure Point", "variable (q : Point)", "noncomputable section"]:
+echo "== challenge: what a comparator checks a solution against"
+run challenge --out "$work-base"
+[[ -f "$work-base/ChallengeDeps.lean" && ! -e "$work-base/Challenge.lean" ]] \
+  || fail "a challenge of no theorems: want ChallengeDeps.lean alone: $(ls "$work-base")"
+run challenge Sample.energy_even "$(id_of Sample.second_site)" --out "$work-challenge"
+python3 - "$work-challenge" <<'PY' || fail "challenge: not the commands the theorems need"
+import sys
+d = sys.argv[1]
+deps, chal = open(f"{d}/ChallengeDeps.lean").read(), open(f"{d}/Challenge.lean").read()
+lake, toolchain = open(f"{d}/lakefile.toml").read(), open(f"{d}/lean-toolchain").read()
+# What the tagged declarations need, as written, module after module, each in a section of its own.
+for kept in ["def double (n : Nat) : Nat := n + n", "def energy (n : Nat) : Nat := double n", "structure Point where",
+             "def Point.norm", "noncomputable section", "variable (q : Point)", "def pointEnergy",
+             "axiom energy_pos (n : Nat) : 0 < energy (n + 1)"]:
     assert kept in deps, (kept, deps)
-for left in ["two_pos", "Point.norm", "pointEnergy", "second_site", "energy_pos", "theorem energy_even"]:
+for left in ["trusted", "two_pos", "def two", "theorem", "import"]:
     assert left not in deps, (left, deps)
-write(cut, {"ChallengeDeps.lean": deps, "Challenge.lean":
-    "import ChallengeDeps\n\nnamespace Challenge\n\ntheorem energy_even (n : Nat) : Sample.energy n % 2 = 0 := sorry\n\nend Challenge\n"})
+assert deps.count("section\n") == 3 and deps.rstrip().endswith("end Sample\nend\nend"), deps
+# The theorems named, proofs sorry, among the scope commands of their module.
+assert "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry" in chal, chal
+assert "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in chal, "a proof inside a statement stays"
+assert chal.startswith("import ChallengeDeps\n") and "variable (q : Point)" in chal, chal
+assert "one_site_pos" not in chal and chal.count(":= sorry") == 2, chal
+assert "autoImplicit = false" in lake and "relaxedAutoImplicit = false" in lake and "require" not in lake, lake
+assert toolchain.startswith("leanprover/lean4:v4."), toolchain
 PY
-ok "sorried prints each copy by its hash, in pieces with what each declares and uses; three theorem proofs are sorry; two_pos keeps its proof"
-for dir in "$work-copies" "$work-cut"; do
-  cp lean-toolchain "$dir/"
-  printf 'name = "copies"\ndefaultTargets = ["ChallengeDeps"]\n\n[[require]]\nname = "leanblame"\npath = "%s"\n\n[[lean_lib]]\nname = "ChallengeDeps"\n\n[[lean_lib]]\nname = "Challenge"\n' "$cli" > "$dir/lakefile.toml"
-done
-(cd "$work-copies" && lake build) >"$logs/copies.log" 2>&1 || fail "the merged copies do not build without the library: $(cat "$logs/copies.log")"
-ok "the copies, merged into one file, build on their own"
-(cd "$work-cut" && lake build ChallengeDeps Challenge) >"$logs/cut.log" 2>&1 || fail "the copies cut for energy_even do not build: $(cat "$logs/cut.log")"
-ok "cut to what energy_even needs (two_pos, Point.norm and the other theorems left out), they build, and its challenge with them"
+(cd "$work-challenge" && lake build) >"$logs/challenge.log" 2>&1 || fail "Lake does not build the challenge: $(cat "$logs/challenge.log")"
+ok "challenge writes what the tagged declarations need, the theorems named (by name or id) with proofs sorry, and the library's Lean options; Lake builds it"
+run challenge --check "$work-challenge"
+[[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
+ok "the check builds the challenge against the library: its 10 tagged declarations have the library's claims"
+edit "$work-challenge/ChallengeDeps.lean" 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
+must_fail "does not mean what the library means" "Sample.energy change=untagged:Sample.double" -- "$lb" challenge --check "$work-challenge"
+ok "a challenge whose helper differs fails the check, with the cause status would give"
+must_fail "Sample.energy is not a theorem" -- "$lb" challenge Sample.energy --out "$work-challenge-x"
+must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge --out "$work-challenge"
+ok "challenge refuses a declaration that is not a theorem, and a directory that exists"
 python3 - <<'PY'
-p = "Sample/Energy.lean"
-s = open(p).read()
-at = s.index("\n", s.index("theorem second_site")) + 1
-check = "/-- info: 'Sample.second_site' does not depend on any axioms -/\n#guard_msgs in\n#print axioms second_site\n"
-open(p, "w").write(s[:at] + check + s[at:])
+basic = open("Sample/Basic.lean").read()
+open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\nnamespace Extra\n/-- Nothing tagged uses this. -/\ndef unused : Nat := 0\nend Extra\n\n"
+    "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := 0\n\nend More\n\nend Sample"))
+energy = open("Sample/Energy.lean").read()
+at = energy.index("/-- The energy of a point")
+energy = energy[:at] + "open Extra\n\n/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n" + energy[at:]
+energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero\n")
+open("Sample/Energy.lean", "w").write(energy + "\nvariable (late : Nat)\n")
 PY
-must_fail "Sample.Energy: the copy differs from the library" "guard_msgs" -- "$lb" export
-git checkout -q -- Sample/Energy.lean
-ok "an error in the middle of a module's copy stops export (the copy of second_site rests on sorryAx)"
-must_fail "is no module copy of the last export" -- "$lb" sorried "sha256:$(printf '0%.0s' {1..64})"
-ok "sorried refuses a hash the last export does not list"
+export_lib
+run challenge --out "$work-challenge-two"
+deps="$(cat "$work-challenge-two/ChallengeDeps.lean")"
+for kept in "theorem two_pos : 0 < 2 := by decide" "private def secret : Nat := 0" $'namespace Sample.Extra\nend Sample.Extra' "open Extra" \
+            "namespace More.Inner" "end Inner" "def zero : Nat := 0" "end More"; do
+  [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
+done
+for left in "def unused" "def hidden" "variable (late"; do
+  [[ "$deps" != *"$left"* ]] || fail "'$left' is not needed: $deps"
+done
+run challenge --check "$work-challenge-two"
+[[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
+  || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
+git checkout -q -- Sample
+export_lib
+ok "a tagged definition that uses two brings two_pos with its proof; a private helper means the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner; a variable after the last kept command stays out; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"
@@ -355,7 +307,6 @@ echo "== an export of uncommitted changes names no commit"
 touch notes.txt
 export_lib
 grep -q "warning: uncommitted changes in the library" "$logs/export.log" || fail "no warning: $(cat "$logs/export.log")"
-! grep -q "copying" "$logs/export.log" || fail "no module changed, yet export copied: $(cat "$logs/export.log")"
 run status --json
 python3 -c 'import json, sys; assert json.loads(sys.argv[1])["commit"] is None' "$out" \
   || fail "status --json: an export of uncommitted changes names a commit"
@@ -363,7 +314,7 @@ must_fail "the current export has uncommitted changes" -- "$lb" sign --signer lo
 must_fail "release: the current export has uncommitted changes" -- "$lb" release --tag 2026.10.2
 rm notes.txt
 export_lib
-ok "an untracked file: the export names no commit; sign and release refuse it; no module is copied again"
+ok "an untracked file: the export names no commit; sign and release refuse it"
 
 echo "== release refuses an axiom that is neither standard nor tagged"
 cat >> Sample/Basic.lean <<'EOF'
@@ -388,12 +339,16 @@ edit Sample/Energy.lean 's/2, by decide/2, by omega/'
 grep -q "by omega" Sample/Energy.lean || fail "test setup: proof not swapped"
 commit "second_site: another proof of 2 < 3 in the statement"
 before="$(current_export)"
+pieces_of() { python3 -c 'import json, sys; print(next(m["pieces"] for m in json.load(open(".leanblame/current"))["modules"] if m["name"] == sys.argv[1]))' "$1"; }
+basic_pieces="$(pieces_of Sample.Basic)"
+energy_pieces="$(pieces_of Sample.Energy)"
 export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
-grep -q "copying 2 of 3 modules" "$logs/export.log" || fail "want Sample.Energy and Sample copied again: $(cat "$logs/export.log")"
+[[ "$(pieces_of Sample.Basic)" == "$basic_pieces" ]] || fail "the pieces of Sample.Basic changed with an edit of Sample.Energy"
+[[ "$(pieces_of Sample.Energy)" != "$energy_pieces" ]] || fail "the pieces of Sample.Energy did not change"
 run status
 expect_line Sample.second_site "Sample.second_site valid"
-ok "a proof inside a statement is not part of the hash; only its module and the one importing it are copied again"
+ok "a proof inside a statement is not part of the hash; only the pieces of its module change"
 
 echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
@@ -494,7 +449,7 @@ run diff --from "$basic_record" --json Sample.energy Sample.second_site
 python3 - "$out" "$basic_record" <<'PY2' || fail "diff --json: $out"
 import json, sys
 d = json.loads(sys.argv[1])
-assert d["schema"] == "leanblame.diff.2" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
+assert d["schema"] == "leanblame.diff.3" and d["from"]["record"] == sys.argv[2] and d["to"]["record"] is None, d
 energy, site = d["declarations"]
 assert energy["to"]["name"] == "Sample.energy" and energy["from"]["claim"] != energy["to"]["claim"], energy
 c = energy["changes"]
@@ -803,6 +758,10 @@ printf 'attribute [trusted] Sample.energy\n' >> Tags.lean
 must_fail "Sample.energy\` is already tagged" -- "$lb" export "${libs[@]}"
 git checkout -q -- Tags.lean
 ok "a second tag on one declaration is a build error"
+printf 'attribute [trusted] Sample.two Sample.two_pos\n' >> Tags.lean
+must_fail "a \`trusted\` tag names one declaration" -- "$lb" export "${libs[@]}"
+git checkout -q -- Tags.lean
+ok "one tag names one declaration: two names in one attribute command are a build error"
 python3 - <<'PY'
 p = "Sample/Basic.lean"
 s = open(p).read()

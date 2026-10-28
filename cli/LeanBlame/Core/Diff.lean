@@ -1,5 +1,5 @@
 /-
-`leanblame diff --from RECORD [--to RECORD] [--json] [NAME|ID...]` (docs/design/14-schemas.md §6):
+`leanblame diff --from RECORD [--to RECORD] [--json] [NAME|ID...]` (docs/design/14-schemas.md §5):
 what changed between the export an approve record names and another approve record's, or the last
 `export`. `status` compares each declaration with its last live approval; `diff` compares two points
 the caller picks, with the same comparison (`Walk.compare`), and gives both readable versions. It
@@ -13,7 +13,7 @@ namespace LeanBlame.Diff
 
 open Lean (Json toJson)
 
-def schemaId : String := "leanblame.diff.2"
+def schemaId : String := "leanblame.diff.3"
 
 /-- One end of a diff: the graph of the export an approve record names, or of the last `export`. -/
 structure Point where
@@ -141,7 +141,7 @@ def textLines (e : Entry) : Array String :=
     #[" ".intercalate head.toList] ++
       (if c.informal then textDiff "informal" o.decl.informal n.decl.informal else #[]) ++
       (if c.statement || c.renamed then
-        textDiff "statement" (statementText o.decl.statement.pretty) (statementText n.decl.statement.pretty)
+        textDiff "statement" (statementText o.decl.statement) (statementText n.decl.statement)
        else #[])
   | none, some n, _ => #[s!"{n.decl.name} added"]
   | some o, none, _ => #[s!"{o.decl.name} removed"]

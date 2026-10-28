@@ -18,7 +18,8 @@ def double (n : Nat) : Nat := n + n
 /-- The taxicab norm of a point: the sum of its two coordinates. -/
 @[trusted] def Point.norm (p : Point) : Nat := p.x + p.y
 
-/-- Two is positive. A definition uses this proof, so the module's sorried copy keeps it. -/
+/-- Two is positive. Nothing tagged uses it, so a challenge leaves it out; `test/run.sh` makes a
+tagged definition use it, through `two`, and then the challenge holds its proof. -/
 theorem two_pos : 0 < 2 := by decide
 
 /-- Two, as a positive number. -/

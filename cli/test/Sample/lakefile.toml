@@ -10,5 +10,10 @@ enableArtifactCache = true
 name = "leanblame"
 path = "../.."
 
+# Lean options, two ways: `leanblame challenge` writes them into a challenge's lakefile.
+[leanOptions]
+relaxedAutoImplicit = false
+
 [[lean_lib]]
 name = "Sample"
+moreLeanArgs = ["-DautoImplicit=false"]

@@ -8,9 +8,9 @@ import LeanBlame.Core.Release
 import LeanBlame.Core.Sign
 import LeanBlame.Core.Status
 import LeanBlame.Core.Validate
+import LeanBlame.Lean.Challenge
 import LeanBlame.Lean.Equiv
 import LeanBlame.Lean.Ids
-import LeanBlame.Lean.Sorried
 import LeanBlame.Lean.Source
 
 open LeanBlame
@@ -35,8 +35,11 @@ commands:
                                          is definitionally equal to what was approved
   sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
   sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
-  sorried HASH...                        print the library's modules with proofs replaced by
-                                         sorry, in pieces, by the hashes `status --json` lists
+  challenge [THEOREM|ID...] --out DIR    write a comparator challenge into the new directory DIR:
+                                         ChallengeDeps.lean, Challenge.lean (the theorems,
+                                         proofs sorry), lakefile.toml, lean-toolchain
+  challenge --check DIR                  build the challenge in DIR against the library and
+                                         check that it means what the library means
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
 
@@ -126,19 +129,19 @@ def cmdSign (args : List String) : IO UInt32 := do
       fail "--constants goes with --withdraw; to approve, list the names"
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
-def cmdSorried (args : List String) : IO UInt32 := do
-  let a ← parseArgs #[] #[] args (positional := true)
-  if a.positional.isEmpty then fail "usage: leanblame sorried HASH..."
+def cmdChallenge (args : List String) : IO UInt32 := do
+  let a ← parseArgs #["--out", "--check"] #[] args (positional := true)
   let root ← IO.currentDir
-  let cur ← Store.readCurrent root
-  let copies ← a.positional.mapM fun h => do
-    let some m := cur.modules.find? (·.copy == h)
-      | fail s!"{h} is no module copy of the last export (`leanblame status --json` lists them)"
-    let c ← Sorried.read root m.key
-    unless c.hash == h do fail s!"{Sorried.path root m.key}: its pieces do not hash to {h}"
-    return (h, Lean.toJson c.pieces)
-  IO.println (Lean.Json.mkObj copies.toList).pretty
-  return 0
+  match a.get? "--out", a.get? "--check" with
+  | some dir, none =>
+    Challenge.write root dir a.positional
+    return 0
+  | none, some dir =>
+    unless a.positional.isEmpty do fail "challenge --check DIR takes no names"
+    let n ← Challenge.check Source.backend root dir
+    IO.println s!"challenge {dir}: the {n} tagged declarations it holds mean what the library's do"
+    return 0
+  | _, _ => fail "usage: leanblame challenge [THEOREM|ID...] --out DIR, or leanblame challenge --check DIR"
 
 def cmdEquiv (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)
@@ -161,12 +164,15 @@ def dispatch : List String → IO UInt32
   | "validate" :: args => cmdValidate args
   | "release" :: args => cmdRelease args
   | "equiv" :: args => cmdEquiv args
-  | "sorried" :: args => cmdSorried args
+  | "challenge" :: args => cmdChallenge args
   | cmd :: _ => do
     IO.eprintln s!"leanblame: unknown command {cmd}\n{usage}"
     return 2
 
-def main (args : List String) : IO UInt32 := do
+/-- Importing a library runs its initializers, as `lean` does for a file it compiles: `export` and
+`id` load the library's environment extensions. -/
+unsafe def main (args : List String) : IO UInt32 := do
+  Lean.enableInitializersExecution
   try
     dispatch args
   catch e =>

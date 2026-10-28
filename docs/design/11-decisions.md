@@ -104,7 +104,7 @@ the old meaning can be found.
 ### Notation is not on the boundary
 
 It never reaches the kernel. Conventions are declarations. Statements are
-printed with notation (`pretty`) and without (`plain`).
+printed with notation, as doc-gen4 prints them, each constant in them named.
 
 ### Formats and commands
 
@@ -222,3 +222,19 @@ is git's; the service displays it. `status` compares each declaration with its l
 comparison (`Walk.compare`): each part of the claim, by hash, so a difference is one the kernel sees,
 not a change of the printer. It reads the stored graphs and never hashes; a declaration whose claim did
 not move is not walked.
+
+### One environment, challenges from the source (owner, 2026-10-28: "This is a large REFACTOR … Don't be trapped by current implementations"; "fix ROOT CAUSES from first principles")
+
+`export` imports the library once, with the environment extensions of everything it imports, as an
+editor or doc-gen4 loads it, and makes every output from that environment: the export, the
+statements (printed in-process, as doc-gen4 prints them) and the challenge pieces. A challenge is
+not a copy of each module elaborated again in other `lean` processes: it is the commands of the
+library's source that its theorems need, found from the kernel terms and the `.ilean`, with their
+scope. `leanblame challenge` joins them into one `ChallengeDeps.lean` (owner: one file, not one per
+module) and `Challenge.lean`, with the library's Lean options and requires; a viewer does not join
+pieces. Names are rewritten only where they would read differently in that file. Lake's own loader
+gives the libraries, their modules and their Lean options. `challenge --check` hashes the challenge
+with the claim hash, the rule a sign-off follows, so that "the challenge means what the library
+means" is the same question as "the claim did not move". Rejected: copying every module (416 `lean`
+processes for Lean-QIT, about 1.6 GB each, which ran a 16 GB machine out of memory twice), one
+challenge file per module, and comparing a challenge with its own hash of terms.

@@ -94,6 +94,9 @@ initialize registerBuiltinAttribute {
     if (tagsExt.getState env).byDecl.contains target then
       throwError "`{.ofConstName target}` is already tagged `trusted`; a declaration has one tag"
     let pos := stx[0].getTailPos?.map (← getFileMap).toPosition
+    -- `attribute [trusted] a b` would give two declarations one place for their ids.
+    if pos.isSome && (tagsExt.getState env).here.any (·.pos == pos) then
+      throwError "a `trusted` tag names one declaration; write `attribute [trusted] Name` for each"
     modifyEnv (tagsExt.addEntry · { decl := target, id, pos })
 }
 
