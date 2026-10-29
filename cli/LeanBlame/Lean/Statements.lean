@@ -1,10 +1,11 @@
 /-
 The statements of the boundary list (docs/design/14-schemas.md §1), printed in this process from the
 environment `export` imports with the environment extensions of the library and its dependencies
-(their notations and delaborators), as doc-gen4 renders signatures: each signature pretty-printed
-with every constant reference tagged (`Widget.tagCodeInfos`) and flattened to segments. A reference
-prints with its surrounding spaces (` + ` for `HAdd.hAdd`), which stay outside its segment;
-`pp.tagAppFns` gives the head of an application a tag of its own, so it becomes a segment.
+(their notations and delaborators), as doc-gen4 renders signatures: each signature pretty-printed,
+twice (`Statement`), with every constant reference tagged (`Widget.tagCodeInfos`) and flattened to
+segments. A reference prints with its surrounding spaces (` + ` for `HAdd.hAdd`), which stay outside
+its segment; `pp.tagAppFns` gives the head of an application a tag of its own, so it becomes a
+segment.
 -/
 import Lean
 import LeanBlame.Core.Schema
@@ -47,10 +48,14 @@ def segments (c : Name) : MetaM (Array Segment) := do
   return flatten none code #[]
 
 /-- The statements of `names`, in `env`; a printer error stops `export`. -/
-def print (env : Environment) (names : Array Name) : IO (Array (Array Segment)) := do
-  let opts := ({} : Options).setBool `pp.tagAppFns true
-  let run : MetaM (Array (Array Segment)) := names.mapM segments
-  let (out, _) ← (run.run' {} {}).toIO { fileName := "<statements>", fileMap := default, options := opts } { env }
-  return out
+def print (env : Environment) (names : Array Name) : IO (Array Statement) := do
+  let pretty := ({} : Options).setBool `pp.tagAppFns true
+  let plain := pretty.setBool `pp.notation false |>.setBool `pp.fieldNotation false
+    |>.setBool `pp.coercions false
+  let under (options : Options) : IO (Array (Array Segment)) := do
+    let run : MetaM (Array (Array Segment)) := names.mapM segments
+    let (out, _) ← (run.run' {} {}).toIO { fileName := "<statements>", fileMap := default, options } { env }
+    return out
+  return (← under pretty).zipWith (fun pretty plain => { pretty, plain }) (← under plain)
 
 end LeanBlame.Statements

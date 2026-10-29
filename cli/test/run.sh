@@ -196,10 +196,11 @@ assert decls["Sample.energy_even"]["tagged_deps"] == ["Sample.energy"]
 assert {"name": "Sample.double", "module": "Sample.Basic"} in decls["Sample.energy"]["untagged_deps"]
 text = lambda segs: "".join(seg["text"] for seg in segs)
 even = decls["Sample.energy_even"]["statement"]
-assert text(even) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even)
-assert {"const": "Sample.energy", "text": "Sample.energy"} in even, even
-assert all(set(seg) == {"text", "const"} for seg in even), even
-assert text(decls["Sample.energy"]["statement"]) == "Sample.energy (n : Nat) : Nat"
+assert text(even["pretty"]) == "Sample.energy_even (n : Nat) : Sample.energy n % 2 = 0", text(even["pretty"])
+assert "HMod.hMod" in text(even["plain"]), text(even["plain"])
+assert {"const": "Sample.energy", "text": "Sample.energy"} in even["pretty"], even["pretty"]
+assert all(set(seg) == {"text", "const"} for seg in even["pretty"] + even["plain"]), even
+assert text(decls["Sample.energy"]["statement"]["pretty"]) == "Sample.energy (n : Nat) : Nat"
 assert decls["Sample.energy_even"]["proof"]["axioms"] == ["sorryAx"]
 assert decls["Sample.one_site_pos"]["proof"]["axioms"] == ["Sample.energy_pos"]
 assert decls["Sample.energy"]["role"] == "defined"

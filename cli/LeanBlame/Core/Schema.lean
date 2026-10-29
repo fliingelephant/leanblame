@@ -183,6 +183,22 @@ instance : FromJson Segment where
     let o ← JsonObj.read j "segment" ["text", "const"]
     return { text := ← o.get String "text", const := ← o.get (Option String) "const" }
 
+/-- A signature (name, binders, type) printed two ways, in segments: every constant reference is one
+of its own, so a page can link it. `pretty` is the proof assistant's default printer; `plain` has
+notation, field notation and coercions off (`norm x` for `‖x‖`). -/
+structure Statement where
+  pretty : Array Segment
+  plain : Array Segment
+  deriving Inhabited, Repr
+
+instance : ToJson Statement where
+  toJson s := Json.mkObj [("pretty", toJson s.pretty), ("plain", toJson s.plain)]
+
+instance : FromJson Statement where
+  fromJson? j := do
+    let o ← JsonObj.read j "statement" ["pretty", "plain"]
+    return { pretty := ← o.get (Array Segment) "pretty", plain := ← o.get (Array Segment) "plain" }
+
 structure BoundaryDecl where
   name : String
   /-- Stays when the declaration is renamed or edited; never hashed. Its own (Lean: written in
@@ -199,9 +215,7 @@ structure BoundaryDecl where
   role : Role
   /-- The docstring (a member without one: its parent's), as `normalizeInformal` leaves it. -/
   informal : String
-  /-- Its signature (name, binders, type) as the proof assistant prints it, in segments: every
-  constant reference is one of its own, so a page can link it. -/
-  statement : Array Segment
+  statement : Statement
   deriving Inhabited, Repr
 
 /-- The declarations of the trusted boundary, in source order (a module after the modules it
@@ -229,7 +243,7 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
   let d : BoundaryDecl := {
     name, id := ← o.get String "id", parent := ← o.get (Option String) "parent"
     module := ← o.get String "module", kind := ← o.get String "kind", role := ← o.get Role "role"
-    informal := ← o.get String "informal", statement := ← o.get (Array Segment) "statement" }
+    informal := ← o.get String "informal", statement := ← o.get Statement "statement" }
   for (k, v) in [("id", d.id), ("kind", d.kind), ("informal", d.informal)] do
     if v.isEmpty then throw s!"{o.what}: `{k}` is empty"
   unless normalizeInformal d.informal == d.informal do

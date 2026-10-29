@@ -29,7 +29,10 @@ dependencies they come from are in `.leanblame/current` and in each record.
       "kind": "def",
       "role": "defined",
       "informal": "Nearest-neighbour Ising Hamiltonian on a finite chain, H = -J Σ σᵢσᵢ₊₁, open boundary.",
-      "statement": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }]
+      "statement": {
+        "pretty": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }],
+        "plain": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "Real", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "Real", "const": "Real" }]
+      }
     }
   ]
 }
@@ -43,7 +46,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [03-trust-model.md](03-trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
-| `statement` | the signature (name, binders, type) as segments, printed as the library's documentation (doc-gen4) prints it, with the notations of the library and what it imports; a segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
+| `statement` | the signature (name, binders, type), printed twice as segments: `pretty` as the library's documentation (doc-gen4) prints it, with the notations of the library and what it imports; `plain` with notation, field notation and coercions off. A segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
 
 ## 2. Record (storage, TOML)
 
@@ -124,7 +127,7 @@ every record. Viewers display it; they never need another source. With
       "kind": "theorem",
       "role": "proved",
       "informal": "…",
-      "statement": [ "…" ],
+      "statement": { "pretty": […], "plain": […] },
       "claim": "sha256:77c0…",
       "state": "outdated",
       "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
@@ -191,9 +194,9 @@ stderr.
     {
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
       "from": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
-                "claim": "sha256:3b1f…", "informal": "…", "statement": [ "…" ] },
+                "claim": "sha256:3b1f…", "informal": "…", "statement": { "pretty": […], "plain": […] } },
       "to": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
-              "claim": "sha256:77c0…", "informal": "…", "statement": [ "…" ] },
+              "claim": "sha256:77c0…", "informal": "…", "statement": { "pretty": […], "plain": […] } },
       "changes": {
         "informal": false, "statement": false, "body": false,
         "relies_on": { "added": [], "removed": [], "changed": ["OpenPhysics.Ising.Hamiltonian"] },

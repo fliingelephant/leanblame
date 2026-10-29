@@ -139,7 +139,7 @@ def textLines (e : Entry) : Array String :=
     #[" ".intercalate head.toList] ++
       (if c.informal then textDiff "informal" o.decl.informal n.decl.informal else #[]) ++
       (if c.statement || c.renamed then
-        textDiff "statement" (statementText o.decl.statement) (statementText n.decl.statement)
+        textDiff "statement" (statementText o.decl.statement.pretty) (statementText n.decl.statement.pretty)
        else #[])
   | none, some n, _ => #[s!"{n.decl.name} added"]
   | some o, none, _ => #[s!"{o.decl.name} removed"]
