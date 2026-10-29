@@ -2,15 +2,15 @@
 The object store (docs/design/04-architecture.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too), release
-manifests and the challenge pieces of a module (`Pieces`). Graphs, exports hashed against boundary
+manifests and piece graphs (`Pieces`). Graphs, exports hashed against boundary
 lists (`Graph`), are keyed by what made them: `graphs/<export hex>-<boundary hex>.json`.
 
 One small local file points into it: `.leanblame/current` (JSON), the export, boundary list,
-constant listing and module pieces of the last `export` run, with the commit, toolchain and
+constant listing and piece graph of the last `export` run, with the commit, toolchain and
 dependencies it was made from. `equiv` writes evidence files next to it,
 `.leanblame/equiv/evidence/<claim hex>.json`. `export` sweeps: an export, boundary list or listing
 that neither the current pointer nor a record names is deleted, so are the graphs of a deleted
-export, pieces the current pointer does not name, evidence for a claim that is no longer current,
+export, a piece graph the current pointer does not name, evidence for a claim that is no longer current,
 and a proof that neither evidence nor a record names. Every JSON file here is read strictly: an
 unknown or missing key is an error.
 -/
@@ -81,52 +81,34 @@ def sweepDir (d : System.FilePath) (keep : Std.HashSet String) : IO Nat := do
 def sweep (root : System.FilePath) (k : Kind) (keep : Std.HashSet String) : IO Nat :=
   sweepDir (kindDir root k) keep
 
-/-- Why a challenge cannot be made: the tagged theorem whose challenge it stops (`name`), or every
-challenge (`none`). -/
-structure ChallengeProblem where
-  name : Option String
-  problem : String
-  deriving Inhabited, BEq, Repr
-
-instance : Lean.ToJson ChallengeProblem where
-  toJson p := Lean.Json.mkObj [("theorem", Lean.toJson p.name), ("problem", p.problem)]
-
-def ChallengeProblem.fromJson? (j : Lean.Json) : Except String ChallengeProblem := do
-  let o ← JsonObj.read j "challenge problem" ["theorem", "problem"]
-  return { name := ← o.get (Option String) "theorem", problem := ← o.get String "problem" }
-
 /-- The last `export`: its export, boundary list and listing of the constants the library defines;
-the library's own modules with their challenge pieces, and why a challenge cannot be made; and what
-it was made from: the commit (`none` with uncommitted changes, which cannot be signed), the
-toolchain, the commits of git dependencies and what the lakefile requires. -/
+the library's own modules and the piece graph its challenges are cut from; and what it was made
+from: the commit (`none` with uncommitted changes, which cannot be signed), the toolchain and the
+commits of git dependencies. -/
 structure Current where
   exportHash : String
   boundary : String
   owned : String
-  modules : Array OwnModule
-  challengeProblems : Array ChallengeProblem
+  modules : Array String
+  pieces : String
   commit : Option String
   toolchain : String
   deps : Array (String × String)
-  requires : Array Require
 
 instance : Lean.ToJson Current where
-  toJson c := Lean.Json.mkObj [("export", c.exportHash),
-    ("boundary", c.boundary), ("owned", c.owned), ("modules", Lean.toJson c.modules),
-    ("challenge_problems", Lean.toJson c.challengeProblems), ("commit", Lean.toJson c.commit), ("toolchain", c.toolchain), ("deps", stringsJson c.deps),
-    ("requires", Lean.toJson c.requires)]
+  toJson c := Lean.Json.mkObj [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned),
+    ("modules", Lean.toJson c.modules), ("pieces", c.pieces), ("commit", Lean.toJson c.commit),
+    ("toolchain", c.toolchain), ("deps", stringsJson c.deps)]
 
 def Current.fromJson? (j : Lean.Json) : Except String Current := do
   let o ← JsonObj.read j "current"
-    ["export", "boundary", "owned", "modules", "challenge_problems", "commit", "toolchain", "deps",
-     "requires"]
+    ["export", "boundary", "owned", "modules", "pieces", "commit", "toolchain", "deps"]
   let c : Current := {
     exportHash := ← o.get String "export", boundary := ← o.get String "boundary"
-    owned := ← o.get String "owned", modules := ← (← o.get (Array Lean.Json) "modules").mapM OwnModule.fromJson?
-    challengeProblems := ← (← o.get (Array Lean.Json) "challenge_problems").mapM ChallengeProblem.fromJson?
+    owned := ← o.get String "owned", modules := ← o.get (Array String) "modules", pieces := ← o.get String "pieces"
     commit := ← o.get (Option String) "commit", toolchain := ← o.get String "toolchain"
-    deps := ← o.getStrings "deps", requires := ← (← o.get (Array Lean.Json) "requires").mapM Require.fromJson? }
-  for (k, h) in [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned)] do
+    deps := ← o.getStrings "deps" }
+  for (k, h) in [("export", c.exportHash), ("boundary", c.boundary), ("owned", c.owned), ("pieces", c.pieces)] do
     unless isHash h do throw s!"current.{k}: `{h}` is not a sha256: hash"
   return c
 

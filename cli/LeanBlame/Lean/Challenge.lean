@@ -1,14 +1,13 @@
 /-
-`leanblame challenge [THEOREM|ID...] --out DIR` and `leanblame challenge --check DIR`
-(docs/design/04-architecture.md, "Challenges").
+`leanblame challenge THEOREM|ID... --out DIR`, `leanblame challenge --graph` and
+`leanblame challenge --check DIR` (docs/design/04-architecture.md, "Challenges").
 
-A challenge is what a comparator checks a solution against, joined from the pieces of the last
-export: `ChallengeDeps.lean` imports what the library's modules import from outside it and holds
-every piece without a statement, module after module, which is what the tagged declarations need and
-the same for every challenge of the library; `Challenge.lean` holds the statements of the named
-tagged theorems, proofs `sorry`, among the scope commands of their modules; `lakefile.toml` has what
-the library's lakefile requires; `lean-toolchain` the library's toolchain. What stops a challenge
-(`Store.ChallengeProblem`, found by `export`) stops `challenge`, not `export`.
+A challenge is what a comparator checks a solution against, cut from the piece graph of the last
+export (`Pieces.Graph.cut`): `Challenge.lean` states the named tagged theorems, proofs `sorry`, among
+the scope commands of their modules; `ChallengeDeps.lean` holds what they need, and imports what that
+needs from outside the library; `lakefile.toml` has what the library's lakefile requires;
+`lean-toolchain` the library's toolchain. What stops a challenge is in the graph: it stops
+`challenge`, not `export`. `--graph` prints the graph, for a service that cuts challenges itself.
 
 `--check` builds the challenge with `lean` against the library's build, as a comparator builds it,
 in the store's temporary space, imports it and hashes its own declarations in memory as `export`
@@ -33,90 +32,43 @@ namespace LeanBlame.Challenge
 
 open Lean
 
-/-- LeanBlame's own package: a challenge drops `@[trusted]` and imports nothing of LeanBlame. -/
-def leanblamePackage : String := "leanblame"
-
-/-- What the modules with pieces import from outside the library, through the library's modules they
-import. -/
-def importsOf (modules : Array OwnModule) : Array String := Id.run do
-  let byName : Std.HashMap String OwnModule := modules.foldl (fun m o => m.insert o.name o) {}
-  let mut out := #[]
-  let mut seen : Std.HashSet String := {}
-  let mut todo := (modules.filter (·.pieces.isSome)).map (·.name)
-  while h : todo.size > 0 do
-    let m := todo[todo.size - 1]
-    todo := todo.pop
-    if seen.contains m then continue
-    seen := seen.insert m
-    for i in (byName[m]?.map (·.imports)).getD #[] do
-      if byName.contains i then todo := todo.push i
-      else if !out.contains i then out := out.push i
-  return out.qsort (· < ·)
-
-/-- A TOML string. -/
-def tomlString (s : String) : String := (Json.str s).compress
-
-/-- The challenge's `lakefile.toml`: what the library's lakefile requires (by git; LeanBlame left
-out), and the libraries `ChallengeDeps` and, with statements, `Challenge`. Each module's part of the
-challenge sets the Lean options Lake builds that module with. -/
-def lakefile (needs : Array Require) (stated : Bool) : IO String := do
-  let reqs ← (needs.filter (·.name != leanblamePackage)).toList.mapM fun r => do
-    let some git := r.git | fail s!"{r.name} is required by path; a challenge requires it by git"
-    return "\n".intercalate (["[[require]]", s!"name = {tomlString r.name}", s!"git = {tomlString git}"] ++
-      (r.rev.map (s!"rev = {tomlString ·}")).toList ++ (r.subDir.map (s!"subDir = {tomlString ·}")).toList)
-  let libs := ["ChallengeDeps"] ++ (if stated then ["Challenge"] else [])
-  return "\n\n".intercalate (["name = \"challenge\""] ++ reqs ++
-    libs.map (s!"[[lean_lib]]\nname = \"{·}\"")) ++ "\n"
-
-/-- Write the challenge of the tagged theorems `names` (names or ids; none: `ChallengeDeps.lean`
-alone) into the new directory `out`. -/
+/-- Write the challenge of the tagged theorems `names` (names or ids) into the new directory `out`. -/
 def write (root out : System.FilePath) (names : Array String) : IO Unit := do
+  if names.isEmpty then fail "a challenge states theorems: name at least one"
   if ← out.pathExists then fail s!"{out} exists; a challenge goes into a new directory"
   let cur ← Store.readCurrent root
   let boundary ← Status.loadBoundary root cur.boundary
   let theorems ← names.mapM fun x => do
     let some d := boundary.declarations.find? fun d => d.name == x || d.id == x
       | fail s!"{x} is not on the boundary list of the last export"
-    unless d.role == .proved do fail s!"{d.name} is not a theorem: a challenge states theorems"
+    unless d.kind == "theorem" do fail s!"{d.name} ({d.kind}) is not a theorem: a challenge states theorems"
     return d.name
-  let stops := cur.challengeProblems.filter (·.name.all theorems.contains)
-  unless stops.isEmpty do
-    fail ("this challenge cannot be made:\n" ++ "\n".intercalate (stops.toList.map fun p =>
-      s!"  {p.name.getD "every challenge"}: {p.problem}"))
-  let modules ← cur.modules.filterMapM fun m => m.pieces.mapM (Pieces.read root ·)
-  let isNamed (p : Pieces.Piece) := p.statement.any (theorems.contains ·.name)
-  for t in theorems do
-    unless modules.any (·.pieces.any (·.statement.any (·.name == t))) do
-      fail s!"{t} is a theorem of another library: its challenge is that library's"
-  let deps := modules.flatMap fun m => (m.pieces.filter (·.statement.isNone)).map (·.text)
-  let stated := modules.filter (·.pieces.any isNamed) |>.flatMap fun m =>
-    m.pieces.filterMap fun p => match p.statement with
-      | some st => if theorems.contains st.name then some st.text else none
-      | none => if p.scope then some p.text else none
-  IO.FS.createDirAll out
-  IO.FS.writeFile (out / "ChallengeDeps.lean") <|
-    String.join ((importsOf cur.modules).toList.map (s!"import {·}\n")) ++ "\n" ++ "\n\n".intercalate deps.toList ++ "\n"
-  unless theorems.isEmpty do
-    IO.FS.writeFile (out / "Challenge.lean") ("import ChallengeDeps\n\n" ++ "\n\n".intercalate stated.toList ++ "\n")
-  IO.FS.writeFile (out / "lakefile.toml") (← lakefile cur.requires !theorems.isEmpty)
-  IO.FS.writeFile (out / "lean-toolchain") s!"leanprover/lean4:{cur.toolchain}\n"
+  match (← Pieces.read root cur.pieces).cut (dedup theorems) with
+  | .error problems =>
+    fail ("this challenge cannot be made:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
+  | .ok files =>
+    IO.FS.createDirAll out
+    for (f, text) in files do IO.FS.writeFile (out / f) text
+
+/-- The piece graph of the last export (docs/design/14-schemas.md §6). -/
+def graph (root : System.FilePath) : IO Pieces.Graph := do
+  Pieces.read root (← Store.readCurrent root).pieces
 
 /-- Build the challenge in `dir` against the library's build and compare the claims of the tagged
 declarations it holds with the last export's; where they differ, the kernel decides whether the
 challenge's declaration is definitionally equal to the library's. Returns how many it compared, and
-how many of them the kernel decided. Any other difference, or a tagged declaration of the library
-other than a theorem that the challenge lacks, is an error. -/
+how many of them the kernel decided. Any other difference is an error. -/
 def check (root dir : System.FilePath) : IO (Nat × Nat) := do
   let cur ← Store.readCurrent root
   let lib ← Status.currentGraph root cur
   let (sysroot, leanPath, _) ← Export.lakeEnvPaths root
-  let mods := #[`ChallengeDeps] ++ (if ← (dir / "Challenge.lean").pathExists then #[`Challenge] else #[])
+  let mods := #[`ChallengeDeps, `Challenge]
   -- The library's private constants, by user name, for the challenge's.
   let libPrivate : Std.HashMap Name Name := lib.nodes.fold (init := {}) fun acc s _ =>
     match Pieces.nameOf? s with
     | some n => if isPrivateName n then acc.insert (privateToUserName n) n else acc
     | none => acc
-  let libModules : NameSet := cur.modules.foldl (·.insert ·.name.toName) {}
+  let libModules : NameSet := cur.modules.foldl (·.insert ·.toName) {}
   let challengePrivate := mods.map (mkPrivateNameCore · .anonymous)
   let rename (n : Name) : Name :=
     if !(privatePrefix? n).any challengePrivate.contains then n else
@@ -170,9 +122,6 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
         problems := problems.push <| match Walk.compare lib h d.name d.name with
           | .ok cmp => s!"{d.name} {Status.changeText (cmp.changes d.name)}"
           | .error e => s!"{d.name}: {e}"
-    for d in lib.boundary.declarations do
-      if d.role != .proved && libModules.contains d.module.toName && !present.any (·.name == d.name) then
-        problems := problems.push s!"{d.name} missing"
     unless problems.isEmpty do
       let kernel := proven.notes.flatMap fun (line, detail) => #[line] ++ detail.map ("  " ++ ·)
       fail ("the challenge does not mean what the library means:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)) ++

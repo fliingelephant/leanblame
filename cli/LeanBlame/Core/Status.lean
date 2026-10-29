@@ -204,7 +204,7 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
     library := new.boundary.library, commit := cur.commit, toolchain := cur.toolchain, deps := cur.deps
     exportHash := cur.exportHash, boundary := cur.boundary, generated := ← Std.Time.Timestamp.nowSeconds
     standard := new.standard, declarations := decls, records := ledger.records
-    untaggedInLibrary := untaggedInLibrary new closures (cur.modules.map (·.name)) owned }
+    untaggedInLibrary := untaggedInLibrary new closures cur.modules owned }
   return { cur, new, report, validRecords := (validRecords.qsort (· < ·)).eraseReps }
 
 /-- The warnings the text form prints: untagged declarations of this library that tagged ones use,

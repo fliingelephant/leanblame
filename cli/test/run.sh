@@ -6,12 +6,12 @@
 # Copies the sample library to a scratch directory, makes it a git repository,
 # and walks through: init -> export -> sign (records name declarations by id) ->
 # status (valid; --json complete, nothing on stderr) -> challenge (the commands the
-# tagged declarations need, @[trusted] dropped, the named theorems with proofs
+# named theorems need and nothing else, @[trusted] dropped, the theorems with proofs
 # `sorry`, the library's Lean options; Lake builds it without the library; the
-# check finds it means what the library means, and finds a changed body; a tagged
-# definition that uses a theorem brings its proof, a private one keeps its
-# meaning, an `open` of a namespace nothing kept is declared first; only the
-# pieces of an edited module change) -> release -> edit a body ->
+# piece graph cuts to the same files; the check finds it means what the library
+# means, and finds a changed body; a tagged definition that uses a theorem brings
+# its proof, so the two cannot be named together; a private one keeps its meaning,
+# an `open` of a namespace nothing needed is declared first) -> release -> edit a body ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
 # causes (untagged, own-text, dep-spec) -> diff since the first sign-off (the
@@ -216,50 +216,69 @@ PY
 ok "status --json has the docs/design/14 fields and nothing on stderr; members' ids come from their structure's"
 
 echo "== challenge: what a comparator checks a solution against"
-run challenge --out "$work-base"
-[[ -f "$work-base/ChallengeDeps.lean" && ! -e "$work-base/Challenge.lean" ]] \
-  || fail "a challenge of no theorems: want ChallengeDeps.lean alone: $(ls "$work-base")"
+must_fail "a challenge states theorems: name at least one" -- "$lb" challenge --out "$work-base"
 run challenge Sample.energy_even "$(id_of Sample.second_site)" --out "$work-challenge"
 python3 - "$work-challenge" <<'PY' || fail "challenge: not the commands the theorems need"
 import sys
 d = sys.argv[1]
 deps, chal = open(f"{d}/ChallengeDeps.lean").read(), open(f"{d}/Challenge.lean").read()
 lake, toolchain = open(f"{d}/lakefile.toml").read(), open(f"{d}/lean-toolchain").read()
-# What the tagged declarations need, as written, module after module, each in a section of its own.
-for kept in ["def double (n : Nat) : Nat := n + n", "def energy (n : Nat) : Nat := double n", "structure Point where",
-             "def Point.norm", "noncomputable section", "variable (q : Point)", "def pointEnergy",
-             "axiom energy_pos (n : Nat) : 0 < energy (n + 1)"]:
+# What the theorems need, as written, in a section of its module's own; `Point` through the
+# `variable` of the theorems' scope.
+for kept in ["def double (n : Nat) : Nat := n + n", "def energy (n : Nat) : Nat := double n", "structure Point where"]:
     assert kept in deps, (kept, deps)
-for left in ["trusted", "two_pos", "def two", "theorem", "import"]:
+for left in ["trusted", "two_pos", "def two", "theorem", "import", "Point.norm", "pointEnergy", "energy_pos", "noncomputable"]:
     assert left not in deps, (left, deps)
-assert deps.count("section\n") == 3 and deps.rstrip().endswith("end Sample\nend\nend"), deps
+assert deps.count("section\n") == 1 and deps.rstrip().endswith("end Sample\n\nend"), deps
 # Each module's section sets the Lean options Lake builds the module with; the lakefile sets none.
 for opt in ["set_option autoImplicit false", "set_option relaxedAutoImplicit false"]:
-    assert deps.count(opt) == 2 and opt in chal, (opt, deps, chal)
-# The theorems named, proofs sorry, among the scope commands of their module.
+    assert deps.count(opt) == 1 and chal.count(opt) == 1, (opt, deps, chal)
+# The theorems named, proofs sorry, among the scope commands of their module, closed.
 assert "theorem energy_even (n : Nat) : energy n % 2 = 0 := sorry" in chal, chal
 assert "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := sorry" in chal, "a proof inside a statement stays"
 assert chal.startswith("import ChallengeDeps\n") and "variable (q : Point)" in chal, chal
+assert chal.rstrip().endswith("end Sample\n\nend\n\nend"), chal
 assert "one_site_pos" not in chal and chal.count(":= sorry") == 2, chal
 assert "leanOptions" not in lake and "require" not in lake, lake
 assert toolchain.startswith("leanprover/lean4:v4."), toolchain
 PY
 (cd "$work-challenge" && lake build) >"$logs/challenge.log" 2>&1 || fail "Lake does not build the challenge: $(cat "$logs/challenge.log")"
-ok "challenge writes what the tagged declarations need, the theorems named (by name or id) with proofs sorry, each module with its Lean options; Lake builds it"
+ok "challenge writes what the theorems named (by name or id) need and nothing else, the theorems with proofs sorry, each module with its Lean options; Lake builds it"
+run challenge --graph
+printf '%s' "$out" >"$logs/graph.json"
+python3 - "$work-challenge" "$logs/graph.json" <<'PY' || fail "challenge --graph: the cut of its graph is not the challenge"
+import json, sys
+g = json.load(open(sys.argv[2]))["pieces"]
+assert all(set(p) == {"file", "text", "needs", "theorem", "problem"} for p in g), g[0]
+assert all(n < len(g) for p in g for n in p["needs"]), "a piece needs a piece the graph lacks"
+statements = {p["theorem"]: i for i, p in enumerate(g) if p["file"] == "Challenge.lean" and p["theorem"]}
+assert set(statements) == {"Sample.second_site", "Sample.energy_even", "Sample.one_site_pos"}, statements
+held, todo = set(), [statements["Sample.energy_even"], statements["Sample.second_site"]]
+while todo:
+    i = todo.pop()
+    if i not in held:
+        held.add(i)
+        todo += g[i]["needs"]
+assert not any(g[i]["problem"] for i in held), [g[i]["problem"] for i in held]
+for f in ["lakefile.toml", "lean-toolchain", "ChallengeDeps.lean", "Challenge.lean"]:
+    cut = "".join(g[i]["text"] for i in sorted(held) if g[i]["file"] == f)
+    assert cut == open(f"{sys.argv[1]}/{f}").read(), (f, cut)
+PY
+ok "challenge --graph prints the piece graph: the statements, what they need and what that needs make the challenge"
 run challenge --check "$work-challenge"
-[[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
-ok "the check builds the challenge against the library: its 10 tagged declarations have the library's claims"
+[[ "$out" == "challenge $work-challenge: the 7 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
+ok "the check builds the challenge against the library: its 7 tagged declarations have the library's claims"
 edit "$work-challenge/ChallengeDeps.lean" 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
 must_fail "does not mean what the library means" "Sample.energy change=untagged:Sample.double" \
   "^  Sample.double: not definitionally equal$" -- "$lb" challenge --check "$work-challenge"
 ok "a challenge whose helper differs fails the check, with the cause status would give and the kernel's answer"
 edit "$work-challenge/ChallengeDeps.lean" 's/def double (n : Nat) : Nat := 2 \* n/def double (n : Nat) : Nat := Nat.add n n/'
 run challenge --check "$work-challenge"
-[[ "$out" == "challenge $work-challenge: the 10 tagged declarations it holds mean what the library's do, 1 of them by definitional equality" ]] \
+[[ "$out" == "challenge $work-challenge: the 7 tagged declarations it holds mean what the library's do, 1 of them by definitional equality" ]] \
   || fail "check: $out"
 ok "a helper written differently, Nat.add n n for n + n, has another claim but passes: the kernel finds it definitionally equal"
-must_fail "Sample.energy is not a theorem" -- "$lb" challenge Sample.energy --out "$work-challenge-x"
-must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge --out "$work-challenge"
+must_fail "Sample.energy (def) is not a theorem: a challenge states theorems" -- "$lb" challenge Sample.energy --out "$work-challenge-x"
+must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge Sample.energy_even --out "$work-challenge"
 ok "challenge refuses a declaration that is not a theorem, and a directory that exists"
 python3 - <<'PY'
 basic = open("Sample/Basic.lean").read()
@@ -275,11 +294,15 @@ energy = (energy[:at] + "open Extra\n\n/-- Zero, kept to this file too. -/\npriv
 energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero + 0 * Far.Away.one + down 0 + below 0\n")
 at = energy.index("/-- The energy of every chain is even.")
 energy = (energy[:at] + "/-- Site two, as a number proven to be two. -/\n"
-          '@[trusted "5f0c6a8e-2d1b-4c3a-9e7f-1a2b3c4d5e6f"] def siteTwo : {n : Nat // n = 2} := ⟨_, second_site⟩\n\n' + energy[at:])
+          '@[trusted "5f0c6a8e-2d1b-4c3a-9e7f-1a2b3c4d5e6f"] def siteTwo : {n : Nat // n = 2} := ⟨_, second_site⟩\n\n'
+          "/-- The energy of a point is even. -/\n"
+          '@[trusted "6a1d7b9f-3e2c-4d4b-8f80-2b3c4d5e6f70"] theorem pointEnergy_even (p : Point) : pointEnergy p % 2 = 0 := by\n  sorry\n\n'
+          "/-- Site two is two. -/\n"
+          '@[trusted "7b2e8c0a-4f3d-4e5c-9a91-3c4d5e6f7081"] theorem siteTwo_val : siteTwo.val = 2 := siteTwo.property\n\n' + energy[at:])
 open("Sample/Energy.lean", "w").write(energy + "\nvariable (late : Nat)\n")
 PY
 export_lib
-run challenge --out "$work-challenge-two"
+run challenge Sample.pointEnergy_even Sample.siteTwo_val --out "$work-challenge-two"
 deps="$(cat "$work-challenge-two/ChallengeDeps.lean")"
 for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := rfl" \
             "private def «secret (Sample.Basic)» : Nat := 0" "def zero : Nat := «secret (Sample.Basic)»" \
@@ -288,18 +311,20 @@ for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2,
             $'namespace Far.Away\n\n/-- One, far away. -/\ndef one : Nat := 1\n\nend Far.Away\n\nend Sample\n\nend\n\nsection'; do
   [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
 done
-for left in "def unused" "def hidden" "variable (late"; do
+for left in "def unused" "def hidden" "variable (late" "energy_even" "one_site_pos"; do
   [[ "$deps" != *"$left"* ]] || fail "'$left' is not needed: $deps"
 done
-must_fail "this challenge cannot be made" "Sample.second_site: a declaration that every challenge holds uses it" \
-  -- "$lb" challenge Sample.second_site --out "$work-challenge-three"
+must_fail "this challenge cannot be made" "  Sample.second_site: the other theorems need its proof, so the challenge cannot state it" \
+  -- "$lb" challenge Sample.second_site Sample.siteTwo_val --out "$work-challenge-three"
+run challenge Sample.second_site --out "$work-challenge-three"
+[[ "$(cat "$work-challenge-three/ChallengeDeps.lean")" != *"siteTwo"* ]] || fail "second_site alone needs nothing of siteTwo"
 run challenge --check "$work-challenge-two"
 [[ "$out" == *", 1 of them by definitional equality" ]] || fail "below shares down's match in one file: $out"
 [[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
   || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
 git checkout -q -- Sample
 export_lib
-ok "two_pos and second_site come with their proofs, and second_site has no challenge of its own; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is kept, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the last kept command stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
+ok "a tagged definition that uses theorems brings their proofs, so second_site has no challenge with siteTwo_val, but one alone; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is needed, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the needed commands stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"
@@ -360,16 +385,15 @@ edit Sample/Energy.lean 's/2, by decide/2, by omega/'
 grep -q "by omega" Sample/Energy.lean || fail "test setup: proof not swapped"
 commit "second_site: another proof of 2 < 3 in the statement"
 before="$(current_export)"
-pieces_of() { python3 -c 'import json, sys; print(next(m["pieces"] for m in json.load(open(".leanblame/current"))["modules"] if m["name"] == sys.argv[1]))' "$1"; }
-basic_pieces="$(pieces_of Sample.Basic)"
-energy_pieces="$(pieces_of Sample.Energy)"
+statement_of() { python3 -c 'import json, sys; print(next(p["text"] for p in json.load(sys.stdin)["pieces"] if p["file"] == "Challenge.lean" and p["theorem"] == sys.argv[1]))' "$1"; }
 export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
-[[ "$(pieces_of Sample.Basic)" == "$basic_pieces" ]] || fail "the pieces of Sample.Basic changed with an edit of Sample.Energy"
-[[ "$(pieces_of Sample.Energy)" != "$energy_pieces" ]] || fail "the pieces of Sample.Energy did not change"
+run challenge --graph
+[[ "$(statement_of Sample.second_site <<<"$out")" == *"(⟨2, by omega⟩ : Fin 3).val = 2 := sorry"* ]] \
+  || fail "the piece graph states second_site as it was: $(statement_of Sample.second_site <<<"$out")"
 run status
 expect_line Sample.second_site "Sample.second_site valid"
-ok "a proof inside a statement is not part of the hash; only the pieces of its module change"
+ok "a proof inside a statement is not part of the hash; a challenge states it as written now"
 
 echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'

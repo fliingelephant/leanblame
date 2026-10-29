@@ -35,9 +35,11 @@ commands:
                                          is definitionally equal to what was approved
   sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
   sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
-  challenge [THEOREM|ID...] --out DIR    write a comparator challenge into the new directory DIR:
-                                         ChallengeDeps.lean, Challenge.lean (the theorems,
-                                         proofs sorry), lakefile.toml, lean-toolchain
+  challenge THEOREM|ID... --out DIR      write the comparator challenge of the theorems into the
+                                         new directory DIR: Challenge.lean (the theorems, proofs
+                                         sorry), ChallengeDeps.lean (what they need),
+                                         lakefile.toml, lean-toolchain
+  challenge --graph                      print the piece graph challenges are cut from (JSON)
   challenge --check DIR                  build the challenge in DIR against the library and
                                          check that it means what the library means
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
@@ -130,19 +132,23 @@ def cmdSign (args : List String) : IO UInt32 := do
     Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
 
 def cmdChallenge (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--out", "--check"] #[] args (positional := true)
+  let a ← parseArgs #["--out", "--check"] #["--graph"] args (positional := true)
   let root ← IO.currentDir
-  match a.get? "--out", a.get? "--check" with
-  | some dir, none =>
+  match a.get? "--out", a.get? "--check", a.has "--graph" with
+  | some dir, none, false =>
     Challenge.write root dir a.positional
     return 0
-  | none, some dir =>
+  | none, some dir, false =>
     unless a.positional.isEmpty do fail "challenge --check DIR takes no names"
     let (n, k) ← Challenge.check root dir
     IO.println (s!"challenge {dir}: the {n} tagged declarations it holds mean what the library's do" ++
       if k == 0 then "" else s!", {k} of them by definitional equality")
     return 0
-  | _, _ => fail "usage: leanblame challenge [THEOREM|ID...] --out DIR, or leanblame challenge --check DIR"
+  | none, none, true =>
+    unless a.positional.isEmpty do fail "challenge --graph takes no names"
+    IO.print (jsonText (← Challenge.graph root))
+    return 0
+  | _, _, _ => fail "usage: leanblame challenge THEOREM|ID... --out DIR, leanblame challenge --graph, or leanblame challenge --check DIR"
 
 def cmdEquiv (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)

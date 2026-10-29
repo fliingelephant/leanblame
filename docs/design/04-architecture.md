@@ -37,7 +37,7 @@ A module under `Core/` imports only `Init`, `Std`, `Lean.Data.*`, `Lake.Toml`,
 `Lake.Util.*` and other `Core/` modules: nothing in it knows what a Lean term,
 environment or kernel is. `Main` passes the Lean frontend to the core commands.
 
-Eleven commands (`challenge` has two forms):
+Eleven commands (`challenge` has three forms):
 
 | Command | Does |
 |---------|------|
@@ -50,7 +50,8 @@ Eleven commands (`challenge` has two forms):
 | `equiv [X...]` | For each declaration outdated solely by an `untagged` cause: rebuild the old meaning under `Old.` from the old export, ask the kernel whether old and new are definitionally equal (one call per changed definition), store the proof as an export that `leanchecker` replays. Never writes a record. See [06-versioning.md](06-versioning.md). |
 | `sign --signer local:NAME [--withdraw RECORD]` | Write one record from the terminal, with a `local:` signer id. Ids backed by a login come from a service that writes records. |
 | `validate` | Check record files against the schema and the authority rules (the other commands stop on any of these problems). Refuse edits or deletions of existing records. Gates every record; where it runs (the service that writes records, or a repository check) is the adopter's choice. |
-| `challenge [X...] --out DIR` | Write the comparator challenge of the tagged theorems `X` (names or ids) into the new directory DIR, from the last export (see Challenges). Without names: only `ChallengeDeps.lean`, which every challenge of the library shares. |
+| `challenge X... --out DIR` | Write the comparator challenge of the tagged theorems `X` (names or ids) into the new directory DIR: what they need and nothing else, cut from the piece graph of the last export (see Challenges). |
+| `challenge --graph` | Print the piece graph of the last export ([14-schemas.md](14-schemas.md) §6), for a service that cuts challenges itself. |
 | `challenge --check DIR` | Build the challenge in DIR against the library's build and hash it as `export` does: each tagged declaration in it must have the claim hash of the last export, or the kernel must find it definitionally equal to the library's, as `equiv` does. Any other difference fails with the cause `status` would give and the kernel's answer. |
 | `release --tag TAG [--out FILE]` | Kernel replay with `leanchecker --from-export`; per-theorem axiom report; manifest, into the object store (and FILE). Fails only on an invalid signoff, a kernel error or a non-permitted axiom. Open theorems are counted, not failed. |
 
@@ -74,30 +75,37 @@ unexpected type are errors.
 
 A comparator challenge must not depend on the library it comes from: it carries
 what its theorems need, and nothing else. `export` finds that in the one
-environment it imports, and takes it from the library's source as pieces: one
-piece per command a challenge needs, as written. Nothing is elaborated again.
-`challenge` joins the pieces into a challenge.
+environment it imports, and takes it from the library's source as a piece
+graph: a piece is text in a file of a challenge, its links are the pieces it
+needs. Nothing is elaborated again. The challenge of chosen theorems is their
+statements, what those need, what that needs, and so on: a cut of the graph.
+What several theorems need is there once.
 
-- What a challenge needs: the statements of the tagged theorems, the other
-  tagged declarations, and what these use, then what that uses, and so on. A
-  declaration uses the constants in its kernel terms (the type; the value or
-  proof of one a challenge holds) and those its source names (the `.ilean`, as
-  for "find references"). A module that gives a challenge something gives it
-  all its instances, since Lean uses them without naming them; an `attribute`
-  command comes along when it names kept declarations only.
-- A piece is a command, from its first token (the docstring) to its end. Its
-  scope comes with it: the `namespace`, `section`, `open`, `variable`,
-  `universe` and `set_option` commands before it, and their `end`s; a command
-  that opens or closes several scopes (`namespace A.B`) comes for each. A module's
-  pieces start with a `section` of their own, which first sets the Lean options
-  Lake builds the module with (its `leanOptions` and the `-D` options of
-  `moreLeanArgs` and `weakLeanArgs`, as `lean` reads them), and end with a piece
-  that closes what the module leaves open, so that nothing one module opens or
-  sets reaches the next.
-  Lean refuses an `open` of a namespace that does not exist yet: one that no
-  piece before it makes, and no constant of the modules the challenge imports,
-  is declared at the start of the module's `section` (`namespace N` `end N`);
-  declaring one that exists changes nothing.
+- A piece is mostly a command, from its first token (the docstring) to its end,
+  as written. The others: the lakefile, the toolchain, an `import`, a
+  `namespace N` `end N` that an `open` needs, a module's `section` and its
+  `end`, and an `end` for a scope the module leaves open.
+- A declaration needs the commands that declare the constants in its kernel
+  terms (the type; the value or proof) and those its source names (the
+  `.ilean`, as for "find references"), and the instances of its module, since
+  Lean uses them without naming them. An `attribute` command is split by the
+  names it gives the attribute to: each part comes with the declaration it
+  names, or, for a constant from outside the library, with its module.
+- A command needs its scope: the `namespace` and `section` commands around it
+  with their `end`s and, unless it opens or closes a scope, the `open`,
+  `variable`, `universe` and `set_option` commands before it in that scope; a
+  command that opens or closes several scopes (`namespace A.B`) is needed for
+  each. A command needs its module's `section`, which first sets the Lean
+  options Lake builds the module with (its `leanOptions` and the `-D` options of
+  `moreLeanArgs` and `weakLeanArgs`, as `lean` reads them) and needs what the
+  module imports from outside the library; nothing one module opens or sets
+  reaches the next. Lean refuses an `open` of a namespace that does not exist
+  yet: one that no module from outside the library imported by its module makes
+  is declared first (`namespace N` `end N`); declaring one that exists changes
+  nothing.
+- A tagged theorem's statement is a piece of `Challenge.lean`: its command with
+  the proof `sorry`. It needs what the statement uses, copies of the scope
+  commands around it, and `import ChallengeDeps`.
 - Module-system words (`module`, `public`, `meta`, `@[expose]`) and
   `@[trusted]` go. A name that would read differently in one file with the other
   modules is written as Lean writes it (`unresolveNameGlobal`): a name the
@@ -105,39 +113,37 @@ piece per command a challenge needs, as written. Nothing is elaborated again.
   with the command's namespace and `open`s, reads as other constants too or
   instead. A challenge holds some of those constants, so a name that reads as
   its constant alone, or as none (a local), reads the same there. Lean names a
-  private declaration after its module: one whose name a kept declaration of
-  another module has too is written with its module (`«secret (Sample.Energy)»`),
-  and so is every name that refers to it.
+  private declaration after its module: one whose name a declaration of another
+  module in the graph has too is written with its module
+  (`«secret (Sample.Energy)»`), and so is every name that refers to it.
 - What stops a challenge stops `challenge`, not `export`, which sign-offs need:
-  a tagged theorem that what every challenge holds uses (every challenge holds
-  its proof, so it has no challenge of its own); a declaration no command
-  declares; a module whose source does not read; a Lean option the library
-  itself declares, which a challenge file cannot set.
-- `challenge X... --out DIR` joins the pieces as lean-eval joins a challenge.
-  `ChallengeDeps.lean` imports every module from outside the library that the
-  library's modules import (through the library modules they import), then
-  holds the pieces of each module, in import order, but the tagged theorems: it
-  is the same for every challenge of the library. `Challenge.lean` imports it
-  and holds, for each module with a named theorem, its scope pieces with the
-  statements, proofs `sorry`. `lakefile.toml` requires what the library's
-  lakefile requires, by git (LeanBlame left out; a path is an error), and sets
-  no Lean options: each module's section does. `lean-toolchain` is the
-  library's.
+  a piece holds its problem (a declaration no command declares; a module whose
+  source does not read; a Lean option the library itself declares, which a
+  challenge file cannot set; a package the library requires by path), and a cut
+  that holds such a piece cannot be made. A challenge cannot state a theorem
+  whose proof its other theorems need.
+- `challenge X... --out DIR` writes the cut of the named theorems.
+  `lakefile.toml` requires what the library's lakefile requires, by git
+  (LeanBlame left out), and sets no Lean options: each module's section does.
+  `lean-toolchain` is the library's. `ChallengeDeps.lean` holds the imports, the
+  declared namespaces, then each module's part, in import order.
+  `Challenge.lean` imports it and holds each module's scope copies with the
+  statements, proofs `sorry`. `challenge --graph` prints the graph
+  ([14-schemas.md](14-schemas.md) §6), so that a service cuts challenges itself.
 - `challenge --check DIR` builds the challenge with `lean` against the
   library's build, imports it and hashes its own declarations as `export`
   hashes the library, in memory; what it imports from outside the library is
   the library's build, so those declarations keep the last export's hashes.
   Each tagged declaration it holds must have the claim hash of the last export,
-  or the kernel must find it definitionally equal to the library's, and every
-  tagged declaration but the theorems must be there: the challenge then means
-  what the signers signed, and a solution of it proves the library's theorem.
-  Lean can write the same source as other terms in one file (a `match` shares
-  the helper Lean made for another module's); the kernel decides as `equiv`
-  does, against the library's versions of what differs, read from the compiled
-  files of the modules that declare them. A private name holds the module it is
-  written in, so the challenge's private constants are hashed under the
-  library's names: by their names, or by the module a name written with its
-  module gives.
+  or the kernel must find it definitionally equal to the library's: the
+  challenge then means what the signers signed, and a solution of it proves the
+  library's theorem. Lean can write the same source as other terms in one file
+  (a `match` shares the helper Lean made for another module's); the kernel
+  decides as `equiv` does, against the library's versions of what differs, read
+  from the compiled files of the modules that declare them. A private name holds
+  the module it is written in, so the challenge's private constants are hashed
+  under the library's names: by their names, or by the module a name written
+  with its module gives.
 
 ## Config: `leanblame.toml`
 
@@ -158,7 +164,7 @@ signed `axiom` in the library or its tagged dependencies.
 ## Storage
 
 - Code, records, config: git.
-- Exports, boundary lists, graphs, challenge pieces, `equiv` proofs, release manifests: an
+- Exports, boundary lists, graphs, piece graphs, `equiv` proofs, release manifests: an
   object store keyed by hash, one directory per kind
   (`.leanblame/store/<kind>/`). A graph is an export hashed against a boundary
   list: every claim hash, with the parts `status` compares and the axiom
@@ -166,10 +172,10 @@ signed `axiom` in the library or its tagged dependencies.
   the one kind keyed by what it was computed from instead of its own bytes:
   `graphs/<export>-<boundary list>.json`, both by their hashes; a graph that is
   not complete is an error. `.leanblame/current` points at the last export and
-  its pieces, with the commit, toolchain and dependencies it was made from.
+  its piece graph, with the commit, toolchain and dependencies it was made from.
   `export` deletes what nothing names any more: exports and boundary lists named
-  by no record and not current, the graphs of deleted exports, pieces that are
-  not current, evidence whose claim is no longer current, proofs named by
+  by no record and not current, the graphs of deleted exports, a piece graph that
+  is not current, evidence whose claim is no longer current, proofs named by
   no evidence and no record. Validity compares the records' claims with the graph
   of the current code, which whoever judges makes with `export`. Graphs of old
   exports only explain causes and show diffs; they never change a state.
@@ -189,7 +195,7 @@ object store, and records.
 
 | Used as is | Copied and changed | New |
 |------------|--------------------|-----|
-| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, git | comparator's closure walk; core's `Replay.lean` | claim hash, cause analysis, records and validator, `status`/`blame`/`diff`/`release`, `Old.` reconstruction, challenge pieces |
+| `leanexport` and its parser, `leanchecker`, Lake's TOML reader and git helpers, mathlib cache, git | comparator's closure walk; core's `Replay.lean` | claim hash, cause analysis, records and validator, `status`/`blame`/`diff`/`release`, `Old.` reconstruction, the piece graph |
 
 No forks.
 
@@ -208,8 +214,8 @@ On change, `status` reports state and causes, `diff` shows what changed, and
 
 ## Formats
 
-Boundary list, record, release manifest, `status --json`, challenge pieces,
-`diff --json`. Exact fields in [14-schemas.md](14-schemas.md).
+Boundary list, record, release manifest, `status --json`, `diff --json`, piece
+graph. Exact fields in [14-schemas.md](14-schemas.md).
 
 ## Language
 

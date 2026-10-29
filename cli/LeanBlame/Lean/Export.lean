@@ -7,8 +7,8 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 `module`, `kind`, `role` and the printed statement. Exports the library's constants and the
 boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
-(docs/design/04-architecture.md, "Storage"). Takes the challenge pieces of the modules that hold
-something the tagged declarations need (`Pieces`). Then points `.leanblame/current` at them, with
+(docs/design/04-architecture.md, "Storage"). Makes the piece graph the challenges of the tagged
+theorems are cut from (`Pieces`). Then points `.leanblame/current` at them, with
 the commit, toolchain and dependencies they were made from. Prints the two hashes.
 
 The library is imported once, with the environment extensions of everything it imports, as an
@@ -93,7 +93,7 @@ def commitIfClean (root : System.FilePath) (rev : String) : IO (Option String) :
 
 /-- From `lake-manifest.json`, which `lake build` writes: the commits of git dependencies (path
 dependencies have none), and what the lakefile requires (the packages that are not inherited). -/
-def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Array Require) := do
+def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Array Pieces.Require) := do
   let some m ← Lake.Manifest.load? (root / "lake-manifest.json")
     | fail "no lake-manifest.json after `lake build`"
   let name (p : Lake.PackageEntry) := p.name.toString (escape := false)
@@ -294,7 +294,7 @@ structure Loaded where
   /-- The Lean options of each module, as Lake builds it. -/
   options : NameMap Options
   deps : Array (String × String)
-  requires : Array Require
+  requires : Array Pieces.Require
   env : Environment
   /-- Where the sources are (`LEAN_SRC_PATH` of `lake env`). -/
   srcPath : System.SearchPath
@@ -371,19 +371,10 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
-  IO.eprintln "leanblame: challenge pieces"
-  let tagged := declarations.filterMap fun (n, d) =>
-    if d.kind == "field" || d.kind == "constructor" then none else some (n, d.kind == "theorem")
-  let (pieces, challengeProblems) ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) tagged
-  let mut stored : NameMap String := {}
-  for p in pieces do
-    stored := stored.insert p.module.toName (← Store.putString root .pieces (jsonText p))
-  let modules : Array OwnModule := mods.filterMap fun m => do
-    let idx ← env.getModuleIdx? m
-    let d ← env.header.moduleData[idx.toNat]?
-    let imports := dedup (d.imports.filterMap fun i =>
-      if i.module == `Init || (`LeanBlame).isPrefixOf i.module then none else some (toString i.module))
-    return { name := toString m, imports, pieces := stored.find? m }
+  IO.eprintln "leanblame: piece graph"
+  let theorems := declarations.filterMap fun (n, d) => if d.kind == "theorem" then some n else none
+  let graph ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) theorems requires toolchain
+  let pieces ← Store.putString root .pieces (jsonText graph)
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
     roots := roots.push n
@@ -402,10 +393,9 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root
-    { exportHash, boundary, owned := ownedHash, modules, challengeProblems, commit,
-      toolchain, deps, requires }
+    { exportHash, boundary, owned := ownedHash, modules := mods.map toString, pieces, commit, toolchain, deps }
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
-  -- with their export; pieces while the current pointer names them; evidence while its claim is
+  -- with their export; the piece graph while the current pointer names it; evidence while its claim is
   -- current; a proof while evidence or a record names it.
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex exportHash)
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
@@ -420,7 +410,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     if n.informal.isSome then acc.insert s!"{hashHex n.claim}.json" else acc
   let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
   removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
-  removed := removed + (← Store.sweep root .pieces (.ofList (modules.toList.filterMap (·.pieces.map hashHex))))
+  removed := removed + (← Store.sweep root .pieces (({} : Std.HashSet String).insert (hashHex pieces)))
   removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
   removed := removed + (← Store.sweep root .proofs (proofs.union (← Store.evidenceProofs root)))
   Graph.sweep root exports

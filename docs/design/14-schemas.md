@@ -220,3 +220,34 @@ A renamed declaration has two names, and its claim moved, as the name is hashed.
 prints one line per declaration: `NAME [renamed-from=OLD] change=cause:names;..
 [relies-on=+ADDED,-REMOVED]`, with the causes of `status`, or `NAME added`, `NAME removed`, `NAME
 unchanged`; then the old and the new informal text and statement where they differ.
+
+## 6. Piece graph (output of `challenge --graph`)
+
+The pieces the comparator challenges of the library's tagged theorems are cut from
+([04-architecture.md](04-architecture.md), "Challenges"), in the order their files hold them.
+
+```json
+{
+  "pieces": [
+    { "file": "lakefile.toml", "text": "name = \"challenge\"\n…", "needs": [], "theorem": null, "problem": null },
+    { "file": "ChallengeDeps.lean", "text": "\n/-- Twice a natural number. -/\ndef double …\n", "needs": [3, 4],
+      "theorem": null, "problem": null },
+    { "file": "Challenge.lean", "text": "\ntheorem energy_even (n : Nat) : energy n % 2 = 0 := sorry\n",
+      "needs": [0, 1, 5, 9], "theorem": "Sample.energy_even", "problem": null }
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `file` | `lakefile.toml`, `lean-toolchain`, `ChallengeDeps.lean` or `Challenge.lean` |
+| `text` | the piece's text in that file |
+| `needs` | the pieces it needs, by index |
+| `theorem` | in `Challenge.lean`: the tagged theorem it states; in `ChallengeDeps.lean`: the tagged theorem it declares with its proof; else `null` |
+| `problem` | why a challenge that holds it cannot be made, or `null` |
+
+The challenge of theorems T: start from the `Challenge.lean` pieces whose `theorem` is in T, add the
+pieces they need, then the pieces those need, until nothing is added. It cannot be made when a piece
+it holds has a `problem`, or a `ChallengeDeps.lean` piece it holds has its `theorem` in T (the other
+theorems need that one's proof). Otherwise each file is the text of its pieces, in index order.
+

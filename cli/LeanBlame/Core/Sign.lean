@@ -71,7 +71,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
       pure ds
     else
       -- Default: every tagged declaration of the library's own modules.
-      pure <| boundary.declarations.filter fun d => cur.modules.any (·.name == d.module)
+      pure <| boundary.declarations.filter fun d => cur.modules.contains d.module
   if selected.isEmpty then fail "nothing to sign"
   let modules := dedup (selected.map (·.module))
   let dir ← recordsDir ledger.cfg

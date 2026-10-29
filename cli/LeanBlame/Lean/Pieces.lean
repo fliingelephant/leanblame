@@ -1,37 +1,43 @@
 /-
-Challenge pieces (docs/design/04-architecture.md, "Challenges"): the parts of the library's
-source that comparator challenges for its tagged declarations are made of, taken as written;
-nothing is elaborated again.
+Challenge pieces (docs/design/04-architecture.md, "Challenges"): the piece graph that the comparator
+challenges of the library's tagged theorems are cut from, taken from the library's source as
+written; nothing is elaborated again.
 
-What is needed comes from the kernel: what the statements of the tagged theorems reach, every other
-tagged declaration, and then everything those reach, proofs included, since `sorry` there would
-reach every proof of a statement that uses them. Where it is written comes from Lean: its parser
-cuts each module that holds something needed into commands, and its declaration ranges say which
-command declares which constant. A piece is one command, as written: a needed declaration; an
-instance of a module that has a needed declaration, since Lean uses instances without naming them;
-an `attribute` command on needed declarations; or a command that sets the scope of a kept
-declaration after it (`namespace`, `section`, `end`, `open`, `variable`, `universe`, `set_option`,
-`include`, `omit`, local attributes). A declaration needs the library's constants in its kernel terms
-and every name in its text that Lean's record of the build (the module's `.ilean`) says refers to
-one, so that a lemma given to `simp` but not used counts too.
+A piece is text in one file of a challenge; its links are the pieces it needs. Most pieces are one
+command as written: a declaration; an instance; an `attribute` command, for one of its names; or a
+command that sets the scope of what comes after it (`namespace`, `section`, `end`, `open`,
+`variable`, `universe`, `set_option`, `include`, `omit`, local attributes). A declaration needs the
+commands that declare the library's constants in its kernel terms (proofs included, since `sorry`
+there would reach every proof of a statement that uses it) and every name in its text that Lean's
+record of the build (the module's `.ilean`) says refers to one, so that a lemma given to `simp` but
+not used counts too; and the instances of its module, since Lean uses instances without naming them.
+Every command needs the `namespace` and `section` around it, with their `end`s, and one that does not
+open or close a scope needs the scope commands before it. An `attribute` command comes with the
+declaration it names, or, for a constant from outside the library, with its module. A tagged
+theorem's statement is a piece of `Challenge.lean`: its command with the proof replaced by `sorry`,
+among copies of the scope commands it needs; it needs what its statement uses. The challenge of
+chosen theorems is their statements, what those need, what that needs, and so on (`Graph.cut`): it
+holds what they need and nothing else, and what several need once.
 
-The pieces go into one file (`ChallengeDeps.lean`, as lean-eval has it), where a name could read
-differently: another module's declaration, or its imports, may share it. So each recorded name is
-checked to read back as the constant it named, in the scope it was written in, among everything the
-library imports (Lean's name resolution); a name that would not is written as Lean writes names
-(`unresolveNameGlobal`). An `open` needs its namespace to exist: one that no piece before it
-makes, and no constant of the modules the challenge imports, is declared first (`namespace N end N`);
-declaring one that exists changes nothing.
-Lean names a private declaration after its module: one whose name a kept declaration of another
-module has too is written with its module (`«secret (M)»`). Each module's pieces sit in a `section`
-of their own that first sets the Lean options Lake builds the module with. Module-system words
-(`public`, `meta`, `@[expose]`) and the `trusted` attribute are dropped: a challenge is a plain file
-that does not import LeanBlame. A tagged theorem's piece also has its statement: its text with the
-proof replaced by `sorry`, for `Challenge.lean`.
+The pieces of a module sit in a `section` of their own, which first sets the Lean options Lake builds
+the module with, so that what one module opens and sets ends with it; an `end` closes each scope the
+module leaves open. `ChallengeDeps.lean` imports what the modules it holds import from outside the
+library. A file holds the pieces of several modules, where a name could read differently: another
+module's declaration, or its imports, may share it. So each recorded name is checked to read back as
+the constant it named, in the scope it was written in, among everything the library imports (Lean's
+name resolution); a name that would not is written as Lean writes names (`unresolveNameGlobal`). An
+`open` needs its namespace to exist: one that no module from outside the library which its module
+imports makes is declared first (`namespace N end N`); declaring one that exists changes nothing.
+Lean names a private declaration after its module: one whose name a declaration of another module in
+the graph has too is written with its module (`«secret (M)»`). Module-system words (`public`, `meta`,
+`@[expose]`) and the `trusted` attribute are dropped: a challenge is a plain file that does not
+import LeanBlame.
 
-What stops a challenge is recorded, not an error of `export`: a tagged theorem that what every
-challenge holds uses (every challenge holds its proof), a declaration no command declares, a module
-that does not read, a Lean option a file cannot set. `challenge` refuses what it stops.
+What stops a challenge is part of the graph, not an error of `export`: a piece has a problem when it
+needs a declaration no command declares or a module that does not read, when its module has a Lean
+option a file cannot set, or when it is a statement with no proof to replace; the lakefile has one
+when the library requires a package by path. A challenge cannot state a theorem whose proof the
+other theorems need.
 -/
 import Lean
 import Lean.Server.References
@@ -41,60 +47,83 @@ namespace LeanBlame.Pieces
 
 open Lean Elab
 
-/-- A tagged theorem, and its command with the proof replaced by `sorry`. -/
-structure Statement where
-  name : String
-  text : String
-  deriving Inhabited
+/-- The files of a challenge. -/
+def lakefileFile : String := "lakefile.toml"
+def toolchainFile : String := "lean-toolchain"
+def depsFile : String := "ChallengeDeps.lean"
+def challengeFile : String := "Challenge.lean"
+def files : Array String := #[lakefileFile, toolchainFile, depsFile, challengeFile]
 
-/-- One command of a module that a challenge needs, as written (docs/design/04-architecture.md,
-"Challenges"). `ChallengeDeps.lean` holds every piece without a statement; `Challenge.lean` repeats
-the scope commands (`scope`: `namespace`, `section`, `end`, `open`, `variable` and the like) around
-the statements. -/
+/-- A piece of the piece graph (docs/design/14-schemas.md §6): its text in one file of a challenge;
+the pieces it needs, by index; the tagged theorem it states (in `Challenge.lean`) or declares with
+its proof (in `ChallengeDeps.lean`); and why a challenge that holds it cannot be made. -/
 structure Piece where
+  file : String
   text : String
-  scope : Bool
-  statement : Option Statement
+  needs : Array Nat
+  tagged : Option String
+  problem : Option String
   deriving Inhabited
 
-/-- The pieces of one module, in source order, in a `section` of their own (which first declares
-the namespaces its `open`s need) closed by an `end` for each scope it leaves open, so that it can sit
-in a file that merges modules. -/
-structure Module where
-  module : String
+/-- The pieces the challenges of the library's tagged theorems are cut from, in the order their
+files hold them. -/
+structure Graph where
   pieces : Array Piece
   deriving Inhabited
 
-instance : ToJson Statement where
-  toJson s := Json.mkObj [("name", s.name), ("text", s.text)]
-
 instance : ToJson Piece where
-  toJson p := Json.mkObj [("text", p.text), ("scope", p.scope), ("statement", toJson p.statement)]
+  toJson p := Json.mkObj [("file", p.file), ("text", p.text), ("needs", toJson p.needs),
+    ("theorem", toJson p.tagged), ("problem", toJson p.problem)]
 
-instance : ToJson Module where
-  toJson m := Json.mkObj [("module", m.module), ("pieces", toJson m.pieces)]
-
-def Statement.fromJson? (j : Json) : Except String Statement := do
-  let o ← JsonObj.read j "statement" ["name", "text"]
-  return { name := ← o.get String "name", text := ← o.get String "text" }
+instance : ToJson Graph where
+  toJson g := Json.mkObj [("pieces", toJson g.pieces)]
 
 def Piece.fromJson? (j : Json) : Except String Piece := do
-  let o ← JsonObj.read j "piece" ["text", "scope", "statement"]
-  let statement ← match ← o.get Json "statement" with
-    | .null => pure none
-    | s => some <$> Statement.fromJson? s
-  return { text := ← o.get String "text", scope := ← o.get Bool "scope", statement }
+  let o ← JsonObj.read j "piece" ["file", "text", "needs", "theorem", "problem"]
+  let p : Piece := { file := ← o.get String "file", text := ← o.get String "text", needs := ← o.get (Array Nat) "needs"
+                     tagged := ← o.get (Option String) "theorem", problem := ← o.get (Option String) "problem" }
+  unless files.contains p.file do throw s!"piece: `{p.file}` is not a file of a challenge"
+  return p
 
-def Module.fromJson? (j : Json) : Except String Module := do
-  let o ← JsonObj.read j "pieces" ["module", "pieces"]
-  return { module := ← o.get String "module", pieces := ← (← o.get (Array Json) "pieces").mapM Piece.fromJson? }
+def Graph.fromJson? (j : Json) : Except String Graph := do
+  let o ← JsonObj.read j "piece graph" ["pieces"]
+  let pieces ← (← o.get (Array Json) "pieces").mapM Piece.fromJson?
+  unless pieces.all (·.needs.all (· < pieces.size)) do throw "piece graph: a piece needs a piece it lacks"
+  return { pieces }
 
-def read (root : System.FilePath) (hash : String) : IO Module := do
+def read (root : System.FilePath) (hash : String) : IO Graph := do
   let p := Store.objectPath root .pieces hash
-  unless ← p.pathExists do fail s!"pieces {hash} are not in the store"
-  match Json.parse (← IO.FS.readFile p) >>= Module.fromJson? with
-  | .ok m => return m
+  unless ← p.pathExists do fail s!"piece graph {hash} is not in the store"
+  match Json.parse (← IO.FS.readFile p) >>= Graph.fromJson? with
+  | .ok g => return g
   | .error e => fail s!"{p}: {e}"
+
+/-- The challenge of the tagged theorems `names` (docs/design/14-schemas.md §6), each file with its
+text: their statements, the pieces those need, the pieces these need, and so on, each file the text
+of its pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each named
+theorem whose proof its `ChallengeDeps.lean` holds. -/
+def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array (String × String)) := do
+  let mut todo := #[]
+  for n in names do
+    match g.pieces.findIdx? fun p => p.file == challengeFile && p.tagged == some n with
+    | some i => todo := todo.push i
+    | none => throw #[s!"{n} has no statement in the piece graph"]
+  let mut held : Std.HashSet Nat := {}
+  while h : todo.size > 0 do
+    let i := todo[todo.size - 1]
+    todo := todo.pop
+    unless held.contains i do
+      held := held.insert i
+      todo := todo ++ g.pieces[i]!.needs
+  let order := held.toArray.qsort (· < ·)
+  let problems := dedup <| order.filterMap (g.pieces[·]!.problem) ++ order.filterMap fun i =>
+    let p := g.pieces[i]!
+    if p.file != depsFile then none else (p.tagged.filter names.contains).map
+      (s!"{·}: the other theorems need its proof, so the challenge cannot state it")
+  unless problems.isEmpty do throw problems
+  return files.map fun f => (f, String.join (order.filterMap fun i =>
+    let p := g.pieces[i]!
+    if p.file == f then some p.text else none).toList)
 
 /-- Where Lean's declaration ranges put `n` in its source; a module of the module system keeps
 those of its private declarations at the private level. -/
@@ -167,6 +196,15 @@ structure Read where
 /-- The library's constants that the names in `c` refer to. -/
 def Read.named (r : Read) (c : Cmd) (stop := c.stop) : Array Name :=
   r.refs.filterMap fun (a, _, n) => if c.start ≤ a && a < stop then some n else none
+
+/-- The longest name recorded from `a` that ends by `b`, with its end: a shorter one is the head of
+a dotted name (`h.symm`). -/
+def Read.refAt? (r : Read) (a b : String.Pos.Raw) : Option (String.Pos.Raw × Name) :=
+  r.refs.foldl (init := none) fun best (s, e, n) =>
+    if s != a || e.byteIdx > b.byteIdx then best
+    else match best with
+      | some (e', _) => if e.byteIdx > e'.byteIdx then some (e, n) else best
+      | none => some (e, n)
 
 def proofKinds : Array SyntaxNodeKind :=
   #[``Parser.Command.declValSimple, ``Parser.Command.declValEqns, ``Parser.Command.whereStructInst]
@@ -460,13 +498,7 @@ partial def edits (r : Read) (c : Cmd) (renamed : NameMap String) (stx : Syntax)
   | .ident .. =>
     if nameless.contains parent then return
     let (some a, some b) := (stx.getPos?, stx.getTailPos?) | return
-    -- The longest name recorded from here; a shorter one is the head of a dotted name (`h.symm`).
-    let found := r.refs.filter fun (s, e, _) => s == a && e.byteIdx ≤ b.byteIdx
-    let longest := found.foldl (init := none) fun best x =>
-      match best with
-      | some y => if x.2.1.byteIdx > y.2.1.byteIdx then some x else best
-      | none => some x
-    let some (_, e, n) := longest | return
+    let some (e, n) := r.refAt? a b | return
     -- A private name written with its module: `renames` writes it.
     if (renamedPrefix? renamed n).isSome then return
     if c.declares.contains n then return
@@ -513,16 +545,7 @@ def under (set : NameMap α) : Name → Bool
   | .anonymous => false
   | p@(.str q _) | p@(.num q _) => set.contains p || under set q
 
-/-! ## What a challenge needs -/
-
-/-- A scope command that `make` writes itself. -/
-def scopeOnly (text : String) : Piece :=
-  { text, scope := true, statement := none }
-
-/-- `ns` and every prefix of it. -/
-def prefixesOf : Name → NameSet → NameSet
-  | .anonymous, acc => acc
-  | p@(.str q _), acc | p@(.num q _), acc => prefixesOf q (acc.insert p)
+/-! ## The piece graph -/
 
 /-- The namespaces Lean makes for constant `n` (`Lean.registerNamePrefixes`): the prefixes of its
 user name, up to the first that is not made of words alone, unless the name's last part starts with
@@ -560,63 +583,138 @@ def termUses (env : Environment) (n : Name) (value : Bool) : Array Name :=
       (if value then ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[] else #[])
   | none => #[]
 
-/-- The scope commands that the kept commands `ks` of `r` need: each command that sets the scope of
-one before it, and the `namespace` or `section` and its `end` around one. A command that opens or
-closes several scopes (`namespace A.B`, `end A.B`) is needed for each, so with the other scopes it
-opens or closes. -/
-def scopeOf (r : Read) (ks : Std.HashSet Nat) : Array Nat := Id.run do
-  -- Each scope: the commands that open and close it, and whether a kept command is in it. For the
-  -- scopes open now, the file's first: the `sets` commands not yet followed by a kept command.
-  let mut scopes : Array (Nat × Option Nat × Bool) := #[]
+/-- How the commands of a module nest. -/
+structure Scopes where
+  /-- For each command: the commands that open the scopes around it, and, unless it opens or closes
+  a scope, the commands before it that set the scopes it is in. -/
+  context : Array (Array Nat)
+  /-- Each scope: the command that opens it, its name as `end` writes it, and the command that
+  closes it, if the module does. `namespace A.B` opens two scopes, and `end A.B` closes two. -/
+  scopes : Array (Nat × String × Option Nat)
+  deriving Inhabited
+
+def scopesOf (r : Read) : Scopes := Id.run do
+  let mut scopes : Array (Nat × String × Option Nat) := #[]
+  -- The scopes open now, innermost last, and the commands that set each, the file's first.
   let mut stack : Array Nat := #[]
   let mut sets : Array (Array Nat) := #[#[]]
-  let mut out := #[]
+  let mut context := #[]
   for c in r.cmds, i in [:r.cmds.size] do
+    let around := dedup (stack.map fun k => scopes[k]!.1)
+    context := context.push <|
+      if c.role == .opens || c.role == .closes then around else around ++ sets.flatten
     match c.role with
     | .opens =>
-      for _ in [:c.opens.size] do
+      for h in c.opens do
         stack := stack.push scopes.size
-        scopes := scopes.push (i, none, false)
+        scopes := scopes.push (i, h, none)
         sets := sets.push #[]
     | .closes =>
       for _ in [:c.closes] do
         let some k := stack.back? | break
         stack := stack.pop
         sets := sets.pop
-        scopes := scopes.modify k fun (o, _, u) => (o, some i, u)
+        scopes := scopes.modify k fun (o, h, _) => (o, h, some i)
     | .sets => sets := sets.modify (sets.size - 1) (·.push i)
-    | _ =>
-      if ks.contains i then
-        out := sets.foldl (· ++ ·) out
-        sets := sets.map fun _ => #[]
-        for k in stack do scopes := scopes.modify k fun (o, e, _) => (o, e, true)
-  let mut need : Std.HashSet Nat := {}
-  let mut grew := true
-  while grew do
-    grew := false
-    for (o, e, used) in scopes do
-      if (used || need.contains o || e.any need.contains) && !(need.contains o && e.all need.contains) then
-        need := e.toArray.foldl (·.insert ·) (need.insert o)
-        grew := true
-  return out ++ need.toArray
+    | _ => pure ()
+  return { context, scopes }
 
-/-- The pieces of every module of the library (`library`, in import order; sources on `srcPath`,
-Lean options from `options`) that holds something the tagged declarations (`tagged`, each with
-whether it is a theorem) need, each module with its pieces; and why a challenge cannot be made, of
-one tagged theorem or of any. -/
+/-- The library's constant that the `a`-th name of the `attribute` command `c` refers to, if one does. -/
+def Read.target? (r : Read) (c : Cmd) (a : Nat) : Option Name := do
+  let id := (innermost c.stx)[4][a]
+  let (_, n) ← r.refAt? (← id.getPos?) (← id.getTailPos?)
+  return n
+
+/-- The `attribute` commands of `r` that keep an attribute: each command, each place of a name it
+gives them to, and the library's constant that name refers to, if one does. -/
+def attributesOf (r : Read) : Array (Nat × Nat × Option Name) := Id.run do
+  let mut out := #[]
+  for c in r.cmds, i in [:r.cmds.size] do
+    let d := innermost c.stx
+    unless c.role == .attribute && !(attributesKept d).isEmpty do continue
+    for a in [:d[4].getNumArgs] do
+      out := out.push (i, a, r.target? c a)
+  return out
+
+/-- A package the library's lakefile requires (Lake: a package of `lake-manifest.json` that is not
+inherited): its git URL, commit and subdirectory; `git` and `rev` are `none` for a path
+dependency. -/
+structure Require where
+  name : String
+  git : Option String
+  rev : Option String
+  subDir : Option String
+  deriving Inhabited, Repr
+
+/-- LeanBlame's own package, which a challenge leaves out. -/
+def leanblamePackage : String := "leanblame"
+
+/-- A TOML string. -/
+def tomlString (s : String) : String := (Json.str s).compress
+
+/-- A challenge's `lakefile.toml`: what the library's lakefile requires (`required`) but LeanBlame,
+by git, and the libraries `ChallengeDeps` and `Challenge`. It sets no Lean options: each module's
+part of the challenge does. And why it cannot be written: a package required by path. -/
+def lakefile (required : Array Require) : String × Option String := Id.run do
+  let mut reqs : Array String := #[]
+  let mut byPath : Array String := #[]
+  for r in required.filter (·.name != leanblamePackage) do
+    match r.git with
+    | some git => reqs := reqs.push <| "\n".intercalate <| ["[[require]]", s!"name = {tomlString r.name}",
+        s!"git = {tomlString git}"] ++ (r.rev.map (s!"rev = {tomlString ·}")).toList ++
+        (r.subDir.map (s!"subDir = {tomlString ·}")).toList
+    | none => byPath := byPath.push s!"{r.name} is required by path; a challenge requires it by git"
+  let text := "\n\n".intercalate (["name = \"challenge\""] ++ reqs.toList ++
+    ["ChallengeDeps", "Challenge"].map (s!"[[lean_lib]]\nname = \"{·}\"")) ++ "\n"
+  return (text, if byPath.isEmpty then none else some ("; ".intercalate byPath.toList))
+
+/-- A piece while `make` builds the graph. `deps`: in `ChallengeDeps.lean`, else in `Challenge.lean`. -/
+inductive Key where
+  | lakefile
+  | toolchain
+  /-- `import M`, for a module from outside the library. -/
+  | outside (m : Name)
+  /-- `namespace N end N`, for an `open N`. -/
+  | declare (n : Name)
+  /-- `import ChallengeDeps`. -/
+  | importDeps
+  /-- The `section` of module `m`, which first sets the Lean options Lake builds `m` with. -/
+  | head (deps : Bool) (m : Name)
+  /-- Command `i` of module `m`, as written. -/
+  | cmd (deps : Bool) (m : Name) (i : Nat)
+  /-- The `attribute` command `i` of module `m`, for its `a`-th name alone. -/
+  | attr (m : Name) (i a : Nat)
+  /-- The instances of module `m`, which come with its declarations; no text of its own. -/
+  | instances (m : Name)
+  /-- The statement of the tagged theorem `t`. -/
+  | statement (t : Name)
+  /-- The `end` of scope `s` of module `m`, which `m` leaves open. -/
+  | close (deps : Bool) (m : Name) (s : Nat)
+  /-- The `end` of the `section` of module `m`. -/
+  | tail (deps : Bool) (m : Name)
+  deriving BEq, Hashable, Inhabited
+
+def Key.file : Key → String
+  | .lakefile => lakefileFile
+  | .toolchain => toolchainFile
+  | .importDeps | .statement _ => challengeFile
+  | .head d _ | .cmd d _ _ | .close d _ _ | .tail d _ => if d then depsFile else challengeFile
+  | .outside _ | .declare _ | .attr .. | .instances _ => depsFile
+
+/-- The piece graph of the tagged theorems `theorems` of the library (`library`, in import order;
+sources on `srcPath`; Lean options from `options`): every piece their statements need, what those
+need, and so on. A challenge's lakefile requires what the library's requires (`required`); its
+toolchain is the library's (`toolchain`). -/
 def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (options : Name → Options)
-    (tagged : Array (Name × Bool)) : IO (Array Module × Array Store.ChallengeProblem) := do
+    (theorems : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
   let libSet : NameSet := library.foldl (·.insert ·) {}
   let moduleOf (n : Name) : Option Name := do
     let i ← env.getModuleIdxFor? n
     let m ← env.header.moduleNames[i.toNat]?
     if libSet.contains m then some m else none
-  let problems ← IO.mkRef (#[] : Array Store.ChallengeProblem)
-  -- A problem of the challenge of the tagged theorem `t`, or (`none`) of every challenge.
-  let problem (t : Option Name) (text : String) : IO Unit :=
-    problems.modify fun ps => let p : Store.ChallengeProblem := { name := t.map toString, problem := text }
-      if ps.contains p then ps else ps.push p
+  -- Each module read once; `fresh`: those read since `make` last looked at their `attribute` commands.
   let reads ← IO.mkRef ({} : Std.HashMap Name (Except String Read))
+  let fresh ← IO.mkRef (#[] : Array Name)
   let readOf (m : Name) : IO (Except String Read) := do
     if let some r := (← reads.get)[m]? then return r
     let r ← try
@@ -624,82 +722,197 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         pure (.ok (← readModule env (options m) libSet m file ((← findOLean m).withExtension "ilean")))
       catch e => pure (.error (toString e))
     reads.modify (·.insert m r)
+    fresh.modify (·.push m)
     return r
-  -- The commands kept for `ChallengeDeps.lean`; those of tagged theorems, for `Challenge.lean`.
-  let mut kept : Std.HashMap Name (Std.HashSet Nat) := {}
-  let mut stated : Std.HashMap Name (Std.HashMap Nat Name) := {}
-  let mut todo : Array Name := #[]
-  for (t, isTheorem) in tagged do
-    let some m := moduleOf t | continue
-    -- What stops a tagged theorem's statement stops its challenge; any other tagged declaration is
-    -- in every challenge.
-    let whose := if isTheorem then some t else none
+  -- A module that holds a piece reads.
+  let readOk (m : Name) : IO Read := do
     match ← readOf m with
-    | .error e => problem whose e
-    | .ok r =>
-      match r.owner.find? t with
-      | none => problem whose s!"{t}: no command of {m} declares it"
-      | some i =>
-        if isTheorem then
-          stated := stated.alter m fun s => some ((s.getD {}).insert i t)
-          let c := r.cmds[i]!
-          let headerEnd := ((proofOf? (innermost c.stx)).bind (·.getPos?)).getD c.stop
-          -- A proof inside the statement may make constants of the command (`second_site._proof_1`):
-          -- the statement makes them again.
-          todo := todo ++ (termUses env t false ++ r.named c headerEnd).filter (r.owner.find? · != some i)
-        else todo := todo.push t
-  let mut seen : NameSet := {}
-  let mut more := true
-  while more do
-    more := false
-    while !todo.isEmpty do
-      let n := todo.back!
+    | .ok r => return r
+    | .error e => fail e
+  let scopesRef ← IO.mkRef ({} : Std.HashMap Name Scopes)
+  let scopesIn (m : Name) : IO Scopes := do
+    if let some s := (← scopesRef.get)[m]? then return s
+    let s := scopesOf (← readOk m)
+    scopesRef.modify (·.insert m s)
+    return s
+  -- The piece that declares the library's constant `n`, or why none does; `none` for a constant
+  -- from outside the library.
+  let ownerOf (n : Name) : IO (Option (Except String Key)) := do
+    if isReservedName env n then return none
+    let some m := moduleOf n | return none
+    return some <| match ← readOf m with
+      | .error e => .error e
+      | .ok r => match r.owner.find? n with
+        | some i => .ok (.cmd true m i)
+        | none => .error s!"{n}: no command of {m} declares it"
+  -- The pieces that declare the constants `ns`, but `self`, and why some have none.
+  let declarers (self : Option Key) (ns : Array Name) : IO (Array Key × Array String) := do
+    let mut keys : Array Key := #[]
+    let mut problems : Array String := #[]
+    for n in dedup ns do
+      match ← ownerOf n with
+      | some (.ok k) => if some k != self then keys := keys.push k
+      | some (.error e) => problems := problems.push e
+      | none => pure ()
+    return (dedup keys, problems)
+  -- The namespaces that modules from outside the library make, each with those modules.
+  let makersRef ← IO.mkRef (none : Option (Std.HashMap Name (Array Name)))
+  let makers : IO (Std.HashMap Name (Array Name)) := do
+    if let some x := ← makersRef.get then return x
+    let map := (importClosure env library).foldl (init := ({} : Std.HashMap Name (Array Name))) fun map mod =>
+      if libSet.contains mod then map else
+      match (env.getModuleIdx? mod).bind (env.header.moduleData[·.toNat]?) with
+      | none => map
+      | some d => d.constNames.foldl (init := map) fun map n =>
+        (namespacesOf n {}).foldl (init := map) fun map ns =>
+          map.alter ns fun ms => let ms := ms.getD #[]; some (if ms.back? == some mod then ms else ms.push mod)
+    makersRef.set (some map)
+    return map
+  let closures ← IO.mkRef ({} : Std.HashMap Name NameSet)
+  let closureOf (m : Name) : IO NameSet := do
+    if let some c := (← closures.get)[m]? then return c
+    let c := importClosure env #[m]
+    closures.modify (·.insert m c)
+    return c
+  -- Of the namespaces an `open` of module `m` opens, those that no module from outside the library
+  -- which `m` imports makes.
+  let undeclared (m : Name) (opened : Array Name) : IO (Array Name) := do
+    if opened.isEmpty then return #[]
+    let mk ← makers
+    let cl ← closureOf m
+    return opened.filter fun ns => !((mk[ns]?).getD #[]).any cl.contains
+  let importsOf (m : Name) : Array Name :=
+    (((env.getModuleIdx? m).bind (env.header.moduleData[·.toNat]?)).map (·.imports.map (·.module))).getD #[]
+  -- What module `m` imports from outside the library, through the library's modules it imports; not
+  -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
+  let outsideOf (m : Name) : Array Name := Id.run do
+    let mut out := #[]
+    let mut seen : NameSet := {}
+    let mut todo := #[m]
+    while h : todo.size > 0 do
+      let x := todo[todo.size - 1]
       todo := todo.pop
-      if seen.contains n || isReservedName env n then continue
-      seen := seen.insert n
-      let some m := moduleOf n | continue
-      match ← readOf m with
-      | .error e => problem none e
-      | .ok r =>
-        match r.owner.find? n with
-        | none => problem none s!"{n}: no command of {m} declares it"
-        | some i =>
-          let had := kept.getD m {}
-          unless had.contains i do
-            -- A module that gives a challenge something gives it its instances too.
-            let add := if had.isEmpty then #[i] ++ (Array.range r.cmds.size).filter (r.instances[·]!) else #[i]
-            for j in add do
-              if (kept.getD m {}).contains j then continue
-              kept := kept.alter m fun s => some ((s.getD {}).insert j)
-              let c := r.cmds[j]!
-              todo := todo ++ c.declares.flatMap (termUses env · true) ++ r.named c
-    for (m, r) in ← reads.get do
-      let .ok r := r | continue
-      let ks := (stated.getD m {}).fold (fun ks i _ => ks.insert i) (kept.getD m {})
-      if ks.isEmpty then continue
-      for j in scopeOf r ks do
-        if (kept.getD m {}).contains j then continue
-        kept := kept.alter m fun s => some ((s.getD {}).insert j)
-        let named := r.named r.cmds[j]!
-        unless named.isEmpty do
-          todo := todo ++ named
-          more := true
-  let read : Std.HashMap Name Read := (← reads.get).fold (init := {}) fun acc m r =>
-    match r with | .ok r => acc.insert m r | .error _ => acc
-  -- A tagged theorem that what every challenge holds uses is there with its proof: it has no
-  -- challenge of its own.
-  for (m, ss) in stated.toArray do
-    for (i, t) in ss.toArray do
-      if (kept.getD m {}).contains i then
-        problem (some t) "a declaration that every challenge holds uses it, so every challenge holds its proof"
-        stated := stated.modify m (·.erase i)
-  -- One file holds the pieces of every module, and Lean names a private declaration after its
-  -- module: a private declaration whose name a kept declaration of another module has too is
+      if seen.contains x then continue
+      seen := seen.insert x
+      for i in importsOf x do
+        if libSet.contains i then todo := todo.push i
+        else if i != `Init && !(`LeanBlame).isPrefixOf i && !out.contains i then out := out.push i
+    return out
+  let optionDecls ← getOptionDecls
+  -- The Lean options Lake builds module `m` with, as `set_option` commands, and why a file cannot
+  -- set some.
+  let optionsOf (m : Name) : Array String × Array String := Id.run do
+    let mut lines := #[]
+    let mut problems := #[]
+    for (k, v) in options m do
+      if (optionDecls.find? k).any fun d => (moduleOf d.declName).isSome then
+        problems := problems.push s!"{m}: the library itself declares Lean option {k}, which a challenge file cannot set"
+      match v with
+      | .ofBool b => lines := lines.push s!"set_option {k} {b}"
+      | .ofNat n => lines := lines.push s!"set_option {k} {n}"
+      | .ofString v => lines := lines.push s!"set_option {k} {v.quote}"
+      | _ => problems := problems.push s!"{m}: Lean option {k} has a value `set_option` cannot write"
+    return (lines, problems)
+  let (lakeText, lakeProblem) := lakefile required
+  -- Where each tagged theorem is written.
+  let mut written : Std.HashMap Name (Name × Nat) := {}
+  for t in theorems do
+    let some m := moduleOf t | continue
+    let .ok r ← readOf m | continue
+    if let some i := r.owner.find? t then written := written.insert t (m, i)
+  let statementAt : Std.HashMap (Name × Nat) Name := written.fold (init := {}) fun acc t place => acc.insert place t
+  -- What piece `k` needs, and why a challenge that holds it cannot be made.
+  let step (k : Key) : IO (Array Key × Array String) := do
+    match k with
+    | .lakefile => return (#[], lakeProblem.toArray)
+    | .toolchain | .outside _ | .declare _ | .importDeps | .tail .. => return (#[], #[])
+    | .head deps m => return (((outsideOf m).map Key.outside).push (.tail deps m), (optionsOf m).2)
+    | .instances m =>
+      let r ← readOk m
+      return (((Array.range r.cmds.size).filter (r.instances[·]!)).map (Key.cmd true m ·), #[])
+    | .close deps m s => return (#[.cmd deps m (← scopesIn m).scopes[s]!.1], #[])
+    | .cmd deps m i =>
+      let r ← readOk m
+      let sc ← scopesIn m
+      let c := r.cmds[i]!
+      let mut needs := #[Key.head deps m] ++ sc.context[i]!.map (Key.cmd deps m ·)
+      -- The other end of each scope it opens or closes.
+      for (o, _, e) in sc.scopes, s in [:sc.scopes.size] do
+        if o == i then needs := needs.push (match e with | some e => .cmd deps m e | none => .close deps m s)
+        if e == some i then needs := needs.push (.cmd deps m o)
+      needs := needs ++ (← undeclared m c.opened).map Key.declare
+      if deps && !c.declares.isEmpty then needs := needs.push (.instances m)
+      let (keys, problems) ← declarers (some (.cmd true m i)) (c.declares.flatMap (termUses env · true) ++ r.named c)
+      return (needs ++ keys, problems)
+    | .attr m i a =>
+      let r ← readOk m
+      let c := r.cmds[i]!
+      let attrEnd := ((innermost c.stx)[3].getTailPos?).getD c.stop
+      let (keys, problems) ← declarers none (r.named c attrEnd ++ (r.target? c a).toArray)
+      return (#[Key.head true m] ++ (← scopesIn m).context[i]!.map (Key.cmd true m ·) ++ keys, problems)
+    | .statement t =>
+      let base := #[Key.importDeps, .lakefile, .toolchain]
+      let some m := moduleOf t | return (base, #[s!"{t} is a theorem of another library: its challenge is that library's"])
+      let r ← match ← readOf m with
+        | .ok r => pure r
+        | .error e => return (base, #[e])
+      let some i := r.owner.find? t | return (base, #[s!"{t}: no command of {m} declares it"])
+      let c := r.cmds[i]!
+      let some p := proofOf? (innermost c.stx) | return (base, #[s!"{t}: its command has no proof to replace by `sorry`"])
+      let (some a, some _) := (p.getPos?, p.getTailPos?) | return (base, #[s!"{t}: its proof has no position"])
+      -- A proof inside the statement may make constants of the command (`second_site._proof_1`):
+      -- the statement makes them again.
+      let (keys, problems) ← declarers none ((termUses env t false ++ r.named c a).filter (r.owner.find? · != some i))
+      return (base.push (.head false m) ++ (← scopesIn m).context[i]!.map (Key.cmd false m ·) ++ keys, problems)
+  -- Every piece the statements need, what those need, and so on. An `attribute` command comes with
+  -- the declaration it names, or, for a constant from outside the library, with its module's
+  -- `section`s: the commands of a module are known once the module is read.
+  let mut visited : Std.HashMap Key (Array Key × Array String) := {}
+  let mut attributes : Std.HashMap Name (Array (Nat × Nat × Option Name)) := {}
+  let mut attrsOn : Std.HashMap Name (Array Key) := {}
+  let mut attrsIn : Std.HashMap Name (Array Key) := {}
+  let mut declared : NameSet := {}
+  let mut todo : Array Key := theorems.map Key.statement
+  while h : todo.size > 0 do
+    let k := todo[todo.size - 1]
+    todo := todo.pop
+    if visited.contains k then continue
+    let (needs, problems) ← step k
+    visited := visited.insert k (needs, problems)
+    todo := todo ++ needs
+    match k with
+    | .cmd true m i =>
+      for n in (← readOk m).cmds[i]!.declares do
+        declared := declared.insert n
+        todo := todo ++ attrsOn.getD n #[]
+    | .head _ m => todo := todo ++ attrsIn.getD m #[]
+    | _ => pure ()
+    for m in ← fresh.swap #[] do
+      let .ok r ← readOf m | continue
+      let found := attributesOf r
+      attributes := attributes.insert m found
+      for (i, a, target) in found do
+        let x := Key.attr m i a
+        match target with
+        | some n =>
+          attrsOn := attrsOn.alter n fun xs => some ((xs.getD #[]).push x)
+          if declared.contains n then todo := todo.push x
+        | none =>
+          attrsIn := attrsIn.alter m fun xs => some ((xs.getD #[]).push x)
+          if visited.contains (.head true m) || visited.contains (.head false m) then todo := todo.push x
+  -- What comes with piece `k`.
+  let comesWith (k : Key) : IO (Array Key) := do
+    match k with
+    | .cmd true m i => return (← readOk m).cmds[i]!.declares.flatMap (attrsOn.getD · #[])
+    | .head _ m => return attrsIn.getD m #[]
+    | _ => return #[]
+  -- One file holds the pieces of several modules, and Lean names a private declaration after its
+  -- module: a private declaration whose name a declaration of another module in the graph has too is
   -- written with its module (`withModule`); what Lean makes with it follows its name.
   let mut byName : Std.HashMap Name (Array (Name × Name)) := {}
-  for (m, r) in read do
-    for i in kept.getD m {} do
-      for n in r.cmds[i]!.declares do
+  for (k, _) in visited do
+    if let .cmd true m i := k then
+      for n in (← readOk m).cmds[i]!.declares do
         byName := byName.alter (privateToUserName n) fun ds => some ((ds.getD #[]).push (m, n))
   let mut clashing : NameMap Name := {}
   for (_, ds) in byName do
@@ -710,77 +923,83 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   for (n, m) in clashing do
     if under clashing n.getPrefix then continue
     if let .str _ s := privateToUserName n then renamed := renamed.insert n (withModule s m)
-  -- What the kept commands declare: an `attribute` command on these alone comes along.
-  let mut declared : NameSet := {}
-  for (m, r) in read do
-    for i in kept.getD m {} do
-      declared := r.cmds[i]!.declares.foldl (·.insert ·) declared
-  -- The namespaces that the modules outside the library which the challenge imports make: those
-  -- exist wherever the challenge is.
-  let outside ← IO.mkRef (none : Option NameSet)
-  let isOutside (ns : Name) : IO Bool := do
-    if let some set := ← outside.get then return set.contains ns
-    let imported := importClosure env (library.filter fun m => kept.contains m || stated.contains m)
-    let set := imported.foldl (init := {}) fun acc m =>
-      if libSet.contains m then acc else
-      match (env.getModuleIdx? m).bind (env.header.moduleData[·.toNat]?) with
-      | some d => d.constNames.foldl (fun acc n => namespacesOf n acc) acc
-      | none => acc
-    outside.set (some set)
-    return set.contains ns
-  let optionDecls ← getOptionDecls
-  -- The namespaces the challenge has made so far, file order.
-  let mut made : NameSet := {}
-  let mut out := #[]
-  for m in library do
-    let some r := read[m]? | continue
-    let ks := kept.getD m {}
-    let ss := stated.getD m {}
-    if ks.isEmpty && ss.isEmpty then continue
-    -- The Lean options Lake builds the module with, set for its pieces.
-    let mut setOptions := #[]
-    for (k, v) in options m do
-      if (optionDecls.find? k).any fun d => (moduleOf d.declName).isSome then
-        problem none s!"{m}: the library itself declares Lean option {k}, which a challenge file cannot set"
-      match v with
-      | .ofBool b => setOptions := setOptions.push s!"set_option {k} {b}"
-      | .ofNat n => setOptions := setOptions.push s!"set_option {k} {n}"
-      | .ofString v => setOptions := setOptions.push s!"set_option {k} {v.quote}"
-      | _ => problem none s!"{m}: Lean option {k} has a value `set_option` cannot write"
-    let mut pieces := #[]
-    let mut scopes : Array String := #[]
-    let mut declare : Array Name := #[]
-    for c in r.cmds, i in [:r.cmds.size] do
-      let onKept := c.role == .attribute && !(attributesKept (innermost c.stx)).isEmpty &&
-        (r.named c).all declared.contains
-      unless ks.contains i || ss.contains i || onKept do continue
-      let es ← changes r c renamed
-      let statement ← match ss[i]? with
-        | some t => match statementOf? r c es with
-          | some text => pure (some ({ name := toString t, text } : Statement))
-          | none => do problem (some t) "its command has no proof to replace by `sorry`"; pure none
-        | none => pure none
-      if ss.contains i && statement.isNone then continue
-      match c.role with
-      | .opens => scopes := scopes ++ c.opens
-      | .closes => scopes := scopes.extract 0 (scopes.size - c.closes)
-      | _ => pure ()
-      -- Lean refuses an `open` of a namespace nothing has made yet.
-      for ns in c.opened do
-        unless made.contains ns || declare.contains ns || (← isOutside ns) do declare := declare.push ns
-      if c.role == .opens && (innermost c.stx).isOfKind ``Parser.Command.namespace then
-        made := prefixesOf (c.ns ++ (innermost c.stx)[1].getId) made
-      if ks.contains i then
-        made := c.declares.foldl (fun made n => namespacesOf n made) made
-      pieces := pieces.push { text := apply r.bytes c.start c.stop es, statement
-                              scope := c.role == .opens || c.role == .closes || c.role == .sets }
-    made := declare.foldl (fun made ns => prefixesOf ns made) made
-    -- Each module in a `section` of its own, so that what it opens and sets ends with it: first the
-    -- Lean options Lake builds it with, then the namespaces its `open`s need.
-    let first := "\n".intercalate ("section" :: setOptions.toList ++ declare.toList.map fun ns => s!"namespace {ns}\nend {ns}")
-    let close := scopes.reverse.toList.map (fun h => if h.isEmpty then "end" else s!"end {h}") ++ ["end"]
-    out := out.push { module := toString m,
-                      pieces := #[scopeOnly first] ++ pieces.push (scopeOnly ("\n".intercalate close)) }
-  return (out, ← problems.get)
+  -- The pieces in the order of their files: the lakefile and the toolchain; `ChallengeDeps.lean`: its
+  -- imports, the namespaces it declares, then each module's part; `Challenge.lean`: its import, then
+  -- each module's part. A statement that no module's part holds (it has a problem) is last.
+  let has := visited.contains
+  let sortedBy (f : Key → Option Name) : Array Name :=
+    (visited.toArray.filterMap (f ·.1)).qsort (·.toString < ·.toString)
+  let mut order : Array Key := #[.lakefile, .toolchain]
+  order := order ++ (sortedBy fun | .outside x => some x | _ => none).map Key.outside
+  order := order ++ (sortedBy fun | .declare x => some x | _ => none).map Key.declare
+  for deps in [true, false] do
+    unless deps do order := order.push .importDeps
+    for m in library do
+      unless has (.head deps m) do continue
+      let r ← readOk m
+      let sc ← scopesIn m
+      let attrs := attributes.getD m #[]
+      order := order.push (.head deps m)
+      if deps then order := order.push (.instances m)
+      for i in [:r.cmds.size] do
+        order := order.push (.cmd deps m i)
+        if deps then order := order ++ (attrs.filter (·.1 == i)).map fun (_, a, _) => Key.attr m i a
+        else if let some t := statementAt[(m, i)]? then order := order.push (.statement t)
+      for s in (List.range sc.scopes.size).reverse do order := order.push (.close deps m s)
+      order := order.push (.tail deps m)
+  let placed : Std.HashSet Key := order.foldl (·.insert ·) {}
+  order := (order ++ (theorems.map Key.statement).filter (!placed.contains ·)).filter has
+  unless order.size == visited.size do fail "a piece of the graph has no place in a challenge's files"
+  let index : Std.HashMap Key Nat := order.foldl (init := {}) fun acc k => acc.insert k acc.size
+  -- Texts: a piece on lines of its own after a blank line; an import on one line.
+  let editsRef ← IO.mkRef ({} : Std.HashMap (Name × Nat) (Array Edit))
+  let editsOf (m : Name) (i : Nat) : IO (Array Edit) := do
+    if let some es := (← editsRef.get)[(m, i)]? then return es
+    let r ← readOk m
+    let es ← changes r r.cmds[i]! renamed
+    editsRef.modify (·.insert (m, i) es)
+    return es
+  let theoremSet : NameSet := theorems.foldl (·.insert ·) {}
+  let mut pieces := #[]
+  for k in order do
+    let (needs, problems) := visited.getD k (#[], #[])
+    let needs ← (dedup (needs ++ (← comesWith k))).mapM fun n => match index[n]? with
+      | some j => pure j
+      | none => fail "a piece needs a piece the graph lacks"
+    let text ← match k with
+      | .lakefile => pure lakeText
+      | .toolchain => pure s!"leanprover/lean4:{toolchain}\n"
+      | .outside x => pure s!"import {x}\n"
+      | .declare n => pure s!"\nnamespace {n}\nend {n}\n"
+      | .importDeps => pure "import ChallengeDeps\n"
+      | .instances _ => pure ""
+      | .head _ m => pure ("\n" ++ "\n".intercalate ("section" :: (optionsOf m).1.toList) ++ "\n")
+      | .tail .. => pure "\nend\n"
+      | .close _ m s => do
+        let h := (← scopesIn m).scopes[s]!.2.1
+        pure (if h.isEmpty then "\nend\n" else s!"\nend {h}\n")
+      | .cmd _ m i => do
+        let r ← readOk m
+        let c := r.cmds[i]!
+        pure ("\n" ++ apply r.bytes c.start c.stop (← editsOf m i) ++ "\n")
+      | .attr m i a => do
+        let r ← readOk m
+        let c := r.cmds[i]!
+        let d := innermost c.stx
+        let es ← editsOf m i
+        let (some attrEnd, some s, some e) := (d[3].getTailPos?, d[4][a].getPos?, d[4][a].getTailPos?)
+          | fail s!"{m}: an `attribute` command without positions"
+        pure ("\n" ++ apply r.bytes c.start attrEnd es ++ " " ++ apply r.bytes s e es ++ "\n")
+      | .statement t => do
+        let some (m, i) := written[t]? | pure ""
+        let r ← readOk m
+        pure (((statementOf? r r.cmds[i]! (← editsOf m i)).map ("\n" ++ · ++ "\n")).getD "")
+    let tagged ← match k with
+      | .statement t => pure (some t.toString)
+      | .cmd true m i => pure (((← readOk m).cmds[i]!.declares.find? theoremSet.contains).map toString)
+      | _ => pure none
+    pieces := pieces.push { file := k.file, text, needs, tagged
+                            problem := if problems.isEmpty then none else some ("; ".intercalate (dedup problems).toList) }
+  return { pieces }
 
 end LeanBlame.Pieces

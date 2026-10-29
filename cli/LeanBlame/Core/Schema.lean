@@ -501,45 +501,6 @@ structure StatusDecl where
   closureSize : Nat
   deriving Inhabited, Repr
 
-/-- One of the library's own modules: the modules it imports (but `Init` and LeanBlame's), and the
-hash of its challenge pieces (docs/design/04-architecture.md, "Challenges") when it holds
-something a challenge needs. -/
-structure OwnModule where
-  name : String
-  imports : Array String
-  pieces : Option String
-  deriving Inhabited, Repr
-
-def OwnModule.fromJson? (j : Json) : Except String OwnModule := do
-  let o ← JsonObj.read j "module" ["name", "imports", "pieces"]
-  let m : OwnModule := { name := ← o.get String "name", imports := ← o.get (Array String) "imports",
-                         pieces := ← o.get (Option String) "pieces" }
-  if let some h := m.pieces then
-    unless isHash h do throw s!"module {m.name}.pieces: `{h}` is not a sha256: hash"
-  return m
-
-instance : ToJson OwnModule where
-  toJson m := Json.mkObj [("name", m.name), ("imports", toJson m.imports), ("pieces", toJson m.pieces)]
-
-/-- A dependency the library's lakefile requires (Lake: a package of `lake-manifest.json` that is
-not inherited): its git URL, commit and subdirectory; `git` and `rev` are `none` for a path
-dependency. -/
-structure Require where
-  name : String
-  git : Option String
-  rev : Option String
-  subDir : Option String
-  deriving Inhabited, Repr
-
-def Require.fromJson? (j : Json) : Except String Require := do
-  let o ← JsonObj.read j "require" ["name", "git", "rev", "sub_dir"]
-  return { name := ← o.get String "name", git := ← o.get (Option String) "git",
-           rev := ← o.get (Option String) "rev", subDir := ← o.get (Option String) "sub_dir" }
-
-instance : ToJson Require where
-  toJson r := Json.mkObj [("name", r.name), ("git", toJson r.git), ("rev", toJson r.rev),
-    ("sub_dir", toJson r.subDir)]
-
 structure StatusReport where
   library : String
   /-- `none` when the export has uncommitted changes. -/

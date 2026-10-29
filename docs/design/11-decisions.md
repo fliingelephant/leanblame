@@ -226,17 +226,22 @@ not move is not walked.
 
 `export` imports the library once, with the environment extensions of everything it imports, as an
 editor or doc-gen4 loads it, and makes every output from that environment: the export, the
-statements (printed in-process, as doc-gen4 prints them) and the challenge pieces. A challenge is
+statements (printed in-process, as doc-gen4 prints them) and the piece graph. A challenge is
 not a copy of each module elaborated again in other `lean` processes: it is the commands of the
 library's source that its theorems need, found from the kernel terms and the `.ilean`, with their
-scope. `leanblame challenge` joins them into one `ChallengeDeps.lean` (owner: one file, not one per
-module) and `Challenge.lean`, with what the library requires; a viewer does not join
-pieces. Names are rewritten only where they would read differently in that file. Lake's own loader
+scope. The pieces are a graph whose links are what each piece needs; the challenge of chosen
+theorems is the cut from their statements (owner, 2026-10-29: "We choose one or more theorems then
+have one minimal challengedep"; "dependency graph is essential point of view"): one
+`ChallengeDeps.lean` (owner: one file, not one per module) with what they need and nothing else, and
+`Challenge.lean`. `leanblame challenge` cuts it; `challenge --graph` gives a service the graph, to
+cut challenges live. Names are rewritten only where they would read differently in that file. Lake's own loader
 gives the libraries, their modules and their Lean options. `challenge --check` hashes the challenge
 with the claim hash, the rule a sign-off follows, so that "the challenge means what the library
 means" is the same question as "the claim did not move". What stops a challenge stops `challenge`,
 not `export`: sign-offs do not wait on challenges. In the one file, each module's section sets the
-Lean options Lake builds that module with, and a private name that another module's kept declaration
-has too is written with its module (owner: "Fix the root causes from first principles"). Rejected: copying every module (416 `lean`
-processes for Lean-QIT, about 1.6 GB each, which ran a 16 GB machine out of memory twice), one
-challenge file per module, and comparing a challenge with its own hash of terms.
+Lean options Lake builds that module with, and a private name that another module's declaration in
+the graph has too is written with its module (owner: "Fix the root causes from first principles").
+Rejected: copying every module (416 `lean` processes for Lean-QIT, about 1.6 GB each, which ran a
+16 GB machine out of memory twice), one challenge file per module, comparing a challenge with its
+own hash of terms, and one `ChallengeDeps.lean` shared by every challenge (6,989 lines for any
+Lean-QIT challenge; the owner had asked for what the chosen theorems need).
