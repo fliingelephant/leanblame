@@ -1,5 +1,5 @@
 /-
-Challenge pieces (docs/design/04-architecture.md, "Challenges"): the piece graph that the comparator
+Challenge pieces (docs/decisions.md, "Challenges"): the piece graph that the comparator
 challenges of the library's tagged theorems are cut from, taken from the library's source as
 written; nothing is elaborated again.
 
@@ -54,7 +54,7 @@ def depsFile : String := "ChallengeDeps.lean"
 def challengeFile : String := "Challenge.lean"
 def files : Array String := #[lakefileFile, toolchainFile, depsFile, challengeFile]
 
-/-- A piece of the piece graph (docs/design/14-schemas.md §6): its text in one file of a challenge;
+/-- A piece of the piece graph (docs/schemas.md §6): its text in one file of a challenge;
 the pieces it needs, by index; the tagged theorem it states (in `Challenge.lean`) or declares with
 its proof (in `ChallengeDeps.lean`); and why a challenge that holds it cannot be made. -/
 structure Piece where
@@ -98,7 +98,7 @@ def read (root : System.FilePath) (hash : String) : IO Graph := do
   | .ok g => return g
   | .error e => fail s!"{p}: {e}"
 
-/-- The challenge of the tagged theorems `names` (docs/design/14-schemas.md §6), each file with its
+/-- The challenge of the tagged theorems `names` (docs/schemas.md §6), each file with its
 text: their statements, the pieces those need, the pieces these need, and so on, each file the text
 of its pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each named
 theorem whose proof its `ChallengeDeps.lean` holds. -/

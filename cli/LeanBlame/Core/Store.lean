@@ -1,5 +1,5 @@
 /-
-The object store (docs/design/04-architecture.md, Storage): `.leanblame/store/<kind>/<hex>`, where
+The object store (docs/decisions.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too), release
 manifests and piece graphs (`Pieces`). Graphs, exports hashed against boundary

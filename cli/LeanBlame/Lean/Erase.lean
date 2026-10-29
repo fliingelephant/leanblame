@@ -1,5 +1,5 @@
 /-
-Proof erasure (docs/design/03-trust-model.md, "The hash, precisely"): every subterm of
+Proof erasure (trust-model.md, "The hash, precisely"): every subterm of
 a type or a definition body whose type is a proposition is replaced by a marker
 before hashing.
 

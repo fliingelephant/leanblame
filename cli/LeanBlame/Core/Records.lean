@@ -1,5 +1,5 @@
 /-
-Loading records and deciding liveness (docs/design/05-records.md).
+Loading records and deciding liveness (trust-model.md, "Records").
 
 A record is a file of a records directory named `<sha256 of its bytes>.toml` that parses; that hash
 is its id. Records name declarations by id. A withdraw counts only if it refers to an approve record
@@ -18,7 +18,7 @@ namespace LeanBlame
 def recordDirs (cfg : Config) : Array System.FilePath := cfg.records.map (⟨·⟩)
 
 /-- Load the records directory `dir` of the library at `root`. An entry is a record iff it is a file
-named `<sha256 of its bytes>.toml` that parses (docs/design/05); every other entry is a problem,
+named `<sha256 of its bytes>.toml` that parses (docs/schemas.md §2); every other entry is a problem,
 returned with its path. Paths are relative to `root`. A missing directory holds no records (git
 keeps no empty directory). -/
 def loadRecordDir (root dir : System.FilePath) :
@@ -61,9 +61,10 @@ def loadAllRecords (root : System.FilePath) (cfg : Config) :
   return (good, bad)
 
 /--
-The withdraw rule (docs/design/05): `w` refers to an approve record, is signed by that record's
-signer, and lists only declarations of it. Returns the declarations it withdraws, as that record
-lists them (all of them when it lists none), or every problem. `byId` holds the records by id.
+The withdraw rule (trust-model.md, "Withdraw rules"): `w` refers to an approve record, is signed
+by that record's signer, and lists only declarations of it. Returns the declarations it withdraws,
+as that record lists them (all of them when it lists none), or every problem. `byId` holds the
+records by id.
 -/
 def withdrawCovers (byId : Std.HashMap String LoadedRecord) (w : WithdrawRecord) :
     Except (Array String) (Array ApprovedConstant) := do

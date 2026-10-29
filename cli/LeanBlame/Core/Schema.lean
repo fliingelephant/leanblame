@@ -1,12 +1,12 @@
 /-
-The interfaces of docs/design/14-schemas.md: boundary list (JSON), record (TOML), release manifest
+The interfaces of docs/schemas.md: boundary list (JSON), record (TOML), release manifest
 (JSON) and status (JSON), each a Lean structure with an emitter; the boundary list and the record
 have a strict reader: a missing or an unknown key is an error. Records keep the field order of
-docs/design/05; JSON key order is not part of the schema.
+docs/schemas.md §2; JSON key order is not part of the schema.
 
 Declaration names are kept as strings, exactly as the frontend prints them (Lean:
 `Lean.Name.toString`); only the frontend maps them back to its constants
-(docs/design/04-architecture.md, "Beyond Lean"). A name identifies a declaration within one export; its id
+(docs/decisions.md, "Beyond Lean"). A name identifies a declaration within one export; its id
 identifies it across exports.
 -/
 import Lake.Toml
@@ -68,24 +68,24 @@ def decodeTable (t : Table) (k : Lean.Name) : DecodeM Table :=
 
 Each value prints as the string the schemas use; `Role` enters the hash as that string. -/
 
-/-- What a signer reads of a declaration's body (docs/design/03-trust-model.md): `assumed`, there
+/-- What a signer reads of a declaration's body (trust-model.md): `assumed`, there
 is none and the statement is taken as true; `defined`, the body is the meaning; `proved`, the body
 is a proof, which the kernel checks and nobody reads. -/
 inductive Role where
   | assumed | defined | proved
   deriving Inhabited, Repr, BEq, Hashable
 
-/-- The state of a tagged declaration (docs/design/03, "Validity"). -/
+/-- The state of a tagged declaration (trust-model.md, "Validity"). -/
 inductive State where
   | valid | outdated | unsigned
   deriving Inhabited, Repr, BEq, Hashable
 
-/-- Why a claim hash moved (docs/design/03, "Why a hash moved"). -/
+/-- Why a claim hash moved (trust-model.md, "Why a hash moved"). -/
 inductive Cause where
   | ownText | ownBody | depSpec | cutMoved | untagged
   deriving Inhabited, Repr, BEq, Hashable
 
-/-- A theorem's axiom report (docs/design/07). -/
+/-- A theorem's axiom report (docs/decisions.md, "Releases"). -/
 inductive ProofStatus where
   | proven | «open» | na
   deriving Inhabited, Repr, BEq, Hashable
@@ -95,8 +95,8 @@ inductive Action where
   | approve | withdraw
   deriving Inhabited, Repr, BEq, Hashable
 
-/-- What an approval of a declaration is worth now (docs/design/05): `current`, it is live and
-carries the declaration's current claim; `superseded`, it is live and carries an older claim;
+/-- What an approval of a declaration is worth now (trust-model.md, "Records"): `current`, it is
+live and carries the declaration's current claim; `superseded`, it is live and carries an older claim;
 `withdrawn`, its signer withdrew it; `excluded`, `leanblame.toml` excludes its record;
 `not-allowed`, its signer is not among `allowed_signers`. -/
 inductive Standing where
@@ -164,7 +164,7 @@ instance : FromJson Role := ⟨ofJsonString? Role.all⟩
 
 /-! ## 1. Boundary list -/
 
-/-- The informal text as docs/design/03 hashes it: ASCII whitespace trimmed, line endings
+/-- The informal text as trust-model.md hashes it: ASCII whitespace trimmed, line endings
 normalized, no Unicode normalization (Lean core has none). -/
 def normalizeInformal (s : String) : String := strTrim s.crlfToLf
 
@@ -341,7 +341,7 @@ def action : Record → Action
   | .withdraw _ => .withdraw
 
 open Lake.Toml (Value ppTable) in
-/-- The record as TOML, printed by Lake: the fields of docs/design/05 in order, tables last; each
+/-- The record as TOML, printed by Lake: the fields of docs/schemas.md §2 in order, tables last; each
 declaration of an approve record is a line `"id" = { name = …, claim = …, evidence = … }`. -/
 def toToml (rec : Record) : String :=
   let head (action : Action) (signer : String) (date : Std.Time.Timestamp) : Table :=

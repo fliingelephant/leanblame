@@ -12,7 +12,8 @@ checks, incrementally and with kernel help.
   which signatures still hold and, for the rest, what changed and who must look
   again.
 
-Requires Lean `v4.35.0`, the version in `cli/lean-toolchain`.
+Requires Lean `v4.35.0`, the version in `cli/lean-toolchain`. Older versions have no
+`leanexport` and are not supported.
 
 ## Adding LeanBlame to your project
 
@@ -116,4 +117,5 @@ local and ignored by git.
 cd cli && lake build && bash test/run.sh
 ```
 
-Design documents and schemas: [docs/design/](docs/design/README.md).
+Design: [trust-model.md](trust-model.md), [docs/decisions.md](docs/decisions.md),
+[docs/schemas.md](docs/schemas.md).

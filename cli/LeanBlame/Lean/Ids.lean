@@ -2,7 +2,7 @@
 `leanblame id [--lib NAME]...`: give each tag written in the library without an id a new one,
 written into its source just after `trusted`: `@[trusted "id"]` on a declaration, or `attribute
 [trusted "id"] Name` for one tagged after the fact, also a declaration of another library
-(docs/design/02-concepts.md, "Id"). An id is a random UUID, version 4. It is never hashed, so writing
+(trust-model.md, "Id"). An id is a random UUID, version 4. It is never hashed, so writing
 one changes no claim. Tags written in imported libraries are not touched.
 
 Where to write is where the attribute recorded that `trusted` ends (`Tag.pos`), in the module that

@@ -1,6 +1,6 @@
 /-
-The hashes of docs/design/03-trust-model.md, "The hash, precisely", over the facts a frontend
-reports (docs/design/04-architecture.md, "Beyond Lean"). `H` is SHA-256 over a domain tag and a list of fields,
+The hashes of trust-model.md, "The hash, precisely", over the facts a frontend
+reports (docs/decisions.md, "Beyond Lean"). `H` is SHA-256 over a domain tag and a list of fields,
 each as `<byte length>:<bytes>`:
 
   own(c)   = H("leanblame.own",   kind, role, name, uparams, type, body?, informal?)

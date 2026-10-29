@@ -157,7 +157,7 @@ grep -qxF "$want" "$logs/status.err" || fail "no untagged-dependency warning: $(
 ok "status warns that tagged Sample.energy uses untagged Sample.double, and nothing else"
 "$lb" status --json >"$logs/status.json" 2>"$logs/status-json.err" || fail "status --json: $(cat "$logs/status-json.err")"
 [[ ! -s "$logs/status-json.err" ]] || fail "status --json wrote to stderr: $(cat "$logs/status-json.err")"
-python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not match docs/design/14"
+python3 - "$logs/status.json" "$ids" <<'PY' || fail "status --json does not match docs/schemas.md"
 import json, sys
 s = json.load(open(sys.argv[1]))
 ids = {name: i for i, name in (line.split() for line in sys.argv[2].splitlines())}
@@ -214,7 +214,7 @@ assert {c["name"] for c in basic["constants"]} == {"Sample.energy", "Sample.Poin
                                                   "Sample.Point.y", "Sample.Point.norm"}, basic["constants"]
 assert all(set(c) == {"id", "name", "claim", "evidence"} and c["evidence"] is None for c in basic["constants"])
 PY
-ok "status --json has the docs/design/14 fields and nothing on stderr; members' ids come from their structure's"
+ok "status --json has the docs/schemas.md fields and nothing on stderr; members' ids come from their structure's"
 
 echo "== challenge: what a comparator checks a solution against"
 must_fail "a challenge states theorems: name at least one" -- "$lb" challenge --out "$work-base"
@@ -332,7 +332,7 @@ run release --tag 2026.10 --out "$logs/release.json"
 release_hash="$(awk '/^release /{print $2}' <<<"$out")"
 cmp -s "$logs/release.json" ".leanblame/store/manifests/${release_hash#sha256:}" || fail "--out differs from the stored manifest"
 python3 - "$logs/release.json" "$release_hash" "$(current_export)" "$basic_record" "$energy_record" <<'PY' \
-  || fail "release manifest does not match docs/design/14"
+  || fail "release manifest does not match docs/schemas.md"
 import hashlib, json, sys
 path, h, export, basic, energy = sys.argv[1:]
 text = open(path).read()

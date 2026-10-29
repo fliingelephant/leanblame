@@ -16,7 +16,7 @@ root = "Main"
 supportInterpreter = true
 
 # The executable's own modules: the generic core and the Lean frontend
-# (docs/design/04-architecture.md, "The CLI"). Lake builds an executable's imports only from
+# (docs/decisions.md, "The CLI"). Lake builds an executable's imports only from
 # library targets, so they need one. Internal: user libraries never import it.
 [[lean_lib]]
 name = "LeanBlameCli"

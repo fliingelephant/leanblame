@@ -8,9 +8,9 @@ Adapted for LeanBlame from comparator's closure walk, which ships in the Lean to
 `Lake/Check/Compare.lean`. The licence text is in `cli/LICENSES/Apache-2.0.txt`.
 
 Changes: the worklist loop is kept, but it walks one export, which a frontend serves as a
-`Core.Source` (docs/design/04-architecture.md, "Beyond Lean"), instead of comparing a challenge with a solution.
+`Core.Source` (docs/decisions.md, "Beyond Lean"), instead of comparing a challenge with a solution.
 It seeds from the boundary list, cuts at tagged declarations, and hashes every declaration it
-reaches from the facts the frontend reports, proofs already left out (docs/design/03-trust-model.md,
+reaches from the facts the frontend reports, proofs already left out (trust-model.md,
 "The hash, precisely"). Cycles are found with Tarjan's algorithm and hashed as groups. Instead of
 stopping at the first mismatch, `compare` collects every difference between two hashed exports under
 a declaration, and `Comparison.changes` charges each to a cause. Declarations are keyed by their
@@ -190,7 +190,7 @@ def closureOf (h : Core.Hashed) (x : String) : Array String × Array String := I
 
 /--
 What differs between two hashed exports under one declaration: each part of its claim
-(docs/design/03, "Why a hash moved"), compared by hash, so a difference is one the kernel sees.
+(trust-model.md, "Why a hash moved"), compared by hash, so a difference is one the kernel sees.
 Dependencies are named as the graphs name them; `added` and `removed` are tagged dependencies at
 the cut that the other closure lacks entirely. Dependencies that appear or disappear elsewhere are
 explained by the change of whatever references them.
@@ -239,7 +239,7 @@ def compare (old new : Core.Hashed) (oldName x : String)
       (old.nodes[u]?.map (·.own)) != (new.nodes[u]?.map (·.own)) }
 
 /--
-Why the claim moved, charged to the declaration, now named `x` (docs/design/03, "Why a hash moved"):
+Why the claim moved, charged to the declaration, now named `x` (trust-model.md, "Why a hash moved"):
 * `own-text`: its informal text;
 * `own-body`: its kind, role, name, universe parameters, type or body;
 * `dep-spec`, `cut-moved`, `untagged`: as `Comparison` lists them.

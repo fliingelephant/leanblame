@@ -1,5 +1,5 @@
 /-
-The statements of the boundary list (docs/design/14-schemas.md §1), printed in this process from the
+The statements of the boundary list (docs/schemas.md §1), printed in this process from the
 environment `export` imports with the environment extensions of the library and its dependencies
 (their notations and delaborators), as doc-gen4 renders signatures: each signature pretty-printed,
 twice (`Statement`), with every constant reference tagged (`Widget.tagCodeInfos`) and flattened to

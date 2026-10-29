@@ -1,6 +1,6 @@
 /-
-`leanblame`: command-line entry point (docs/design/04-architecture.md, eleven commands). It passes
-the Lean frontend's backend to the two commands that need one (docs/design/04-architecture.md, "Beyond Lean"):
+`leanblame`: command-line entry point (README.md, Commands). It passes
+the Lean frontend's backend to the two commands that need one (docs/decisions.md, "Beyond Lean"):
 `export` hashes with it, `release` runs its kernel check.
 -/
 import LeanBlame.Core.Diff

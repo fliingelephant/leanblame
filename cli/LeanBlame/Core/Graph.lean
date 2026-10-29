@@ -1,5 +1,5 @@
 /-
-The graph (docs/design/04-architecture.md, "Beyond Lean"): what a frontend reports about one declaration
+The graph (docs/decisions.md, "Beyond Lean"): what a frontend reports about one declaration
 (`Decl`), what it serves to the core (`Source` for one export, `Backend` for the proof assistant),
 and every declaration reached from a boundary list, hashed (`Node`, `Hashed`). Declarations are
 keyed by their printed name; the core never sees a term.

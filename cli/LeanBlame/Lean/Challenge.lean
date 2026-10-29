@@ -1,6 +1,6 @@
 /-
 `leanblame challenge THEOREM|ID... --out DIR`, `leanblame challenge --graph` and
-`leanblame challenge --check DIR` (docs/design/04-architecture.md, "Challenges").
+`leanblame challenge --check DIR` (docs/decisions.md, "Challenges").
 
 A challenge is what a comparator checks a solution against, cut from the piece graph of the last
 export (`Pieces.Graph.cut`): `Challenge.lean` states the named tagged theorems, proofs `sorry`, among
@@ -50,7 +50,7 @@ def write (root out : System.FilePath) (names : Array String) : IO Unit := do
     IO.FS.createDirAll out
     for (f, text) in files do IO.FS.writeFile (out / f) text
 
-/-- The piece graph of the last export (docs/design/14-schemas.md §6). -/
+/-- The piece graph of the last export (docs/schemas.md §6). -/
 def graph (root : System.FilePath) : IO Pieces.Graph := do
   Pieces.read root (← Store.readCurrent root).pieces
 

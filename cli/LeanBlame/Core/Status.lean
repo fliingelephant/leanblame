@@ -1,8 +1,8 @@
 /-
 `leanblame status [--json]` and `leanblame blame NAME|ID`
-(docs/design/03-trust-model.md "Validity", docs/design/06-versioning.md, docs/design/14-schemas.md §4).
+(trust-model.md, "Validity" and "Why a hash moved"; docs/schemas.md §4).
 
-Status reads the graphs `export` stored and never hashes (docs/design/04-architecture.md, "Storage").
+Status reads the graphs `export` stored and never hashes (docs/decisions.md, "Storage").
 Records name declarations by id, so an approval follows its declaration through a rename. Per
 tagged declaration X of the current boundary list:
 * state: `valid` if at least `required_signers` distinct signers have live approve records carrying
@@ -99,9 +99,9 @@ structure Result where
   /-- Live approve records carrying the current claim of some tagged declaration, sorted. -/
   validRecords : Array String
 
-/-- A theorem's axioms against the permitted ones (docs/design/07): `proven` when each is in
-`standard` or `signed`, `open` otherwise; and the axioms that are neither in `incomplete` nor
-permitted. -/
+/-- A theorem's axioms against the permitted ones (docs/decisions.md, "Releases"): `proven` when
+each is in `standard` or `signed`, `open` otherwise; and the axioms that are neither in `incomplete`
+nor permitted. -/
 def classifyAxioms (standard incomplete : Array String) (axioms : Array String)
     (signed : String → Bool) : ProofStatus × Array String :=
   let permitted (a : String) := standard.contains a || signed a

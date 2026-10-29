@@ -1,4 +1,4 @@
-# 14. Schemas
+# Schemas
 
 The interfaces LeanBlame commits to. TOML for what humans read in git
 (records, config); JSON for what machines pass around. Hashes are `sha256:`
@@ -11,7 +11,7 @@ identifies it across exports.
 
 Produced by `export` from `@[trusted "id"]`, including tags found in imported
 libraries, or from a verso-blueprint manifest (`--boundary FILE`,
-[04-architecture.md](04-architecture.md), Blueprints). Read by `status`, from
+[decisions.md](decisions.md), Blueprints). Read by `status`, from
 the object store. It holds the declarations only, in source order: a module
 after the modules it imports, then by position in the file (a member without a
 position of its own at its parent's), ties by name. The commit, toolchain and
@@ -19,19 +19,19 @@ dependencies they come from are in `.leanblame/current` and in each record.
 
 ```json
 {
-  "library": "OpenPhysics",
+  "library": "Example",
   "declarations": [
     {
-      "name": "OpenPhysics.Ising.Hamiltonian",
+      "name": "Example.Ising.Hamiltonian",
       "id": "3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b",
       "parent": null,
-      "module": "OpenPhysics.Ising",
+      "module": "Example.Ising",
       "kind": "def",
       "role": "defined",
       "informal": "Nearest-neighbour Ising Hamiltonian on a finite chain, H = -J Σ σᵢσᵢ₊₁, open boundary.",
       "statement": {
-        "pretty": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }],
-        "plain": [{ "text": "OpenPhysics.Ising.Hamiltonian (J : ", "const": null }, { "text": "Real", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "Real", "const": "Real" }]
+        "pretty": [{ "text": "Example.Ising.Hamiltonian (J : ", "const": null }, { "text": "ℝ", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "ℝ", "const": "Real" }],
+        "plain": [{ "text": "Example.Ising.Hamiltonian (J : ", "const": null }, { "text": "Real", "const": "Real" }, { "text": ") : ", "const": null }, { "text": "Real", "const": "Real" }]
       }
     }
   ]
@@ -43,7 +43,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `name` | fully qualified constant name, after structure expansion |
 | `id` | stays when the declaration is renamed or edited; never hashed. Its own: the UUID in its tag, `@[trusted "id"]` or `attribute [trusted "id"] Name`, or, from a blueprint, the label of its first declaration. Else the parent's id, `/`, and its name under the parent: `3f2b…/x` for the field `x` of a tagged structure, `def:point/norm` for another declaration of the label `def:point`. A tag without an id stops `export`. No two declarations share an id |
 | `parent` | the declaration whose id stands for this one: the first declaration of its blueprint label, else the tagged structure or inductive it is a constructor or projection of; a parent without an id of its own is passed over for its own parent; else `null` |
-| `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [03-trust-model.md](03-trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
+| `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [trust-model.md](../trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
 | `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
 | `statement` | the signature (name, binders, type), printed twice as segments: `pretty` as the library's documentation (doc-gen4) prints it, with the notations of the library and what it imports; `plain` with notation, field notation and coercions off. A segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
@@ -74,13 +74,46 @@ signer relied on.
 
 Validity rules: `refers_to` names an approve record; withdraw `signer` equals
 that record's signer; the ids it lists are in that record; existing files are
-never modified or deleted. Examples in [05-records.md](05-records.md).
+never modified or deleted.
+
+An approve record:
+
+```toml
+action = "approve"
+signer = "example:jane"
+date = 2026-10-23T14:02:11Z
+module = "Example.Ising"
+commit = "9f8e7d…"
+toolchain = "v4.35.0"
+export = "sha256:…"
+boundary = "sha256:…"
+note = "Sign convention follows Example.Conventions, section 2."
+
+[deps]
+mathlib = "a1b2c3…"
+physlib = "d4e5f6…"
+
+[constants]
+3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b = {name = "Example.Ising.Hamiltonian", claim = "sha256:3b1f…"}
+0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b = {name = "Example.Ising.groundEnergy_le", claim = "sha256:77c0…", evidence = "sha256:5e6f…"}
+```
+
+A withdraw record:
+
+```toml
+action = "withdraw"
+signer = "example:jane"
+date = 2027-01-05T09:30:00Z
+refers_to = "sha256:9c0d…"
+constants = ["3f2b8c1e-5a7d-4e9f-8b6a-0c1d2e3f4a5b"]   # ids; optional: left out, all in the record
+note = "Hamiltonian missed the boundary term for periodic chains. See issue 42."
+```
 
 ## 3. Release manifest (output of `release`, JSON)
 
 ```json
 {
-  "library": "OpenPhysics",
+  "library": "Example",
   "tag": "2027.04",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
@@ -90,9 +123,9 @@ never modified or deleted. Examples in [05-records.md](05-records.md).
   "records": ["sha256:…", "sha256:…"],
   "kernel": { "checker": "leanchecker", "version": "v4.35.0", "passed": true },
   "theorems": {
-    "OpenPhysics.Ising.groundEnergy_le": { "status": "proven", "axioms": ["Classical.choice", "propext"] },
-    "OpenPhysics.Ising.gap_conjecture":  { "status": "open", "axioms": ["sorryAx"] },
-    "OpenPhysics.Ising.uses_postulate":  { "status": "proven", "axioms": ["OpenPhysics.Conventions.locality"] }
+    "Example.Ising.groundEnergy_le": { "status": "proven", "axioms": ["Classical.choice", "propext"] },
+    "Example.Ising.gap_conjecture":  { "status": "open", "axioms": ["sorryAx"] },
+    "Example.Ising.uses_postulate":  { "status": "proven", "axioms": ["Example.Conventions.locality"] }
   },
   "counts": { "proven": 2, "open": 1 }
 }
@@ -110,7 +143,7 @@ every record. Viewers display it; they never need another source. With
 
 ```json
 {
-  "library": "OpenPhysics",
+  "library": "Example",
   "commit": "9f8e7d…",
   "toolchain": "v4.35.0",
   "deps": { "mathlib": "a1b2c3…", "physlib": "d4e5f6…" },
@@ -120,10 +153,10 @@ every record. Viewers display it; they never need another source. With
   "standard_axioms": ["propext", "Classical.choice", "Quot.sound"],
   "declarations": [
     {
-      "name": "OpenPhysics.Ising.groundEnergy_le",
+      "name": "Example.Ising.groundEnergy_le",
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
       "parent": null,
-      "module": "OpenPhysics.Ising",
+      "module": "Example.Ising",
       "kind": "theorem",
       "role": "proved",
       "informal": "…",
@@ -133,25 +166,25 @@ every record. Viewers display it; they never need another source. With
       "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
       "signers": [],
       "history": [
-        { "record": "sha256:…", "action": "approve", "signer": "openreview:~Jane_Doe1", "date": "2026-10-23T14:02:11Z",
-          "name": "OpenPhysics.Ising.groundEnergy_le", "claim": "sha256:3b1f…", "note": null, "standing": "superseded" }
+        { "record": "sha256:…", "action": "approve", "signer": "example:jane", "date": "2026-10-23T14:02:11Z",
+          "name": "Example.Ising.groundEnergy_le", "claim": "sha256:3b1f…", "note": null, "standing": "superseded" }
       ],
       "blocked_by": [],
       "proof": { "status": "proven", "axioms": ["propext"], "unpermitted": [] },
       "evidence": "sha256:…",
-      "tagged_deps": ["OpenPhysics.Ising.Hamiltonian"],
+      "tagged_deps": ["Example.Ising.Hamiltonian"],
       "untagged_deps": [{ "name": "Finset.sum", "module": "Mathlib.Algebra.BigOperators.Group.Finset.Defs" }],
       "closure_size": 3412
     }
   ],
   "records": [
-    { "record": "sha256:…", "path": "records/….toml", "action": "approve", "signer": "openreview:~Jane_Doe1",
-      "date": "2026-10-23T14:02:11Z", "note": null, "module": "OpenPhysics.Ising", "commit": "1a2b3c…",
+    { "record": "sha256:…", "path": "records/….toml", "action": "approve", "signer": "example:jane",
+      "date": "2026-10-23T14:02:11Z", "note": null, "module": "Example.Ising", "commit": "1a2b3c…",
       "toolchain": "v4.35.0", "deps": { "mathlib": "a1b2c3…" }, "export": "sha256:…", "boundary": "sha256:…",
-      "constants": [{ "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b", "name": "OpenPhysics.Ising.groundEnergy_le",
+      "constants": [{ "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b", "name": "Example.Ising.groundEnergy_le",
                       "claim": "sha256:3b1f…", "evidence": null }] }
   ],
-  "untagged_in_library": [{ "name": "OpenPhysics.Ising.bond", "used_by": ["OpenPhysics.Ising.Hamiltonian"] }]
+  "untagged_in_library": [{ "name": "Example.Ising.bond", "used_by": ["Example.Ising.Hamiltonian"] }]
 }
 ```
 
@@ -187,19 +220,19 @@ stderr.
 
 ```json
 {
-  "library": "OpenPhysics",
+  "library": "Example",
   "from": { "record": "sha256:…", "commit": "1a2b3c…", "export": "sha256:…", "boundary": "sha256:…" },
   "to": { "record": null, "commit": "9f8e7d…", "export": "sha256:…", "boundary": "sha256:…" },
   "declarations": [
     {
       "id": "0b9c4e2a-7f13-4d5e-9a8b-6c7d8e9f0a1b",
-      "from": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
+      "from": { "name": "Example.Ising.groundEnergy_le", "module": "Example.Ising", "kind": "theorem",
                 "claim": "sha256:3b1f…", "informal": "…", "statement": { "pretty": […], "plain": […] } },
-      "to": { "name": "OpenPhysics.Ising.groundEnergy_le", "module": "OpenPhysics.Ising", "kind": "theorem",
+      "to": { "name": "Example.Ising.groundEnergy_le", "module": "Example.Ising", "kind": "theorem",
               "claim": "sha256:77c0…", "informal": "…", "statement": { "pretty": […], "plain": […] } },
       "changes": {
         "informal": false, "statement": false, "body": false,
-        "relies_on": { "added": [], "removed": [], "changed": ["OpenPhysics.Ising.Hamiltonian"] },
+        "relies_on": { "added": [], "removed": [], "changed": ["Example.Ising.Hamiltonian"] },
         "cut_moved": [], "untagged": []
       }
     }
@@ -227,7 +260,7 @@ unchanged`; then the old and the new informal text and statement where they diff
 ## 6. Piece graph (output of `challenge --graph`)
 
 The pieces the comparator challenges of the library's tagged theorems are cut from
-([04-architecture.md](04-architecture.md), "Challenges"), in the order their files hold them.
+([decisions.md](decisions.md), "Challenges"), in the order their files hold them.
 
 ```json
 {

@@ -1,7 +1,7 @@
 /-
-Canonical printing of exported terms (docs/design/03-trust-model.md, "The hash,
+Canonical printing of exported terms (trust-model.md, "The hash,
 precisely"). The Lean frontend hashes a type or a body as the SHA-256 of its
-printing (docs/design/04-architecture.md, "Beyond Lean").
+printing (docs/decisions.md, "Beyond Lean").
 
 Terms are printed from the parsed export with de Bruijn indices, constants by
 name (never by export index), universe parameters by position. Binder names,

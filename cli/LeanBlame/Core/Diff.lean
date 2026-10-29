@@ -1,5 +1,5 @@
 /-
-`leanblame diff --from RECORD [--to RECORD] [--json] [NAME|ID...]` (docs/design/14-schemas.md §5):
+`leanblame diff --from RECORD [--to RECORD] [--json] [NAME|ID...]` (docs/schemas.md §5):
 what changed between the export an approve record names and another approve record's, or the last
 `export`. `status` compares each declaration with its last live approval; `diff` compares two points
 the caller picks, with the same comparison (`Walk.compare`), and gives both readable versions. It

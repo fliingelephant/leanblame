@@ -4,7 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving
 -/
 /-
-The Lean frontend (docs/design/04-architecture.md, "Beyond Lean"): a parsed export served to the core as a
+The Lean frontend (docs/decisions.md, "Beyond Lean"): a parsed export served to the core as a
 `Core.Source`, the constants of an environment in memory served as the same facts (`declsIn`), and
 `backend`, what Lean contributes to the commands. `declOf` is adapted from comparator's
 `runForUsedConsts`, which ships in the Lean toolchain as `Lake/Check/Util.lean`; the licence text is
@@ -13,7 +13,7 @@ in `cli/LICENSES/Apache-2.0.txt`.
 The core keys constants by their printed name (`Lean.Name.toString`); `nameMap` maps those back and
 refuses an export in which two constants print the same. Per constant the core gets its kind label,
 role, number of universe parameters, the hashes of its canonical type and body with proofs erased
-(`Erase`, `Canon`; docs/design/03-trust-model.md, "The hash, precisely") and the dependencies the
+(`Erase`, `Canon`; trust-model.md, "The hash, precisely") and the dependencies the
 claim follows. All constants of one export are hashed in one `Meta` state, so that its caches serve
 every constant. That state sees the constants alone: the environment an export rebuilds has no
 environment extensions, an environment in memory is imported without them, and smart unfolding,
@@ -175,7 +175,7 @@ def kernelAccepts (path : System.FilePath) : IO Bool := do
   return (← child.wait) == 0
 
 /-- Lean as the core's backend. The standard axioms are the three every Lean library may rest on
-(docs/design/07). -/
+(docs/decisions.md, "Releases"). -/
 def backend : Core.Backend where
   kernelAccepts := kernelAccepts
   checker := "leanchecker"

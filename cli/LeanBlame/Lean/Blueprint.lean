@@ -1,5 +1,5 @@
 /-
-The blueprint parser of `export --boundary FILE` (docs/design/04-architecture.md, "Blueprints"):
+The blueprint parser of `export --boundary FILE` (docs/decisions.md, "Blueprints"):
 verso-blueprint's `blueprint-manifest.json`. Each statement entry of a blueprint node names its Lean
 declarations in `codeData` (the `canonical` of `externalDecls`, the `name` of
 `literateDeclarations.definedDefs` and `definedTheorems`); its text is the `raw` of the

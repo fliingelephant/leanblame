@@ -1,5 +1,5 @@
 /-
-`leanblame equiv [NAME...]` (docs/design/06-versioning.md, "`equiv`").
+`leanblame equiv [NAME...]` (trust-model.md, "`equiv`").
 
 Mechanical: no build, no tactics. For each tagged declaration X that is `outdated` with `untagged`
 as the only cause (the named ones, else all), compared with X's last live approval:
@@ -21,7 +21,7 @@ as the only cause (the named ones, else all), compared with X's last live approv
 What is left is for a human to read: equiv prints the root causes, with the old and new values of
 each changed definition that is not definitionally equal.
 
-The hashes come from the graphs `export` stored (docs/design/04-architecture.md, "Storage"), keyed by
+The hashes come from the graphs `export` stored (docs/decisions.md, "Storage"), keyed by
 printed name; the terms from the old and current exports.
 -/
 import LeanBlame.Core.Status
@@ -79,7 +79,7 @@ def runMeta (env : Kernel.Environment) (x : MetaM α) : IO α := do
     { env := .ofKernelEnv env }
   return a
 
-/-- `e` printed with notation (field notation too) off, as the sign server shows types (docs/design/06). -/
+/-- `e` printed with notation (field notation too) off. -/
 def pp (env : Kernel.Environment) (e : Expr) : IO String := do
   return toString (← runMeta env (PrettyPrinter.ppExpr e))
 

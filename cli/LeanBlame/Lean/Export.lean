@@ -1,5 +1,5 @@
 /-
-`leanblame export [--boundary FILE] [--lib NAME]...` (docs/design/04-architecture.md).
+`leanblame export [--boundary FILE] [--lib NAME]...` (README.md, Commands).
 
 Builds the libraries with `lake build`, imports their modules, and makes the boundary list: the
 declarations tagged `@[trusted "id"]` (own and imported), or named by the blueprint
@@ -7,7 +7,7 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 `module`, `kind`, `role` and the printed statement. Exports the library's constants and the
 boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
 object store, with their graph: the export hashed through the backend
-(docs/design/04-architecture.md, "Storage"). Makes the piece graph the challenges of the tagged
+(docs/decisions.md, "Storage"). Makes the piece graph the challenges of the tagged
 theorems are cut from (`Pieces`). Then points `.leanblame/current` at them, with
 the commit, toolchain and dependencies they were made from. Prints the two hashes.
 
@@ -253,7 +253,7 @@ def withStatements (env : Environment) (declarations : Array (Name × BoundaryDe
   let printed ← Statements.print env (declarations.map (·.1))
   return declarations.zipWith (fun (n, d) st => (n, { d with statement := st })) printed
 
-/-- Whether a user could tag `n`, that is, Lean did not generate it (docs/design/03): not a compiler
+/-- Whether a user could tag `n`, that is, Lean did not generate it (trust-model.md): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
 reserved name, nor anything Lean's own `isAutoDeclOrPrivate_Internal` counts as generated
 (`T.brecOn.go`, `T.ctorIdx`, …). Constructors are tagged with their type. -/
@@ -305,7 +305,7 @@ import (`main` allows initializers). -/
 def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
   let libraries ← libraries (← lakePackage root) libsGiven
   let libs := libraries.map (·.name.toString (escape := false))
-  -- docs/design/04: build using the mathlib cache, when `lake-manifest.json` names mathlib.
+  -- Build using the mathlib cache, when `lake-manifest.json` names mathlib.
   if (← Lake.Manifest.load? (root / "lake-manifest.json")).any (·.packages.any (·.name == `mathlib)) then
     IO.eprintln "leanblame: lake exe cache get"
     runToStderr "lake" #["exe", "cache", "get"] root "`lake exe cache get`"
