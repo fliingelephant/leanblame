@@ -260,7 +260,7 @@ unchanged`; then the old and the new informal text and statement where they diff
 
 ## 6. Piece graph (output of `challenge --graph`)
 
-The pieces the comparator challenges of the library's tagged theorems are cut from
+The pieces the comparator challenges of the library's tagged declarations are cut from
 ([decisions.md](decisions.md), "Challenges"), in the order their files hold them.
 
 ```json
@@ -280,11 +280,13 @@ The pieces the comparator challenges of the library's tagged theorems are cut fr
 | `file` | `lakefile.toml`, `lean-toolchain`, `ChallengeDeps.lean` or `Challenge.lean` |
 | `text` | the piece's text in that file |
 | `needs` | the pieces it needs, by index |
-| `theorem` | in `Challenge.lean`: the tagged theorem it states; in `ChallengeDeps.lean`: the tagged theorem it declares with its proof; else `null` |
+| `theorem` | in `Challenge.lean`: the tagged theorem it states; in `ChallengeDeps.lean`: the tagged declaration it declares (a theorem with its proof); else `null` |
 | `problem` | why a challenge that holds it cannot be made, or `null` |
 
-The challenge of theorems T: start from the `Challenge.lean` pieces whose `theorem` is in T, add the
-pieces they need, then the pieces those need, until nothing is added. It cannot be made when a piece
-it holds has a `problem`, or a `ChallengeDeps.lean` piece it holds has its `theorem` in T (the other
-theorems need that one's proof). Otherwise each file is the text of its pieces, in index order.
+The challenge of tagged declarations D: start from the lakefile and toolchain pieces, the
+`Challenge.lean` pieces whose `theorem` is in D, and, for each other declaration in D, the
+`ChallengeDeps.lean` piece whose `theorem` it is; add the pieces they need, then the pieces those
+need, until nothing is added. It cannot be made when a piece it holds has a `problem`, or a
+`ChallengeDeps.lean` piece it holds has its `theorem` among the theorems of D that have a statement
+(the others need that one's proof). Otherwise each file is the text of its pieces, in index order.
 

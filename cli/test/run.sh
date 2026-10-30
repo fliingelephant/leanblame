@@ -217,7 +217,7 @@ PY
 ok "status --json has the docs/schemas.md fields and nothing on stderr; members' ids come from their structure's"
 
 echo "== challenge: what a comparator checks a solution against"
-must_fail "a challenge states theorems: name at least one" -- "$lb" challenge --out "$work-base"
+must_fail "a challenge needs tagged declarations: name at least one" -- "$lb" challenge --out "$work-base"
 run challenge Sample.energy_even "$(id_of Sample.second_site)" --out "$work-challenge"
 python3 - "$work-challenge" <<'PY' || fail "challenge: not the commands the theorems need"
 import sys
@@ -278,9 +278,12 @@ run challenge --check "$work-challenge"
 [[ "$out" == "challenge $work-challenge: the 7 tagged declarations it holds mean what the library's do, 1 of them by definitional equality" ]] \
   || fail "check: $out"
 ok "a helper written differently, Nat.add n n for n + n, has another claim but passes: the kernel finds it definitionally equal"
-must_fail "Sample.energy (def) is not a theorem: a challenge states theorems" -- "$lb" challenge Sample.energy --out "$work-challenge-x"
+run challenge Sample.energy --out "$work-challenge-x"
+grep -q "^def energy" "$work-challenge-x/ChallengeDeps.lean" || fail "challenge of a definition: ChallengeDeps.lean does not declare it"
+grep -q "theorem" "$work-challenge-x/Challenge.lean" && fail "challenge of a definition: Challenge.lean states a theorem"
+(cd "$work-challenge-x" && lake build) >"$logs/challenge-x.log" 2>&1 || fail "Lake does not build the challenge of a definition: $(cat "$logs/challenge-x.log")"
 must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge Sample.energy_even --out "$work-challenge"
-ok "challenge refuses a declaration that is not a theorem, and a directory that exists"
+ok "challenge of a definition: ChallengeDeps.lean holds it and what it needs, Challenge.lean states nothing; a directory that exists is refused"
 python3 - <<'PY'
 basic = open("Sample/Basic.lean").read()
 open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- One less, or zero. -/\ndef down : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n"

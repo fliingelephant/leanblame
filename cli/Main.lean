@@ -35,9 +35,10 @@ commands:
                                          is definitionally equal to what was approved
   sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
   sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
-  challenge THEOREM|ID... --out DIR      write the comparator challenge of the theorems into the
-                                         new directory DIR: Challenge.lean (the theorems, proofs
-                                         sorry), ChallengeDeps.lean (what they need),
+  challenge NAME|ID... --out DIR         write the comparator challenge of the tagged declarations
+                                         into the new directory DIR: Challenge.lean (the theorems,
+                                         proofs sorry), ChallengeDeps.lean (the others and what
+                                         all of them need),
                                          lakefile.toml, lean-toolchain
   challenge --graph                      print the piece graph challenges are cut from (JSON)
   challenge --check DIR                  build the challenge in DIR against the library and
@@ -148,7 +149,7 @@ def cmdChallenge (args : List String) : IO UInt32 := do
     unless a.positional.isEmpty do fail "challenge --graph takes no names"
     IO.print (jsonText (← Challenge.graph root))
     return 0
-  | _, _, _ => fail "usage: leanblame challenge THEOREM|ID... --out DIR, leanblame challenge --graph, or leanblame challenge --check DIR"
+  | _, _, _ => fail "usage: leanblame challenge NAME|ID... --out DIR, leanblame challenge --graph, or leanblame challenge --check DIR"
 
 def cmdEquiv (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)

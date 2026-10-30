@@ -1,10 +1,11 @@
 /-
-`leanblame challenge THEOREM|ID... --out DIR`, `leanblame challenge --graph` and
+`leanblame challenge NAME|ID... --out DIR`, `leanblame challenge --graph` and
 `leanblame challenge --check DIR` (docs/decisions.md, "Challenges").
 
 A challenge is what a comparator checks a solution against, cut from the piece graph of the last
 export (`Pieces.Graph.cut`): `Challenge.lean` states the named tagged theorems, proofs `sorry`, among
-the scope commands of their modules; `ChallengeDeps.lean` holds what they need, and imports what that
+the scope commands of their modules; `ChallengeDeps.lean` holds the other named tagged declarations
+and what all of them need, and imports what that
 needs from outside the library; `lakefile.toml` has what the library's lakefile requires;
 `lean-toolchain` the library's toolchain. What stops a challenge is in the graph: it stops
 `challenge`, not `export`. `--graph` prints the graph, for a service that cuts challenges itself.
@@ -32,18 +33,17 @@ namespace LeanBlame.Challenge
 
 open Lean
 
-/-- Write the challenge of the tagged theorems `names` (names or ids) into the new directory `out`. -/
+/-- Write the challenge of the tagged declarations `names` (names or ids) into the new directory `out`. -/
 def write (root out : System.FilePath) (names : Array String) : IO Unit := do
-  if names.isEmpty then fail "a challenge states theorems: name at least one"
+  if names.isEmpty then fail "a challenge needs tagged declarations: name at least one"
   if ← out.pathExists then fail s!"{out} exists; a challenge goes into a new directory"
   let cur ← Store.readCurrent root
   let boundary ← Status.loadBoundary root cur.boundary
-  let theorems ← names.mapM fun x => do
+  let chosen ← names.mapM fun x => do
     let some d := boundary.declarations.find? fun d => d.name == x || d.id == x
       | fail s!"{x} is not on the boundary list of the last export"
-    unless d.kind == "theorem" do fail s!"{d.name} ({d.kind}) is not a theorem: a challenge states theorems"
     return d.name
-  match (← Pieces.read root cur.pieces).cut (dedup theorems) with
+  match (← Pieces.read root cur.pieces).cut (dedup chosen) with
   | .error problems =>
     fail ("this challenge cannot be made:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
   | .ok files =>

@@ -1,6 +1,6 @@
 /-
 Challenge pieces (docs/decisions.md, "Challenges"): the piece graph that the comparator
-challenges of the library's tagged theorems are cut from, taken from the library's source as
+challenges of the library's tagged declarations are cut from, taken from the library's source as
 written; nothing is elaborated again.
 
 A piece is text in one file of a challenge; its links are the pieces it needs. Most pieces are one
@@ -15,9 +15,11 @@ Every command needs the `namespace` and `section` around it, with their `end`s, 
 open or close a scope needs the scope commands before it. An `attribute` command comes with the
 declaration it names, or, for a constant from outside the library, with its module. A tagged
 theorem's statement is a piece of `Challenge.lean`: its command with the proof replaced by `sorry`,
-among copies of the scope commands it needs; it needs what its statement uses. The challenge of
-chosen theorems is their statements, what those need, what that needs, and so on (`Graph.cut`): it
-holds what they need and nothing else, and what several need once.
+among copies of the scope commands it needs; it needs what its statement uses. Another tagged
+declaration is the piece of `ChallengeDeps.lean` that declares it. The challenge of chosen
+declarations is their statements (a theorem's) or their pieces (any other's), what those need, what
+that needs, and so on (`Graph.cut`): it holds what they need and nothing else, and what several need
+once.
 
 The pieces of a module sit in a `section` of their own, which first sets the Lean options Lake builds
 the module with, so that what one module opens and sets ends with it; an `end` closes each scope the
@@ -55,8 +57,8 @@ def challengeFile : String := "Challenge.lean"
 def files : Array String := #[lakefileFile, toolchainFile, depsFile, challengeFile]
 
 /-- A piece of the piece graph (docs/schemas.md §6): its text in one file of a challenge;
-the pieces it needs, by index; the tagged theorem it states (in `Challenge.lean`) or declares with
-its proof (in `ChallengeDeps.lean`); and why a challenge that holds it cannot be made. -/
+the pieces it needs, by index; the tagged theorem it states (in `Challenge.lean`) or the tagged
+declaration it declares (in `ChallengeDeps.lean`); and why a challenge that holds it cannot be made. -/
 structure Piece where
   file : String
   text : String
@@ -65,7 +67,7 @@ structure Piece where
   problem : Option String
   deriving Inhabited
 
-/-- The pieces the challenges of the library's tagged theorems are cut from, in the order their
+/-- The pieces the challenges of the library's tagged declarations are cut from, in the order their
 files hold them. -/
 structure Graph where
   pieces : Array Piece
@@ -98,16 +100,20 @@ def read (root : System.FilePath) (hash : String) : IO Graph := do
   | .ok g => return g
   | .error e => fail s!"{p}: {e}"
 
-/-- The challenge of the tagged theorems `names` (docs/schemas.md §6), each file with its
-text: their statements, the pieces those need, the pieces these need, and so on, each file the text
-of its pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each named
-theorem whose proof its `ChallengeDeps.lean` holds. -/
+/-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
+text: the lakefile, the toolchain, a theorem's statement, any other declaration's piece, the pieces
+those need, the pieces these need, and so on, each file the text of its pieces in order. Or why it cannot be made: the problems of
+the pieces it holds, and each named theorem whose proof its `ChallengeDeps.lean` holds. -/
 def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array (String × String)) := do
-  let mut todo := #[]
+  -- Every challenge has the lakefile and the toolchain.
+  let mut todo := (Array.range g.pieces.size).filter fun i => [lakefileFile, toolchainFile].contains g.pieces[i]!.file
+  let mut stated := #[]
   for n in names do
     match g.pieces.findIdx? fun p => p.file == challengeFile && p.tagged == some n with
-    | some i => todo := todo.push i
-    | none => throw #[s!"{n} has no statement in the piece graph"]
+    | some i => todo := todo.push i; stated := stated.push n
+    | none => match g.pieces.findIdx? fun p => p.file == depsFile && p.tagged == some n with
+      | some i => todo := todo.push i
+      | none => throw #[s!"{n} has no piece in the piece graph"]
   let mut held : Std.HashSet Nat := {}
   while h : todo.size > 0 do
     let i := todo[todo.size - 1]
@@ -118,7 +124,7 @@ def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array 
   let order := held.toArray.qsort (· < ·)
   let problems := dedup <| order.filterMap (g.pieces[·]!.problem) ++ order.filterMap fun i =>
     let p := g.pieces[i]!
-    if p.file != depsFile then none else (p.tagged.filter names.contains).map
+    if p.file != depsFile then none else (p.tagged.filter stated.contains).map
       (s!"{·}: the other theorems need its proof, so the challenge cannot state it")
   unless problems.isEmpty do throw problems
   return files.map fun f => (f, String.join (order.filterMap fun i =>
@@ -701,12 +707,13 @@ def Key.file : Key → String
   | .head d _ | .cmd d _ _ | .close d _ _ | .tail d _ => if d then depsFile else challengeFile
   | .outside _ | .declare _ | .attr .. | .instances _ => depsFile
 
-/-- The piece graph of the tagged theorems `theorems` of the library (`library`, in import order;
-sources on `srcPath`; Lean options from `options`): every piece their statements need, what those
-need, and so on. A challenge's lakefile requires what the library's requires (`required`); its
-toolchain is the library's (`toolchain`). -/
+/-- The piece graph of the tagged theorems `theorems` and the other tagged declarations `others` of
+the library (`library`, in import order; sources on `srcPath`; Lean options from `options`): every
+piece the theorems' statements and the others' commands need, what those need, and so on. A
+challenge's lakefile requires what the library's requires (`required`); its toolchain is the
+library's (`toolchain`). -/
 def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (options : Name → Options)
-    (theorems : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
+    (theorems others : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
   let libSet : NameSet := library.foldl (·.insert ·) {}
   let moduleOf (n : Name) : Option Name := do
     let i ← env.getModuleIdxFor? n
@@ -873,6 +880,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   let mut attrsIn : Std.HashMap Name (Array Key) := {}
   let mut declared : NameSet := {}
   let mut todo : Array Key := theorems.map Key.statement
+  for n in others do
+    if let some (.ok k) ← ownerOf n then todo := todo.push k
   while h : todo.size > 0 do
     let k := todo[todo.size - 1]
     todo := todo.pop
@@ -959,7 +968,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     let es ← changes r r.cmds[i]! renamed
     editsRef.modify (·.insert (m, i) es)
     return es
-  let theoremSet : NameSet := theorems.foldl (·.insert ·) {}
+  let taggedSet : NameSet := (theorems ++ others).foldl (·.insert ·) {}
   let mut pieces := #[]
   for k in order do
     let (needs, problems) := visited.getD k (#[], #[])
@@ -996,7 +1005,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         pure (((statementOf? r r.cmds[i]! (← editsOf m i)).map ("\n" ++ · ++ "\n")).getD "")
     let tagged ← match k with
       | .statement t => pure (some t.toString)
-      | .cmd true m i => pure (((← readOk m).cmds[i]!.declares.find? theoremSet.contains).map toString)
+      | .cmd true m i => pure (((← readOk m).cmds[i]!.declares.find? taggedSet.contains).map toString)
       | _ => pure none
     pieces := pieces.push { file := k.file, text, needs, tagged
                             problem := if problems.isEmpty then none else some ("; ".intercalate (dedup problems).toList) }

@@ -76,8 +76,9 @@ A comparator challenge must not depend on the library it comes from: it carries
 what its theorems need, and nothing else. `export` finds that in the one
 environment it imports, and takes it from the library's source as a piece
 graph: a piece is text in a file of a challenge, its links are the pieces it
-needs. Nothing is elaborated again. The challenge of chosen theorems is their
-statements, what those need, what that needs, and so on: a cut of the graph.
+needs. Nothing is elaborated again. The challenge of chosen tagged declarations is
+the theorems' statements and the other declarations' commands, what those need,
+what that needs, and so on: a cut of the graph.
 What several theorems need is there once.
 
 - A piece is mostly a command, from its first token (the docstring) to its end,
@@ -121,7 +122,7 @@ What several theorems need is there once.
   challenge file cannot set; a package the library requires by path), and a cut
   that holds such a piece cannot be made. A challenge cannot state a theorem
   whose proof its other theorems need.
-- `challenge X... --out DIR` writes the cut of the named theorems.
+- `challenge X... --out DIR` writes the cut of the named tagged declarations.
   `lakefile.toml` requires what the library's lakefile requires, by git
   (LeanBlame left out), and sets no Lean options: each module's section does.
   `lean-toolchain` is the library's. `ChallengeDeps.lean` holds the imports, the

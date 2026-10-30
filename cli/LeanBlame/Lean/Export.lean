@@ -372,7 +372,8 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     { fileName := "", fileMap := default } { env }
   IO.eprintln "leanblame: piece graph"
   let theorems := declarations.filterMap fun (n, d) => if d.kind == "theorem" then some n else none
-  let graph ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) theorems requires toolchain
+  let others := declarations.filterMap fun (n, d) => if d.kind == "theorem" then none else some n
+  let graph ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) theorems others requires toolchain
   let pieces ← Store.putString root .pieces (jsonText graph)
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
