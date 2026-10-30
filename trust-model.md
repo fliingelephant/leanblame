@@ -320,13 +320,15 @@ needs a human to read.
    between them and X are **duplicated** under `Old.`, with references renamed.
    Constants used only in proofs are not hashed; they are shared when the new
    export states them the same way.
-3. State the goal by kind. Def: `Old.X = X`, stated at X's type, so the kernel
+3. State the goal by kind, as `∀ P, P old → P new` (whatever holds for the old
+   holds for the new), proved by `fun P h => h`; it names no constant, so every
+   export can state it. Def: `Old.X` and `X`, stated at X's type, so the kernel
    accepts it only if the types are definitionally equal too. Theorem:
-   `type(Old.X) ↔ type(X)`. A structure or another inductive: no goal; a
+   `type(Old.X)` and `type(X)`. A structure or another inductive: no goal; a
    human reads.
 4. The kernel decides, mechanically: no build, no tactics. At the frontier of
-   change, each changed definition C gets `Old.C = C`, and the kernel is asked
-   whether the two are definitionally equal: one kernel call per changed
+   change, each changed definition C gets its goal, and the kernel is asked
+   whether `Old.C` and `C` are definitionally equal: one kernel call per changed
    definition. Everything above follows by congruence; X's own goal is one more
    call. The accepted proofs go to the object store as an export, which
    `leanchecker` replays. Not definitionally equal: a human reads, shown the
@@ -340,11 +342,10 @@ and the challenge, built against it, as the new one; it stores no proof.
 
 Mechanism: `equiv` reads the old and the new export. It adds the duplicated
 constants to the new export's environment, the kernel checking each, then the
-goals with their proofs (`Eq.refl`; for `↔`, the identity both ways). The
-accepted theorems and what they use are written as an export, which
-`leanchecker --from-export` replays, as `release` replays the library: the
-evidence is a file anyone can check again. Nothing is built or elaborated and
-no `.olean` is written.
+goals with their proofs (`fun P h => h`). The accepted theorems and what they
+use are written as an export, which `leanchecker --from-export` replays, as
+`release` replays the library: the evidence is a file anyone can check again.
+Nothing is built or elaborated and no `.olean` is written.
 
 Never copy old *source* into the new build. It would elaborate against the new
 mathlib, make `old = new` true by `rfl`, and prove nothing.

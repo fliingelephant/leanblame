@@ -10,9 +10,9 @@ as the only cause (the named ones, else all), compared with X's last live approv
    that the current export lacks or states differently. Tagged constants are always shared.
 2. Goals. For X and for each changed definition C still present, one kernel call decides whether
    old and new are definitionally equal:
-   `theorem LeanBlame.Equiv.C : Old.C = C := Eq.refl C`, or for a theorem X
-   `<old statement> ↔ <new statement>`, proved by the identity both ways. Steps 1 and 2 are
-   `prove`, which `challenge --check` runs too, with the library as the old version.
+   `theorem LeanBlame.Equiv.C : ∀ P, P Old.C → P C := fun P h => h`, or for a theorem X the
+   same with its old and new statements. Steps 1 and 2 are `prove`, which `challenge --check`
+   runs too, with the library as the old version.
 3. The accepted theorems, with what they use, go to the object store as the solution export, which
    `leanchecker` replays (the kernel check `release` runs): a file anyone can check again.
 4. For each X whose own theorem was accepted, an evidence file (`Store.evidencePath`) names the
@@ -83,25 +83,27 @@ def runMeta (env : Kernel.Environment) (x : MetaM α) : IO α := do
 def pp (env : Kernel.Environment) (e : Expr) : IO String := do
   return toString (← runMeta env (PrettyPrinter.ppExpr e))
 
-/-- The statement that old and current `c` mean the same, with its proof: `Old.c = c` for a safe
-definition with the same number of universe parameters, `<old type> ↔ <type>` for a theorem; or why
-there is none. The kernel accepts it exactly when the two are definitionally equal. -/
-def goal (env : Kernel.Environment) (dup : NameSet) (toNew : Name → Name) (c : Name) (o n : ConstantInfo) :
-    IO (Except String (Expr × Expr)) := do
+/-- `∀ P : t → Prop, P old → P new`, proved by `fun P h => h`: the kernel accepts it exactly when
+`old` and `new`, of type `t`, are definitionally equal. It names no constant, so every environment
+can state it. -/
+def interchangeable (t old new : Expr) : Expr × Expr :=
+  let motive := Expr.forallE `x t (.sort 0) .default
+  (.forallE `P motive (.forallE `h (.app (.bvar 0) old) (.app (.bvar 1) new) .default) .default,
+   .lam `P motive (.lam `h (.app (.bvar 0) old) (.bvar 0) .default) .default)
+
+/-- The statement that old and current `c` mean the same, with its proof (`interchangeable`): of
+`Old.c` and `c`, at `c`'s type, for a safe definition with the same number of universe parameters;
+of the old and current types for a theorem; or why there is none. -/
+def goal (dup : NameSet) (toNew : Name → Name) (c : Name) (o n : ConstantInfo) : Except String (Expr × Expr) := do
   let us := n.levelParams.map Level.param
-  unless o.levelParams.length == us.length do return .error "its universe parameters changed"
+  unless o.levelParams.length == us.length do throw "its universe parameters changed"
   match o, n with
   | .defnInfo ov, .defnInfo nv =>
-    unless ov.safety == .safe && nv.safety == .safe do return .error "it is not a safe definition"
-    let u ← runMeta env (Meta.getLevel n.type)
-    let new := Expr.const (toNew c) us
-    return .ok (mkApp3 (.const ``Eq [u]) n.type (.const (oldName c) us) new, mkApp2 (.const ``Eq.refl [u]) n.type new)
+    unless ov.safety == .safe && nv.safety == .safe do throw "it is not a safe definition"
+    return interchangeable n.type (.const (oldName c) us) (.const (toNew c) us)
   | .thmInfo _, .thmInfo _ =>
-    let a := (renameExpr dup toNew o.type).instantiateLevelParams o.levelParams us
-    let b := n.type
-    return .ok (mkIff a b,
-                mkApp4 (.const ``Iff.intro []) a b (.lam `h a (.bvar 0) .default) (.lam `h b (.bvar 0) .default))
-  | _, _ => return .error s!"no goal for a changed {Source.kindOf n}"
+    return interchangeable (.sort 0) ((renameExpr dup toNew o.type).instantiateLevelParams o.levelParams us) n.type
+  | _, _ => throw s!"no goal for a changed {Source.kindOf n}"
 
 /-- Two versions of the same declarations, for the kernel to compare: each one's graph, and its
 constants by the names the old graph gives them (`none`: not at hand). `toNew` names a constant as
@@ -200,7 +202,7 @@ def prove (base : Kernel.Environment) (sides : Sides) (targets : Array Name) : I
       let failed := if rootCause then #[c] else below
       match oldConst? c, newConst? c, old.nodes[c.toString]?, new.nodes[c.toString]? with
       | some o, some n, some oldNode, some newNode =>
-        match ← goal env dup toNew c o n with
+        match goal dup toNew c o n with
         | .error why =>
           if rootCause then notes := notes.push (s!"{c}: {why}", #[])
           taint := taint.insert c failed
