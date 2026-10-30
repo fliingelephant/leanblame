@@ -411,7 +411,7 @@ data is made again.
    the mathlib cache, Lake's output. A withdraw that breaks the rules, an
    `exclude` entry that names no approve record, and a record in two
    directories stop every command but `validate`, which lists them. `export`
-   builds exactly the libraries it exports.
+   builds exactly the libraries it is run on.
 3. **Records name declarations by id**, so an approval follows a rename: the declaration is
    `outdated`, not `unsigned`. A new id is a new declaration: the old approvals
    stay with the old id.

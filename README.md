@@ -52,7 +52,7 @@ without an alias stops the build at the tag.
 
 ```
 lake exe leanblame id                          # write an id into each @[trusted]
-lake exe leanblame export                      # build and export the library
+lake exe leanblame export                      # build and export the tagged declarations
 lake exe leanblame sign --signer local:alice   # one approve record per module
 lake exe leanblame status                      # every tagged declaration: valid
 ```
@@ -74,7 +74,7 @@ Run in the library root as `lake exe leanblame <command>`.
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
-| `export [--boundary FILE] [--lib NAME]` | Build, export the library, write the list of tagged declarations. |
+| `export [--boundary FILE] [--lib NAME]` | Build, write the list of tagged declarations, export them and what they use. |
 | `id [--lib NAME]` | Write a random id into each tag of the library that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `diff --from RECORD [--to RECORD] [--json] [NAME\|ID...]` | What changed between two sign-offs, or a sign-off and now, as the kernel sees it; with the old and new text. |

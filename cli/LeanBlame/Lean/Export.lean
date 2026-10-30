@@ -4,9 +4,9 @@
 Builds the libraries with `lake build`, imports their modules, and makes the boundary list: the
 declarations tagged `@[trusted "id"]` (own and imported), or named by the blueprint
 `--boundary FILE`, plus the members of tagged structures and inductives, with `id`, `parent`,
-`module`, `kind`, `role` and the printed statement. Exports the library's constants and the
-boundary list with the toolchain's `leanexport` writer (in-process), and writes both files into the
-object store, with their graph: the export hashed through the backend
+`module`, `kind`, `role` and the printed statement. Exports the boundary list's declarations and
+what they use, proofs included, with the toolchain's `leanexport` writer (in-process), and writes
+both files into the object store, with their graph: the export hashed through the backend
 (docs/decisions.md, "Storage"). Makes the piece graph the challenges of the tagged
 theorems are cut from (`Pieces`). Then points `.leanblame/current` at them, with
 the commit, toolchain and dependencies they were made from. Prints the two hashes.
@@ -356,8 +356,6 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   IO.eprintln "leanblame: printing statements"
   let declarations ← withStatements env declarations
   let boundaryList : BoundaryList := { library := ", ".intercalate libs.toList, declarations := declarations.map (·.2) }
-  -- The constants to export: the library's own non-internal constants and the boundary list.
-  let mut roots : Array Name := #[]
   let mut own : Array (Name × ConstantInfo) := #[]
   for m in mods do
     let some idx := env.getModuleIdx? m | fail s!"module {m} was not imported"
@@ -367,7 +365,6 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
       unless env.getModuleIdxFor? n == some idx do continue
       let some ci := env.constants.map₁[n]? | fail s!"{n} of module {m} is not in the environment"
       own := own.push (n, ci)
-      unless n.isInternal do roots := roots.push n
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
@@ -377,8 +374,8 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let pieces ← Store.putString root .pieces (jsonText graph)
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
-    roots := roots.push n
-  roots := (roots.qsort (fun a b => a.cmp b == .lt)).eraseReps
+  -- The constants to export: the boundary list's declarations; the exporter adds what they use.
+  let roots := (declarations.map (·.1)).qsort (fun a b => a.cmp b == .lt)
   -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
   let tmp ← Store.tmpPath root "export"
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"

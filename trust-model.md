@@ -344,7 +344,7 @@ Mechanism: `equiv` reads the old and the new export. It adds the duplicated
 constants to the new export's environment, the kernel checking each, then the
 goals with their proofs (`fun P h => h`). The accepted theorems and what they
 use are written as an export, which `leanchecker --from-export` replays, as
-`release` replays the library: the evidence is a file anyone can check again.
+`release` replays the export: the evidence is a file anyone can check again.
 Nothing is built or elaborated and no `.olean` is written.
 
 Never copy old *source* into the new build. It would elaborate against the new
