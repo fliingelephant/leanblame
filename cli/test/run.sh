@@ -281,6 +281,7 @@ ok "a helper written differently, Nat.add n n for n + n, has another claim but p
 run challenge Sample.energy --out "$work-challenge-x"
 grep -q "^def energy" "$work-challenge-x/ChallengeDeps.lean" || fail "challenge of a definition: ChallengeDeps.lean does not declare it"
 grep -q "theorem" "$work-challenge-x/Challenge.lean" && fail "challenge of a definition: Challenge.lean states a theorem"
+[[ -s "$work-challenge-x/lakefile.toml" && -s "$work-challenge-x/lean-toolchain" ]] || fail "challenge of a definition: no lakefile or toolchain"
 (cd "$work-challenge-x" && lake build) >"$logs/challenge-x.log" 2>&1 || fail "Lake does not build the challenge of a definition: $(cat "$logs/challenge-x.log")"
 must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge Sample.energy_even --out "$work-challenge"
 ok "challenge of a definition: ChallengeDeps.lean holds it and what it needs, Challenge.lean states nothing; a directory that exists is refused"

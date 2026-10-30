@@ -879,7 +879,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   let mut attrsOn : Std.HashMap Name (Array Key) := {}
   let mut attrsIn : Std.HashMap Name (Array Key) := {}
   let mut declared : NameSet := {}
-  let mut todo : Array Key := theorems.map Key.statement
+  -- Every challenge has the lakefile and the toolchain.
+  let mut todo : Array Key := #[.lakefile, .toolchain] ++ theorems.map Key.statement
   for n in others do
     if let some (.ok k) ← ownerOf n then todo := todo.push k
   while h : todo.size > 0 do
