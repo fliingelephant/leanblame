@@ -40,6 +40,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 
 | Field | Meaning |
 |-------|---------|
+| `library` | the name of the library's Lake package |
 | `name` | fully qualified constant name, after structure expansion |
 | `id` | stays when the declaration is renamed or edited; never hashed. Its own: the UUID in its tag, `@[trusted "id"]` or `attribute [trusted "id"] Name`, or, from a blueprint, the label of its first declaration. Else the parent's id, `/`, and its name under the parent: `3f2b…/x` for the field `x` of a tagged structure, `def:point/norm` for another declaration of the label `def:point`. A tag without an id stops `export`. No two declarations share an id |
 | `parent` | the declaration whose id stands for this one: the first declaration of its blueprint label, else the tagged structure or inductive it is a constructor or projection of; a parent without an id of its own is passed over for its own parent; else `null` |

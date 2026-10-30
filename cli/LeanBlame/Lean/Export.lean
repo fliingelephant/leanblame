@@ -289,7 +289,8 @@ def lakeEnvPaths (root : System.FilePath) : IO (System.FilePath × SearchPath ×
 
 /-- A built library with its modules imported. -/
 structure Loaded where
-  libs : Array String
+  /-- The name of the Lake package. -/
+  package : String
   mods : Array Name
   /-- The Lean options of each module, as Lake builds it. -/
   options : NameMap Options
@@ -303,7 +304,8 @@ structure Loaded where
 their modules, running their initializers and loading the environment extensions of everything they
 import (`main` allows initializers). -/
 def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
-  let libraries ← libraries (← lakePackage root) libsGiven
+  let pkg ← lakePackage root
+  let libraries ← libraries pkg libsGiven
   let libs := libraries.map (·.name.toString (escape := false))
   -- Build using the mathlib cache, when `lake-manifest.json` names mathlib.
   if (← Lake.Manifest.load? (root / "lake-manifest.json")).any (·.packages.any (·.name == `mathlib)) then
@@ -328,7 +330,7 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
     if let some (_, o) := libOptions.find? (·.1.isLocalModule m) then
       mods := mods.push m
       options := options.insert m o
-  return { libs, mods, options, deps, requires, env, srcPath }
+  return { package := pkg.name.toString (escape := false), mods, options, deps, requires, env, srcPath }
 
 structure Result where
   exportHash : String
@@ -342,7 +344,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     (libsGiven : Array String) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
-  let { libs, mods, options, deps, requires, env, srcPath } ← load root libsGiven
+  let { package, mods, options, deps, requires, env, srcPath } ← load root libsGiven
   -- Checked after the build, which may update `lake-manifest.json`.
   let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
@@ -355,7 +357,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     fail ("export failed:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
   IO.eprintln "leanblame: printing statements"
   let declarations ← withStatements env declarations
-  let boundaryList : BoundaryList := { library := ", ".intercalate libs.toList, declarations := declarations.map (·.2) }
+  let boundaryList : BoundaryList := { library := package, declarations := declarations.map (·.2) }
   let mut own : Array (Name × ConstantInfo) := #[]
   for m in mods do
     let some idx := env.getModuleIdx? m | fail s!"module {m} was not imported"
