@@ -11,7 +11,7 @@ as the only cause (the named ones, else all), compared with X's last live approv
 2. Goals. For X and for each changed definition C still present, one kernel call decides whether
    old and new are definitionally equal:
    `theorem LeanBlame.Equiv.C : ∀ P, P Old.C → P C := fun P h => h`, or for a theorem X the
-   same with its old and new statements. Steps 1 and 2 are `prove`, which `challenge --check`
+   same with its old and new statements. Steps 1 and 2 are `prove`, which `challenge check`
    runs too, with the library as the old version.
 3. The accepted theorems, with what they use, go to the object store as the solution export, which
    `leanchecker` replays (the kernel check `release` runs): a file anyone can check again.

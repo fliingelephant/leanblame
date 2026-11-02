@@ -134,9 +134,9 @@ what that needs, and so on. What several declarations need is there once.
   declared namespaces, then each module's part, in import order.
   `Challenge.lean` holds the named theorems' statements, proofs `sorry`, with
   `import ChallengeDeps` and each module's scope copies; it is empty when no
-  theorem is named. `challenge --graph` prints the graph
+  theorem is named. `challenge graph` prints the graph
   ([schemas.md](schemas.md) §6), so that a service cuts challenges itself.
-- `challenge --check DIR` builds the challenge with `lean` against the
+- `challenge check DIR` builds the challenge with `lean` against the
   library's build, imports it and hashes its own declarations as `export`
   hashes the library, in memory; what it imports from outside the library is
   the library's build, so those declarations keep the last export's hashes.

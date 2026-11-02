@@ -38,13 +38,13 @@ commands:
   withdraw RECORD --signer local:NAME [--note TEXT] [NAME|ID...]
                                          withdraw your approve record, or only the declarations
                                          named
-  challenge NAME|ID... --out DIR         write the comparator challenge of the tagged declarations
+  challenge write NAME|ID... --out DIR   write the comparator challenge of the tagged declarations
                                          into the new directory DIR: Challenge.lean (the theorems,
                                          proofs sorry), ChallengeDeps.lean (the others and what
                                          all of them need),
                                          lakefile.toml, lean-toolchain
-  challenge --graph                      print the piece graph challenges are cut from (JSON)
-  challenge --check DIR                  build the challenge in DIR against the library and
+  challenge graph                        print the piece graph challenges are cut from (JSON)
+  challenge check DIR                    build the challenge in DIR against the library and
                                          check that it means what the library means
   validate [--base-ref REF]              check records/ (schema, authority, append-only)
   release --tag TAG [--out FILE]         signoff and kernel gates, axiom report, manifest"
@@ -137,24 +137,23 @@ def cmdWithdraw (args : List String) : IO UInt32 := do
     | fail "usage: leanblame withdraw RECORD --signer local:NAME [--note TEXT] [NAME|ID...]"
   Sign.withdraw (← IO.currentDir) (a.get? "--signer") ref (a.positional.extract 1) (a.get? "--note")
 
-def cmdChallenge (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--out", "--check"] #["--graph"] args (positional := true)
-  let root ← IO.currentDir
-  match a.get? "--out", a.get? "--check", a.has "--graph" with
-  | some dir, none, false =>
-    Challenge.write root dir a.positional
+def cmdChallenge : List String → IO UInt32
+  | "write" :: args => do
+    let a ← parseArgs #["--out"] #[] args (positional := true)
+    let some dir := a.get? "--out" | fail "usage: leanblame challenge write NAME|ID... --out DIR"
+    Challenge.write (← IO.currentDir) dir a.positional
     return 0
-  | none, some dir, false =>
-    unless a.positional.isEmpty do fail "challenge --check DIR takes no names"
-    let (n, k) ← Challenge.check root dir
+  | "check" :: args => do
+    let a ← parseArgs #[] #[] args (positional := true)
+    let #[dir] := a.positional | fail "usage: leanblame challenge check DIR"
+    let (n, k) ← Challenge.check (← IO.currentDir) dir
     IO.println (s!"challenge {dir}: the {n} tagged declarations it holds mean what the library's do" ++
       if k == 0 then "" else s!", {k} of them by definitional equality")
     return 0
-  | none, none, true =>
-    unless a.positional.isEmpty do fail "challenge --graph takes no names"
-    IO.print (jsonText (← Challenge.graph root))
+  | ["graph"] => do
+    IO.print (jsonText (← Challenge.graph (← IO.currentDir)))
     return 0
-  | _, _, _ => fail "usage: leanblame challenge NAME|ID... --out DIR, leanblame challenge --graph, or leanblame challenge --check DIR"
+  | _ => fail "usage: leanblame challenge write NAME|ID... --out DIR, leanblame challenge check DIR, or leanblame challenge graph"
 
 def cmdEquiv (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #[] args (positional := true)

@@ -1,6 +1,6 @@
 /-
-`leanblame challenge NAME|ID... --out DIR`, `leanblame challenge --graph` and
-`leanblame challenge --check DIR` (docs/decisions.md, "Challenges").
+`leanblame challenge write NAME|ID... --out DIR`, `leanblame challenge graph` and
+`leanblame challenge check DIR` (docs/decisions.md, "Challenges").
 
 A challenge is what a comparator checks a solution against, cut from the piece graph of the last
 export (`Pieces.Graph.cut`): `Challenge.lean` states the named tagged theorems, proofs `sorry`, among

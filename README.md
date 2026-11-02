@@ -82,9 +82,9 @@ Run in the library root as `lake exe leanblame <command>`.
 | `sign --signer local:NAME [--note TEXT] (NAME\|ID... \| --module M \| --all)` | Write approve records, one per module: of the declarations named, of one module, or of the whole library. |
 | `withdraw RECORD --signer local:NAME [--note TEXT] [NAME\|ID...]` | Withdraw your own record, or some of its declarations (names or ids). |
 | `equiv [NAME\|ID...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
-| `challenge NAME\|ID... --out DIR` | Write the comparator challenge of these tagged declarations: what they need from the library and nothing else, and the theorems' statements with proofs `sorry`. |
-| `challenge --graph` | Print the piece graph that challenges are cut from. |
-| `challenge --check DIR` | Build the challenge against the library: each tagged declaration in it has the library's claim hash, or the kernel finds it definitionally equal to the library's. |
+| `challenge write NAME\|ID... --out DIR` | Write the comparator challenge of these tagged declarations: what they need from the library and nothing else, and the theorems' statements with proofs `sorry`. |
+| `challenge graph` | Print the piece graph that challenges are cut from. |
+| `challenge check DIR` | Build the challenge against the library: each tagged declaration in it has the library's claim hash, or the kernel finds it definitionally equal to the library's. |
 | `validate [--base-ref REF]` | Check record files: schema, signer authority, no edits or deletions since `REF`. |
 | `release --tag TAG [--out FILE]` | Signoff and kernel gates, axiom report, manifest. |
 

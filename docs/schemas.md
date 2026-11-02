@@ -258,7 +258,7 @@ prints one line per declaration: `NAME [renamed-from=OLD] change=cause:names;..
 [relies-on=+ADDED,-REMOVED]`, with the causes of `status`, or `NAME added`, `NAME removed`, `NAME
 unchanged`; then the old and the new informal text and statement where they differ.
 
-## 6. Piece graph (output of `challenge --graph`)
+## 6. Piece graph (output of `challenge graph`)
 
 The pieces the comparator challenges of the library's tagged declarations are cut from
 ([decisions.md](decisions.md), "Challenges"), in the order their files hold them.

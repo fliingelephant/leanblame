@@ -337,7 +337,7 @@ needs a human to read.
    hash with one click; X's entry in the record carries the proof hash as
    `evidence`.
 
-`challenge --check` runs steps 2 to 4 too, with the library as the old version
+`challenge check` runs steps 2 to 4 too, with the library as the old version
 and the challenge, built against it, as the new one; it stores no proof.
 
 Mechanism: `equiv` reads the old and the new export. It adds the duplicated
