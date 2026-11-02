@@ -717,16 +717,20 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     match ← readOf m with
     | .ok r => return r
     | .error e => fail e
-  -- The piece that declares the library's constant `n`, or why none does; `none` for a constant
-  -- from outside the library.
-  let ownerOf (n : Name) : IO (Option (Except String Key)) := do
-    if isReservedName env n then return none
+  -- The module and the command that declare the library's constant `n`, or why none does; `none`
+  -- for a constant from outside the library.
+  let declaredAt (n : Name) : IO (Option (Except String (Name × Nat))) := do
     let some m := moduleOf n | return none
     return some <| match ← readOf m with
       | .error e => .error e
       | .ok r => match r.owner.find? n with
-        | some i => .ok (.cmd true m i)
+        | some i => .ok (m, i)
         | none => .error s!"{n}: no command of {m} declares it"
+  -- The piece that declares the library's constant `n`, or why none does; `none` for a constant
+  -- from outside the library.
+  let ownerOf (n : Name) : IO (Option (Except String Key)) := do
+    if isReservedName env n then return none
+    return (← declaredAt n).map (·.map fun (m, i) => .cmd true m i)
   -- The pieces that declare the constants `ns`, but `self`, and why some have none.
   let declarers (self : Option Key) (ns : Array Name) : IO (Array Key × Array String) := do
     let mut keys : Array Key := #[]
@@ -784,9 +788,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   -- Where each tagged theorem is written.
   let mut written : Std.HashMap Name (Name × Nat) := {}
   for t in theorems do
-    let some m := moduleOf t | continue
-    let .ok r ← readOf m | continue
-    if let some i := r.owner.find? t then written := written.insert t (m, i)
+    if let some (.ok place) ← declaredAt t then written := written.insert t place
   let statementAt : Std.HashMap (Name × Nat) Name := written.fold (init := {}) fun acc t place => acc.insert place t
   let theoremSet : NameSet := theorems.foldl (·.insert ·) {}
   -- What piece `k` needs, and why a challenge that holds it cannot be made.
@@ -827,11 +829,11 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       return (#[Key.head true m] ++ r.scopes.context[i]!.map (Key.cmd true m ·) ++ keys, problems)
     | .statement t =>
       let base := #[Key.importDeps]
-      let some m := moduleOf t | return (base, #[s!"{t} is a theorem of another library: its challenge is that library's"])
-      let r ← match ← readOf m with
-        | .ok r => pure r
-        | .error e => return (base, #[e])
-      let some i := r.owner.find? t | return (base, #[s!"{t}: no command of {m} declares it"])
+      let (m, i) ← match ← declaredAt t with
+        | some (.ok place) => pure place
+        | some (.error e) => return (base, #[e])
+        | none => return (base, #[s!"{t} is a theorem of another library: its challenge is that library's"])
+      let r ← readOk m
       let c := r.cmds[i]!
       let some p := proofOf? (innermost c.stx) | return (base, #[s!"{t}: its command has no proof to replace by `sorry`"])
       let (some a, some _) := (p.getPos?, p.getTailPos?) | return (base, #[s!"{t}: its proof has no position"])
