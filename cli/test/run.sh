@@ -47,6 +47,7 @@ echo "== build leanblame"
 (cd "$cli" && lake build) >/dev/null
 lb="$cli/.lake/build/bin/leanblame"
 (cd "$cli" && lake env lean --run test/Canon.lean) || fail "canonical printing (test/Canon.lean)"
+(cd "$cli" && lake env lean --run test/Sha256.lean) || fail "SHA-256 (test/Sha256.lean)"
 ok "canonical printing is linear in the term as a graph"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/leanblame-test.XXXXXX")"

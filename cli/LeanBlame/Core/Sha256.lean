@@ -29,9 +29,11 @@ structure State where
   pending : ByteArray := ByteArray.empty
   /-- Total message length in bytes. -/
   length : Nat := 0
+  /-- Space for a block's message schedule, written over for each block. -/
+  schedule : Array UInt32 := Array.replicate 64 0
 
-/-- Rounds `i` to 63 on working variables `a` to `hh`, then add them to `h`. A tail-recursive
-function over unboxed words: the loop allocates nothing. -/
+/-- Rounds `i` to 63 on working variables `a` to `hh`, then add them to `h`, in place. A
+tail-recursive function over unboxed words: the loop allocates nothing. -/
 private def rounds (h w : Array UInt32) (i : Nat) (a b c d e f g hh : UInt32) : Array UInt32 :=
   if _ : i < 64 then
     let S1 := rotr e 6 ^^^ rotr e 11 ^^^ rotr e 25
@@ -41,35 +43,53 @@ private def rounds (h w : Array UInt32) (i : Nat) (a b c d e f g hh : UInt32) : 
     let maj := (a &&& b) ^^^ (a &&& c) ^^^ (b &&& c)
     rounds h w (i + 1) (t1 + S0 + maj) a b c (d + t1) e f g
   else
-    #[h[0]! + a, h[1]! + b, h[2]! + c, h[3]! + d, h[4]! + e, h[5]! + f, h[6]! + g, h[7]! + hh]
+    h.modify 0 (· + a) |>.modify 1 (· + b) |>.modify 2 (· + c) |>.modify 3 (· + d)
+      |>.modify 4 (· + e) |>.modify 5 (· + f) |>.modify 6 (· + g) |>.modify 7 (· + hh)
 termination_by 64 - i
 
-/-- Compress the 64-byte block of `data` starting at `off` into `h`. -/
-private def compress (h : Array UInt32) (data : ByteArray) (off : Nat) : Array UInt32 := Id.run do
-  let mut w : Array UInt32 := Array.mkEmpty 64
+/-- The message schedule of the 64-byte block of `data` at `off`, written over `w`. -/
+private def schedule (w : Array UInt32) (data : ByteArray) (off : Nat) : Array UInt32 := Id.run do
+  let mut w := w
   for i in [0:16] do
-    let b0 := data.get! (off + 4*i)
-    let b1 := data.get! (off + 4*i + 1)
-    let b2 := data.get! (off + 4*i + 2)
-    let b3 := data.get! (off + 4*i + 3)
-    w := w.push ((b0.toUInt32 <<< 24) ||| (b1.toUInt32 <<< 16) ||| (b2.toUInt32 <<< 8) ||| b3.toUInt32)
+    let p := off + 4 * i
+    w := w.set! i (((data.get! p).toUInt32 <<< 24) ||| ((data.get! (p + 1)).toUInt32 <<< 16) |||
+      ((data.get! (p + 2)).toUInt32 <<< 8) ||| (data.get! (p + 3)).toUInt32)
   for i in [16:64] do
     let w15 := w[i-15]!
     let w2 := w[i-2]!
     let s0 := rotr w15 7 ^^^ rotr w15 18 ^^^ (w15 >>> 3)
     let s1 := rotr w2 17 ^^^ rotr w2 19 ^^^ (w2 >>> 10)
-    w := w.push (w[i-16]! + s0 + w[i-7]! + s1)
-  return rounds h w 0 h[0]! h[1]! h[2]! h[3]! h[4]! h[5]! h[6]! h[7]!
+    w := w.set! i (w[i-16]! + s0 + w[i-7]! + s1)
+  return w
 
-/-- Feed bytes into the state. -/
+/-- Compress the 64-byte block of `data` at `off` into `h`, with `w` as the schedule's space; both
+come back for the next block. -/
+private def compress (h w : Array UInt32) (data : ByteArray) (off : Nat) : Array UInt32 × Array UInt32 :=
+  let w := schedule w data off
+  (rounds h w 0 h[0]! h[1]! h[2]! h[3]! h[4]! h[5]! h[6]! h[7]!, w)
+
+/-- Feed bytes into the state. Whole blocks are read where they are; only a partial block is
+copied. -/
 def State.update (s : State) (bytes : ByteArray) : State := Id.run do
-  let data := s.pending ++ bytes
   let mut h := s.h
+  let mut w := s.schedule
+  let mut pending := s.pending
   let mut off := 0
-  while off + 64 ≤ data.size do
-    h := compress h data off
+  if pending.size > 0 then
+    off := min (64 - pending.size) bytes.size
+    pending := pending ++ bytes.extract 0 off
+    if pending.size == 64 then
+      let r := compress h w pending 0
+      h := r.1
+      w := r.2
+      pending := .empty
+  while off + 64 ≤ bytes.size do
+    let r := compress h w bytes off
+    h := r.1
+    w := r.2
     off := off + 64
-  return { h, pending := data.extract off data.size, length := s.length + bytes.size }
+  return { h, pending := pending ++ bytes.extract off bytes.size, length := s.length + bytes.size
+           schedule := w }
 
 /-- Finish hashing and return the 32-byte digest. -/
 def State.finish (s : State) : ByteArray := Id.run do
@@ -80,11 +100,14 @@ def State.finish (s : State) : ByteArray := Id.run do
   for i in [0:8] do
     tail := tail.push ((bitLen >>> (8 * (7 - i))) % 256).toUInt8
   let mut h := s.h
+  let mut w := s.schedule
   let mut off := 0
   while off + 64 ≤ tail.size do
-    h := compress h tail off
+    let r := compress h w tail off
+    h := r.1
+    w := r.2
     off := off + 64
-  let mut out := ByteArray.empty
+  let mut out := ByteArray.emptyWithCapacity 32
   for word in h do
     out := out.push (word >>> 24).toUInt8
     out := out.push (word >>> 16).toUInt8
