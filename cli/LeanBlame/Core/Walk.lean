@@ -97,10 +97,11 @@ def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Ar
     for n in comp do axioms := axioms.insert n sorted
   return roots.foldl (init := {}) fun m n => m.insert n (axioms.getD n #[])
 
-/-- Hash every declaration reachable from the boundary list, with the facts `decl` reports. A
-declaration `known` gives is taken as it is, hashed already, with everything it reaches, which must be
-known too (`Challenge.check`: what the challenge imports from outside the library). -/
-def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList)
+/-- Hash every declaration reachable from the boundary list, with the facts `decl` reports; an
+untagged declaration `trusted` names is its statement alone, where the walk stops. A declaration
+`known` gives is taken as it is, hashed already, with everything it reaches, which must be known too
+(`Challenge.check`: what the challenge imports from outside the library). -/
+def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList) (trusted : String → Bool)
     (known : String → Option Core.Node := fun _ => none) : IO (Std.HashMap String Core.Node) := do
   -- Tagged declarations with their informal text.
   let tagged : Std.HashMap String String :=
@@ -119,9 +120,14 @@ def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList)
       worklist := worklist ++ node.decl.deps.filter (!nodes.contains ·)
       continue
     let d ← decl target
+    let informal := tagged[target]?
+    if informal.isNone && trusted target then
+      let d := { d with bodyHash := none, deps := #[] }
+      let spec := Hash.spec d ""
+      nodes := nodes.insert target { decl := d, informal, own := Hash.own d none, spec, claim := spec, trusted := true }
+      continue
     for dep in d.deps do
       unless isTagged dep || nodes.contains dep do worklist := worklist.push dep
-    let informal := tagged[target]?
     nodes := nodes.insert target
       { decl := d, informal, own := Hash.own d informal, spec := informal.map (Hash.spec d ·)
         claim := "" }
@@ -132,8 +138,8 @@ def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList)
   let comps := tarjan (Core.sortNames hashed.toArray) succ
   let entry (nodes : Std.HashMap String Core.Node) (d : String) : IO Hash.DepEntry := do
     let some dn := nodes[d]? | fail s!"dependency '{d}' was not hashed"
-    if isTagged d then
-      let some s := dn.spec | fail s!"tagged '{d}' has no spec"
+    if isTagged d || dn.trusted then
+      let some s := dn.spec | fail s!"'{d}' has no spec"
       return .spec s
     else
       if dn.claim.isEmpty then fail s!"internal: claim of '{d}' needed before it was computed"
@@ -158,23 +164,24 @@ def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList)
         nodes := nodes.insert m { node with claim := Hash.member g m }
   return nodes
 
-/-- Hash every declaration reachable from the boundary list in the export `src` serves; the export
-and the boundary list are stored as `exportHash` and `boundaryHash`. The graph keeps what the other
-commands need from `backend`. -/
+/-- Hash every declaration reachable from the boundary list in the export `src` serves, those of
+trusted packages (`trusted`) by their statement; the export and the boundary list are stored as
+`exportHash` and `boundaryHash`. The graph keeps what the other commands need from `backend`. -/
 def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : BoundaryList)
-    (exportHash boundaryHash : String) : IO Core.Hashed :=
-  return { nodes := ← hashNodes src.decl boundary, axioms := axiomsOf src (boundary.declarations.map (·.name))
+    (trusted : String → Bool) (exportHash boundaryHash : String) : IO Core.Hashed :=
+  return { nodes := ← hashNodes src.decl boundary trusted, axioms := axiomsOf src (boundary.declarations.map (·.name))
            boundary, exportHash, boundaryHash, standard := backend.standard
            incomplete := backend.incomplete, checker := backend.checker }
 
 /--
-The closure under `x`: the tagged declarations where the walk stops (the cut, sorted), and the
-untagged declarations passed through (unsorted). `x` itself is in neither.
+The closure under `x`: the tagged and trusted declarations where the walk stops (the cut, sorted),
+and the untagged declarations passed through (unsorted). `x` itself is in neither.
 -/
 def closureOf (h : Core.Hashed) (x : String) : Array String × Array String :=
+  let stops (d : String) := h.isTagged d || h.isTrusted d
   let deps (d : String) := (h.nodes[d]?.map (·.decl.deps)).getD #[]
-  let reached := Id.run <| reach (deps x) fun d => pure (if h.isTagged d || d == x then #[] else deps d)
-  let (cut, untagged) := (reached.filter (· != x)).partition h.isTagged
+  let reached := Id.run <| reach (deps x) fun d => pure (if stops d || d == x then #[] else deps d)
+  let (cut, untagged) := (reached.filter (· != x)).partition stops
   (Core.sortNames cut, untagged)
 
 /--
@@ -197,9 +204,9 @@ structure Comparison where
   added : Array String := #[]
   /-- Tagged dependencies at the cut that only the old closure has. -/
   removed : Array String := #[]
-  /-- Tagged dependencies at the cut, in both closures, whose spec differs. -/
+  /-- Dependencies at the cut, tagged or trusted, in both closures, whose spec differs. -/
   depSpec : Array String := #[]
-  /-- Dependencies in both closures that gained or lost their tag. -/
+  /-- Dependencies in both closures that gained or lost their tag or their trust. -/
   cutMoved : Array String := #[]
   /-- Untagged declarations in both closures whose own hash differs. -/
   untagged : Array String := #[]
@@ -219,8 +226,8 @@ def compare (old new : Core.Hashed) (oldName x : String)
   return {
     informal := o.informal != n.informal, renamed := oldName != x
     statement := statement o.decl != statement n.decl, body := o.decl.bodyHash != n.decl.bodyHash
-    added := cut1.filter fun d => !cut0s.contains d && !unt0s.contains d
-    removed := cut0.filter fun d => !cut1s.contains d && !unt1s.contains d
+    added := cut1.filter fun d => new.isTagged d && !cut0s.contains d && !unt0s.contains d
+    removed := cut0.filter fun d => old.isTagged d && !cut1s.contains d && !unt1s.contains d
     depSpec := cut1.filter fun d => cut0s.contains d &&
       (old.nodes[d]?.bind (·.spec)) != (new.nodes[d]?.bind (·.spec))
     cutMoved := Core.sortNames ((cut1.filter unt0s.contains) ++ (unt1.filter cut0s.contains))

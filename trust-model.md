@@ -89,7 +89,8 @@ declarations with one id, stop `export`.
 From the export and the boundary list, LeanBlame computes one **claim hash**
 per tagged declaration. It covers the declaration's own type, body and
 informal text; the name, type and informal text of every tagged declaration it
-uses; and everything untagged underneath. Theorem proofs are skipped. It is a
+uses; the name and type of every declaration of a trusted package it uses; and
+everything else untagged underneath. Theorem proofs are skipped. It is a
 hash of **meaning**, not of source text.
 
 ### Signoff
@@ -114,7 +115,8 @@ record that points at the old one.
 
 - You sign your own declaration fully: type, body, informal text.
 - For **tagged** declarations you use, you sign only their name, kind, type, informal text. Not the body.
-- For **untagged** declarations you use, you sign all of it, recursively, until you reach a tagged one.
+- For **trusted** declarations you use (Lean's own; Mathlib by default), you sign only their name, kind, type.
+- For **untagged** declarations you use, you sign all of it, recursively, until you reach a tagged or trusted one.
 
 "Tagged" means: on the boundary list. `@[trusted "id"]` puts a declaration
 there; so can a blueprint. "Informal text" is the docstring, or the blueprint's
@@ -129,8 +131,11 @@ To use Bob's `Hamiltonian`, Alice read its name, type and docstring. That is
 the spec. She never opened the body. Bob owns the body. So Alice's hash
 covers the spec and not the body.
 
-Mathlib's `Finset.sum` has no signer in our system. Nobody else is
-accountable for it, so Alice is. Her hash covers all of it.
+Mathlib's `Finset.sum` has no signer in our system. A library trusts
+Mathlib's declarations by their statements (`trusted` in `leanblame.toml`,
+default Mathlib, with the packages it requires; Lean's own always), so Alice's
+hash covers its name and type. An untagged declaration of a package that is not
+trusted has nobody else accountable for it, so Alice is: her hash covers all of it.
 
 A theorem's proof cannot change what anything means. The kernel checks
 proofs. Hashes skip them.
@@ -443,6 +448,7 @@ own(c)   = H("leanblame.own",   kind, role, name, uparams, type, body?, informal
 spec(c)  = H("leanblame.spec",  kind, role, name, uparams, type, informal)
 claim(c) = H("leanblame.claim", own(c), sorted over direct dependencies d of c:
                tagged(d)   -> ("spec", spec(d))
+               trusted(d)  -> ("spec", spec(d)), its informal text empty
                untagged(d) -> ("full", claim(d)))
 ```
 

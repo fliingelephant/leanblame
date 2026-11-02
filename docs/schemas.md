@@ -164,7 +164,7 @@ every record. Viewers display it; they never need another source. With
       "statement": { "pretty": […], "plain": […] },
       "claim": "sha256:77c0…",
       "state": "outdated",
-      "change": [{ "cause": "untagged", "names": ["Mathlib.Finset.sum"] }],
+      "change": [{ "cause": "untagged", "names": ["Example.Ising.bondEnergy"] }],
       "signers": [],
       "history": [
         { "record": "sha256:…", "action": "approve", "signer": "example:jane", "date": "2026-10-23T14:02:11Z",
@@ -174,8 +174,8 @@ every record. Viewers display it; they never need another source. With
       "proof": { "status": "proven", "axioms": ["propext"], "unpermitted": [] },
       "evidence": "sha256:…",
       "tagged_deps": ["Example.Ising.Hamiltonian"],
-      "untagged_deps": [{ "name": "Finset.sum", "module": "Mathlib.Algebra.BigOperators.Group.Finset.Defs" }],
-      "closure_size": 3412
+      "untagged_deps": [{ "name": "Example.Ising.bondEnergy", "module": "Example.Ising" }],
+      "closure_size": 41
     }
   ],
   "records": [
@@ -205,8 +205,8 @@ every record. Viewers display it; they never need another source. With
 | `proof` | role `proved`: `proven` (every axiom standard, or tagged, `assumed` and valid), `open` (`sorryAx` or another axiom); `n/a` otherwise; with all axioms, and the `unpermitted` ones: neither standard, nor tagged and valid, nor `sorryAx` |
 | `evidence` | hash of an `equiv` proof that the current claim means what a live approval meant, if any |
 | `tagged_deps` | the tagged declarations the claim stops at |
-| `untagged_deps` | the untagged declarations it uses directly, with their modules |
-| `closure_size` | constants hashed into `claim`, proofs excluded |
+| `untagged_deps` | the untagged declarations it uses directly that are not of a trusted package, with their modules |
+| `closure_size` | constants hashed into `claim`, proofs excluded; a trusted package's by their statement |
 | `records` | every record of the records directories, with all its fields, its hash and its path |
 | `untagged_in_library` | untagged declarations of this library that tagged ones use, with those users; tag them so they get their own signer |
 
@@ -249,8 +249,8 @@ stderr.
 | `informal` | its informal text differs |
 | `statement` | its kind, role, universe parameters or type differs |
 | `body` | its body differs |
-| `relies_on` | the tagged declarations its claim stops at: `added` (the old closure lacks them), `removed` (the new one lacks them), `changed` (in both, their spec differs: name, kind, type or informal text) |
-| `cut_moved` | dependencies in both closures that gained or lost their tag |
+| `relies_on` | the declarations its claim stops at: tagged ones `added` (the old closure lacks them) and `removed` (the new one lacks them); tagged or trusted ones `changed` (in both, their spec differs: name, kind, type or informal text) |
+| `cut_moved` | dependencies in both closures that gained or lost their tag or their trust |
 | `untagged` | untagged declarations in both closures that differ |
 
 A renamed declaration has two names, and its claim moved, as the name is hashed. The text form

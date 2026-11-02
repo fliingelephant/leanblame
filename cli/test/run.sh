@@ -121,6 +121,22 @@ export_lib
 [[ "$(current_export)" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "no current export"
 first_export="$(current_export)"
 ok "export stored $first_export"
+python3 - <<'PY' || fail "Lean's own declarations are not trusted by their statement"
+import glob, json
+c = json.load(open(".leanblame/current"))
+[g] = glob.glob(".leanblame/store/graphs/%s-%s.json" % (c["export"][7:], c["boundary"][7:]))
+nodes = {n["name"]: n for n in json.load(open(g))["nodes"]}
+add = nodes["HAdd.hAdd"]
+assert add["trusted"] and add["deps"] == [] and add["body"] is None and add["spec"] == add["claim"], add
+assert "Nat.add" not in nodes, "the walk went past a trusted declaration"
+lean = lambda m: m == "Init" or m.startswith(("Init.", "Std.", "Lean."))
+assert all(lean(n["module"]) == n["trusted"] for n in nodes.values()), \
+  [n["name"] for n in nodes.values() if lean(n["module"]) != n["trusted"]]
+PY
+printf 'trusted = ["nope"]\n' >> leanblame.toml
+must_fail '`trusted` names nope, which is not a package of the workspace' -- "$lb" export
+git checkout -q -- leanblame.toml
+ok "Lean's own declarations enter claims by their statement, where the walk stops; trusted names packages of the workspace"
 must_fail "Sample.energy unsigned" "Sample.one_site_pos unsigned" "11 of 11 tagged declarations are not valid" \
   -- "$lb" release --tag 2026.10
 ok "release refuses unsigned declarations and names them"

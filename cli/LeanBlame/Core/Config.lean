@@ -21,6 +21,9 @@ structure Config where
   /-- A verso-blueprint `blueprint-manifest.json` that names the tagged declarations instead of
   `@[trusted]`, relative to the library root. -/
   boundary : Option String
+  /-- The packages whose declarations enter claims by their statement alone, with the packages they
+  require; `none`: `mathlib` when the workspace has it. Lean's own declarations always do. -/
+  trusted : Option (Array String)
   deriving Inhabited, Repr
 
 def Config.fileName : String := "leanblame.toml"
@@ -39,13 +42,16 @@ allowed_signers = \"any\"   # or a list of provider:id
 # A verso-blueprint blueprint-manifest.json that names the tagged declarations instead of @[trusted],
 # relative to this file:
 # boundary = \"blueprint-manifest.json\"
+# The packages whose declarations enter claims by their statement alone, unreviewed, with the packages
+# they require (default: mathlib, when the package requires it). Lean's own declarations always do.
+# trusted = [\"mathlib\"]
 "
 
 open Lake.Toml (DecodeM Table logDecodeErrorAt) in
-/-- Decode a parsed `leanblame.toml`, logging every problem. Every key is required but `libraries` and
-`boundary`. -/
+/-- Decode a parsed `leanblame.toml`, logging every problem. Every key is required but `libraries`,
+`boundary` and `trusted`. -/
 def Config.decode (t : Table) : DecodeM Config := do
-  checkKeys t #["records", "exclude", "required_signers", "allowed_signers", "libraries", "boundary"]
+  checkKeys t #["records", "exclude", "required_signers", "allowed_signers", "libraries", "boundary", "trusted"]
     Config.fileName
   let records : Array String ← t.tryDecode `records
   if (t.find? `records).isSome && records.isEmpty then
@@ -74,8 +80,9 @@ def Config.decode (t : Table) : DecodeM Config := do
       pure none
   let libraries : Array String ← t.tryDecodeD `libraries #[]
   let boundary : Option String ← t.tryDecode? `boundary
+  let trusted : Option (Array String) ← t.tryDecode? `trusted
   return { records := records.map fun r => if r.length > 1 then (r.dropSuffix "/").copy else r, exclude
-           requiredSigners, allowedSigners, libraries, boundary }
+           requiredSigners, allowedSigners, libraries, boundary, trusted }
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/
 def Config.parse (contents path : String) : IO (Except String Config) :=

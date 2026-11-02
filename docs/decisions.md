@@ -162,9 +162,13 @@ required_signers = 1            # distinct live approvals a declaration needs
 allowed_signers = "any"         # or a list of provider:id
 libraries = ["Lib", "Tags"]     # optional: the libraries to read (default: the default targets)
 boundary = "blueprint-manifest.json"  # optional: tagged declarations from a blueprint
+trusted = ["mathlib"]           # optional: packages taken on their statements (default: mathlib)
 ```
 
-Every key but `libraries` and `boundary` is required; `init` writes them all, those two commented out. Validity is a rule over records.
+Every key but `libraries`, `boundary` and `trusted` is required; `init` writes them all, those three
+commented out. A trusted package's declarations, those of the packages it requires and Lean's own
+enter a claim by their statement (name, kind, universe parameters, type), and the hash walk stops
+there: no one in the library reviews them, so a change to a body there outdates nothing. Validity is a rule over records.
 The two signer knobs are the whole policy; `status` reads them. Who gets *asked* to review is a service's queue, not
 part of validity.
 

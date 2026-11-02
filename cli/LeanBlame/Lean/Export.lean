@@ -20,6 +20,7 @@ import Lake.Config.InstallPath
 import Lake.Config.Module
 import Lake.Load.Manifest
 import Lake.Load.Package
+import Lake.Load.Workspace
 import Lake.Util.Git
 import LeanExport.Basic
 import LeanBlame.Attr
@@ -43,16 +44,34 @@ structure Tag where
   parent : Option Name := none
   informal : String
 
+/-- Lake as the toolchain of `lean` holds it. -/
+def lakeEnv : IO Lake.Env := do
+  let (elan?, some lean, _) ← Lake.findInstall? | fail "cannot find Lean: no `lean` on PATH"
+  match ← (Lake.Env.compute (.ofLean lean) lean elan?).toBaseIO with
+  | .ok e => pure e
+  | .error e => fail s!"Lake: {e}"
+
 /-- The package in `root`, as Lake loads its `lakefile.toml` or `lakefile.lean`. -/
 def lakePackage (root : System.FilePath) : IO Lake.Package := do
-  -- Lake as the toolchain of `lean` holds it.
-  let (elan?, some lean, _) ← Lake.findInstall? | fail "cannot find Lean: no `lean` on PATH"
-  let lakeEnv ← match ← (Lake.Env.compute (.ofLean lean) lean elan?).toBaseIO with
-    | .ok e => pure e
-    | .error e => fail s!"Lake: {e}"
-  let (pkg?, log) ← (Lake.loadPackage { lakeEnv, wsDir := root }).run?
+  let (pkg?, log) ← (Lake.loadPackage { lakeEnv := ← lakeEnv, wsDir := root }).run?
   let some pkg := pkg? | fail s!"Lake cannot load the package:\n{log}"
   return pkg
+
+/-- Lean's own modules and those of the packages `trusted` names (`none`: `mathlib`, when the
+workspace in `root` has it) and of the packages they require, among `mods`: their declarations enter
+claims by their statement alone. A module no package of the workspace holds is Lean's own. -/
+def trustedModules (root : System.FilePath) (trusted? : Option (Array String)) (mods : Array Name) :
+    IO NameSet := do
+  let (ws?, log) ← (Lake.loadWorkspace { lakeEnv := ← lakeEnv, wsDir := root }).run?
+  let some ws := ws? | fail s!"Lake cannot load the workspace:\n{log}"
+  let named := trusted?.getD (if (ws.findPackageByName? `mathlib).isSome then #["mathlib"] else #[])
+  let starts ← named.mapM fun p => match ws.findPackageByName? p.toName with
+    | some pkg => pure pkg.wsIdx
+    | none => fail s!"{Config.fileName}: `trusted` names {p}, which is not a package of the workspace"
+  let pkgs := Id.run <| reach starts fun i => pure ws.packages[i]!.depIdxs
+  return mods.foldl (init := {}) fun s m => match ws.findModule? m with
+    | some mod => if pkgs.contains mod.pkg.wsIdx then s.insert m else s
+    | none => s.insert m
 
 /-- The libraries to export: the `libraries` of `leanblame.toml`, else the package's default `lean_lib` targets, else
 all its `lean_lib`s. -/
@@ -316,7 +335,7 @@ structure Result where
 
 /-- Run the export in library root `root`; `backend` hashes it. -/
 def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
-    (libsGiven : Array String) : IO Result := do
+    (libsGiven : Array String) (trusted? : Option (Array String)) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
   let { package, mods, options, deps, requires, env, srcPath } ← load root libsGiven
@@ -369,7 +388,10 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
       let modules ← exported.constOrder.foldlM (init := ({} : Std.HashMap Name Name)) fun m n => do
         let some mod := moduleOf? env n | fail s!"{n} is in no imported module"
         return m.insert n mod
-      Walk.hashExport backend (← Source.ofExport exported modules) boundaryList exportHash boundary
+      let trustedMods ← trustedModules root trusted? env.header.moduleNames
+      let trusted : Std.HashSet String := modules.fold (init := {}) fun s n m =>
+        if trustedMods.contains m then s.insert n.toString else s
+      Walk.hashExport backend (← Source.ofExport exported modules) boundaryList trusted.contains exportHash boundary
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   Graph.save root hashed
   discard <| Store.putFile root .exports tmp (hashHex exportHash)

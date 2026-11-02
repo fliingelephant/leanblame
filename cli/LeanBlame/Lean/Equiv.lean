@@ -132,8 +132,8 @@ structure Proven where
 Ask the kernel whether the targets of `sides` mean the same in both versions, in `base`, the current
 environment. What an old meaning uses that is not shared goes under `Old.`, references renamed: an
 untagged hashed constant whose claim changed, or a constant used only in proofs (so not hashed) that
-the current version lacks or states differently; tagged constants and constants not at hand are
-shared. The kernel checks each `Old.` constant, then decides, one call each, whether every changed
+the current version lacks or states differently; tagged and trusted constants and constants not at
+hand are shared. The kernel checks each `Old.` constant, then decides, one call each, whether every changed
 definition and every target is definitionally equal to its old version.
 -/
 def prove (base : Kernel.Environment) (sides : Sides) (targets : Array Name) : IO Proven := do
@@ -148,7 +148,7 @@ def prove (base : Kernel.Environment) (sides : Sides) (targets : Array Name) : I
   -- The constants to duplicate, until nothing is added.
   let needs (dup : NameSet) (r : Name) : Bool :=
     let s := r.toString
-    !old.isTagged s && match old.nodes[s]? with
+    !old.isTagged s && !old.isTrusted s && match old.nodes[s]? with
     | some o => (new.nodes[s]?.map (·.claim)) != some o.claim
     | none => match oldConst? r, newConst? r with
       | some o, some n => !sameDecl dup toNew o n

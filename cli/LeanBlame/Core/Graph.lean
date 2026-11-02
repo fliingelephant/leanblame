@@ -70,9 +70,12 @@ structure Node where
   /-- Tagged declarations only. -/
   informal : Option String
   own : String
-  /-- Tagged declarations only. -/
+  /-- Tagged and trusted declarations only. -/
   spec : Option String
   claim : String
+  /-- Of a trusted package: it enters claims by its statement, `spec`, which is its claim; the walk
+  stops there, so it has no body and no dependencies. -/
+  trusted : Bool := false
   deriving Inhabited
 
 /-- Every constant reached from the boundary list, hashed. -/
@@ -95,6 +98,8 @@ structure Hashed where
 
 /-- Tagged nodes are the ones with informal text. -/
 def Hashed.isTagged (h : Hashed) (n : String) : Bool := (h.nodes[n]?.bind (·.informal)).isSome
+
+def Hashed.isTrusted (h : Hashed) (n : String) : Bool := (h.nodes[n]?.map (·.trusted)).getD false
 
 /-- Names sorted as the hashes list them. -/
 def sortNames (xs : Array String) : Array String := xs.qsort (· < ·)
@@ -123,11 +128,11 @@ def nodeToJson (n : Core.Node) : Json :=
   Json.mkObj [("name", d.name), ("module", d.module), ("kind", d.kind), ("role", toJson d.role),
     ("uparams", d.uparams), ("type", d.typeHash), ("body", toJson d.bodyHash),
     ("informal", toJson n.informal), ("deps", toJson d.deps), ("own", n.own), ("spec", toJson n.spec),
-    ("claim", n.claim)]
+    ("claim", n.claim), ("trusted", n.trusted)]
 
 def nodeFromJson? (j : Json) : Except String Core.Node := do
   let o ← JsonObj.read j "graph node" ["name", "module", "kind", "role", "uparams", "type", "body",
-    "informal", "deps", "own", "spec", "claim"]
+    "informal", "deps", "own", "spec", "claim", "trusted"]
   let name ← o.get String "name"
   let o := { o with what := s!"graph node {name}" }
   return {
@@ -136,7 +141,8 @@ def nodeFromJson? (j : Json) : Except String Core.Node := do
       uparams := ← o.get Nat "uparams", typeHash := ← o.get String "type"
       bodyHash := ← o.get (Option String) "body", deps := ← o.get (Array String) "deps" }
     informal := ← o.get (Option String) "informal"
-    own := ← o.get String "own", spec := ← o.get (Option String) "spec", claim := ← o.get String "claim" }
+    own := ← o.get String "own", spec := ← o.get (Option String) "spec", claim := ← o.get String "claim"
+    trusted := ← o.get Bool "trusted" }
 
 /-- Store graph `h`. -/
 def save (root : System.FilePath) (h : Core.Hashed) : IO Unit :=
@@ -147,7 +153,8 @@ def save (root : System.FilePath) (h : Core.Hashed) : IO Unit :=
     ("standard", toJson h.standard), ("incomplete", toJson h.incomplete), ("checker", h.checker)]
 
 /-- A graph is complete: its tagged nodes are exactly the declarations of its boundary list, with
-their informal text and their axioms, and every dependency of a node is a node. -/
+their informal text and their axioms, a trusted node is its statement alone, and every dependency of
+a node is a node. -/
 def check (h : Core.Hashed) : Except String Unit := do
   for d in h.boundary.declarations do
     let some n := h.nodes[d.name]? | throw s!"no node for {d.name}"
@@ -157,6 +164,8 @@ def check (h : Core.Hashed) : Except String Unit := do
   unless tagged == h.boundary.declarations.size do throw "a node with informal text is not on the boundary list"
   unless h.axioms.size == h.boundary.declarations.size do throw "axioms of a declaration not on the boundary list"
   for (_, n) in h.nodes do
+    if n.trusted && !(n.informal.isNone && n.decl.deps.isEmpty && n.decl.bodyHash.isNone && n.spec == some n.claim) then
+      throw s!"trusted {n.decl.name} is not its statement alone"
     for d in n.decl.deps do
       unless h.nodes.contains d do throw s!"{n.decl.name} depends on {d}, which has no node"
 

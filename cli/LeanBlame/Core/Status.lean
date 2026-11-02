@@ -139,7 +139,7 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
     let (cut, untagged) := closure
     let mut untaggedDeps := #[]
     for u in node.decl.deps do
-      if new.isTagged u then continue
+      if new.isTagged u || new.isTrusted u then continue
       let some un := new.nodes[u]? | fail s!"the current graph has no node for {u}"
       untaggedDeps := untaggedDeps.push { name := u, module := un.decl.module }
     closures := closures.insert d.name closure
@@ -149,14 +149,14 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
       blockedBy := #[]
       proof := { status := .na }
       evidence
-      taggedDeps := cut
+      taggedDeps := cut.filter new.isTagged
       untaggedDeps
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size }
   -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
   let cutOf (n : String) : IO (Array String) := do
     let some (cut, _) := closures[n]? | fail s!"{n} is not on the current boundary list"
-    return cut
+    return cut.filter new.isTagged
   let signed (a : String) : Bool := states[a]? == some .valid &&
     match new.nodes[a]? with | some nd => nd.decl.role == .assumed | none => false
   let mut decls := #[]

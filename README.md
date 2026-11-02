@@ -105,8 +105,10 @@ Records are TOML files in `records/`, named by the SHA-256 of their bytes,
 never edited. They name declarations by id, so a sign-off follows a rename.
 `leanblame.toml` sets the policy, every key required: `records` directories,
 `exclude` (records the library refuses to count), `required_signers`,
-`allowed_signers`; and, optionally, `libraries` (the package's libraries to read) and
-`boundary` (a blueprint manifest instead of `@[trusted]`). From the terminal, `sign` writes `local:` signer ids; a service that
+`allowed_signers`; and, optionally, `libraries` (the package's libraries to read),
+`boundary` (a blueprint manifest instead of `@[trusted]`) and `trusted` (the packages
+whose declarations enter claims by their statement alone, with what they require;
+default `mathlib`; Lean's own always do). From the terminal, `sign` writes `local:` signer ids; a service that
 writes records with login-backed ids (OpenVouch) is not built yet.
 
 `.leanblame/` holds the object store. It is local and ignored by git.

@@ -6,12 +6,13 @@ each as `<byte length>:<bytes>`:
   own(c)   = H("leanblame.own",   kind, role, name, uparams, type, body?, informal?)
   spec(c)  = H("leanblame.spec",  kind, role, name, uparams, type, informal)
   claim(c) = H("leanblame.claim", own(c), per direct dependency d, sorted by name:
-               ("spec", spec(d)) if d is tagged, ("full", claim(d)) if not)
+               ("spec", spec(d)) if d is tagged or trusted, ("full", claim(d)) if not)
   group    = H("leanblame.group",  count, member owns sorted by name, external entries)
   member   = H("leanblame.member", group, name)
 
 `name` is the printed name, `type` and `body` the hex hashes the frontend computed; an optional
-field is `+<len>:<bytes>` or `-`. `informal` is there for tagged declarations only.
+field is `+<len>:<bytes>` or `-`. `informal` is there for tagged declarations only; a trusted one's
+`spec` has it empty.
 -/
 import LeanBlame.Core.Graph
 
