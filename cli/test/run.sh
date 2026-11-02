@@ -28,7 +28,7 @@
 # matches it by id), blame by id, a new id is a new declaration (diff: added and removed), a shared id and a malformed one refused
 # -> tags written after the fact, `attribute [trusted] Name` in a library of their own: id writes
 # into the attribute, a second tag refused, a rename with a deprecated alias followed with the id
-# kept, a rename without one a build error.
+# kept and the alias left untagged by id, a rename without one a build error.
 # Before the first export, `id` writes the ids (export refuses a tag without
 # one); after the first body edit, status fails out loud when a signed graph is
 # missing or broken. Also out loud: export outside git, sign without --signer, a
@@ -956,6 +956,9 @@ assert "Sample.double" not in d, d.keys()
 assert d["Sample.twice"]["id"] == sys.argv[2], d["Sample.twice"]
 PY
 ok "a rename marked by a deprecated alias keeps the tag and its id, with a warning to update the name"
+"$lb" id >"$logs/id-alias.log" 2>&1 || fail "id with a deprecated alias: $(cat "$logs/id-alias.log")"
+grep -q "every declaration of this library is tagged" "$logs/id-alias.log" || fail "id tagged a deprecated alias: $(cat "$logs/id-alias.log")"
+ok "id leaves the deprecated alias untagged: a tag on it would stand for what it renames, tagged already"
 python3 - <<'PY'
 p = "Sample/Basic.lean"
 s = open(p).read()
