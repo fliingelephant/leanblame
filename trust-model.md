@@ -269,7 +269,8 @@ Per tagged declaration X, `status` computes:
   live approve records list X but not enough of them carry the current hash;
   `unsigned` if none lists X. Records name X by its id, so a renamed X is
   `outdated` (the name is hashed), not `unsigned`.
-- **blocked_by**: tagged dependencies whose state is not `valid`, recursively.
+- **blocked**: whether a tagged dependency, followed transitively, is not
+  `valid`; one bottom-up pass computes it for all. `blame X` names them.
 - **evidence**: the `equiv` proof that X's current hash means what its last
   live approval meant, if there is one.
 

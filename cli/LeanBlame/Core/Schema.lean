@@ -506,7 +506,8 @@ structure StatusDecl where
   change : Option (Array Change)
   signers : Array String
   history : Array HistoryEntry
-  blockedBy : Array String
+  /-- Whether a tagged dependency, followed transitively, is not valid. -/
+  blocked : Bool
   proof : ProofReport
   evidence : Option String
   taggedDeps : Array String
@@ -543,7 +544,7 @@ instance : ToJson StatusDecl where
     ("kind", d.decl.kind), ("role", toJson d.decl.role), ("informal", d.decl.informal),
     ("statement", toJson d.decl.statement), ("claim", d.claim),
     ("state", toJson d.state), ("change", toJson d.change), ("signers", toJson d.signers),
-    ("history", toJson d.history), ("blocked_by", toJson d.blockedBy),
+    ("history", toJson d.history), ("blocked", toJson d.blocked),
     ("proof", Json.mkObj [("status", toJson d.proof.status), ("axioms", toJson d.proof.axioms),
       ("unpermitted", toJson d.proof.unpermitted)]),
     ("evidence", toJson d.evidence), ("tagged_deps", toJson d.taggedDeps),

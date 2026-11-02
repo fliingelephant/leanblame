@@ -201,7 +201,7 @@ assert s["toolchain"].startswith("v4.") and s["deps"] == {}, (s["toolchain"], s[
 assert s["standard_axioms"] == ["propext", "Classical.choice", "Quot.sound"], s["standard_axioms"]
 assert s["untagged_in_library"] == [{"name": "Sample.double", "used_by": ["Sample.energy"]}], s["untagged_in_library"]
 keys = {"name", "id", "parent", "module", "kind", "role", "informal", "statement", "claim", "state", "change", "signers",
-        "history", "blocked_by", "proof", "evidence", "tagged_deps", "untagged_deps", "closure_size"}
+        "history", "blocked", "proof", "evidence", "tagged_deps", "untagged_deps", "closure_size"}
 members = {"Sample.Point.mk": "mk", "Sample.Point.x": "x", "Sample.Point.y": "y"}
 order = [d["name"] for d in s["declarations"]]
 assert order == ["Sample.energy", "Sample.Point", "Sample.Point.mk", "Sample.Point.x", "Sample.Point.y",
@@ -545,9 +545,12 @@ commit "energy: new body"
 export_lib
 run status
 expect_line Sample.energy "Sample.energy outdated change=own-body:Sample.energy"
-expect_line Sample.energy_even "Sample.energy_even valid blocked-by=Sample.energy"
+expect_line Sample.energy_even "Sample.energy_even valid blocked"
 expect_line Sample.pointEnergy \
-  "Sample.pointEnergy outdated blocked-by=Sample.energy change=own-body:Sample.pointEnergy"
+  "Sample.pointEnergy outdated blocked change=own-body:Sample.pointEnergy"
+run blame Sample.energy_even
+grep -qxF "  blocked by: Sample.energy" <<<"$out" || fail "blame names what blocks: $out"
+ok "status flags what is blocked; blame names what blocks it"
 
 echo "== edit an untagged helper: double"
 edit Sample/Basic.lean 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
@@ -567,7 +570,7 @@ run status
 expect_line Sample.energy \
   "Sample.energy outdated change=own-text:Sample.energy;own-body:Sample.energy;untagged:Sample.double"
 expect_line Sample.energy_even \
-  "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
+  "Sample.energy_even outdated blocked change=dep-spec:Sample.energy"
 
 echo "== diff: what changed since a sign-off, as the kernel sees it"
 status_out="$out"
@@ -620,9 +623,9 @@ ok "validate: $out"
 commit "withdraw Sample.Basic"
 run status
 expect_line Sample.energy "Sample.energy unsigned"
-expect_line Sample.Point "Sample.Point unsigned blocked-by=Sample.Point.mk"
+expect_line Sample.Point "Sample.Point unsigned blocked"
 expect_line Sample.energy_even \
-  "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
+  "Sample.energy_even outdated blocked change=dep-spec:Sample.energy"
 
 echo "== exclude"
 edit leanblame.toml "s|^exclude = \[\]|exclude = [\"$withdraw_record\"]|"
@@ -873,7 +876,7 @@ commit "energy: a new id"
 export_lib
 run status
 expect_line Sample.energy "Sample.energy unsigned"
-expect_line Sample.energy_even "Sample.energy_even valid blocked-by=Sample.energy"
+expect_line Sample.energy_even "Sample.energy_even valid blocked"
 expect_line Sample.Point.x "Sample.Point.x valid"
 run diff --from "$basic_record"
 { grep -qxF "Sample.energy added" <<<"$out" && grep -qxF "Sample.energy removed" <<<"$out"; } \

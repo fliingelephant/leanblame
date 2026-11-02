@@ -13,7 +13,8 @@ tagged declaration X of the current boundary list:
 * history: every record about X, each approval with what it is worth now (`Ledger.standing`);
 * evidence: the `equiv` proof that X's current claim means what a live approval of it meant, if
   `equiv` wrote one;
-* blocked_by: tagged dependencies, followed transitively, that are not valid;
+* blocked: whether a tagged dependency, followed transitively, is not valid, from one bottom-up pass
+  over the tagged dependencies at each cut; `blame` names them for one declaration;
 * proof: for a declaration with role `proved`, the assumptions it rests on (computed by `export`):
   `proven` when each is standard or a tagged, `assumed` declaration that is valid, `open` otherwise
   (an incomplete proof such as `sorry`, or an assumption that is neither, which is `unpermitted`);
@@ -146,17 +147,24 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
     states := states.insert d.name state
     entries := entries.push {
       decl := d, claim, state, change, signers, history := historyOf ledger d.id claim
-      blockedBy := #[]
+      blocked := false
       proof := { status := .na }
       evidence
       taggedDeps := cut.filter new.isTagged
       untaggedDeps
       -- Constants hashed into the claim, proofs excluded: X, its untagged closure, its cut.
       closureSize := 1 + cut.size + untagged.size }
-  -- Pass 2: blocked_by, following tagged dependencies transitively; the axiom report.
-  let cutOf (n : String) : IO (Array String) := do
-    let some (cut, _) := closures[n]? | fail s!"{n} is not on the current boundary list"
-    return cut.filter new.isTagged
+  -- Pass 2: blocked, bottom-up over the tagged dependencies at each cut, a component (a mutual
+  -- block) at a time: a declaration is blocked when one below it, other than itself, is not valid.
+  let cutOf (n : String) : Array String := ((closures[n]?.map (·.1)).getD #[]).filter new.isTagged
+  let valid (n : String) := states[n]? == some .valid
+  let mut blocked : Std.HashMap String Bool := {}
+  for comp in Walk.tarjan (entries.map (·.decl.name)) cutOf do
+    let below := (comp.flatMap cutOf).filter (!comp.contains ·)
+    let fromBelow := below.any fun y => !valid y || blocked.getD y false
+    for n in comp do
+      blocked := blocked.insert n (fromBelow || comp.any fun m => m != n && !valid m)
+  -- The axiom report.
   let signed (a : String) : Bool := states[a]? == some .valid &&
     match new.nodes[a]? with | some nd => nd.decl.role == .assumed | none => false
   let mut decls := #[]
@@ -166,11 +174,7 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
       let some axioms := new.axioms[d.name]? | fail s!"the current graph has no axioms for {d.name}"
       let (status, unpermitted) := classifyAxioms new.standard new.incomplete axioms signed
       pure { status, axioms, unpermitted }
-    let mut blocked : Array String := #[]
-    for y in (← reach (← cutOf d.name) cutOf).filter (· != d.name) do
-      let some s := states[y]? | fail s!"{y} is not on the current boundary list"
-      if s != .valid then blocked := blocked.push y
-    decls := decls.push { sd with blockedBy := Core.sortNames blocked, proof }
+    decls := decls.push { sd with blocked := blocked.getD d.name false, proof }
   let owned : Std.HashSet String :=
     (← Store.readString root .owned cur.owned).lines.fold (·.insert ·.copy) {}
   let report : StatusReport := {
@@ -192,12 +196,12 @@ def warnings (r : StatusReport) : Array String :=
 def changeText (cs : Array Change) : String :=
   "change=" ++ ";".intercalate (cs.toList.map fun c => toString c.cause ++ ":" ++ ",".intercalate c.names.toList)
 
-/-- One line per declaration: `NAME STATE [evidence=..] [blocked-by=..] [change=cause:names;..]`;
+/-- One line per declaration: `NAME STATE [evidence=..] [blocked] [change=cause:names;..]`;
 the evidence is shown while there is something to sign. -/
 def textLine (d : StatusDecl) : String :=
   let parts := #[d.decl.name, toString d.state] ++
     (if d.state == .valid then #[] else (d.evidence.toList.map fun e => s!"evidence={e}").toArray) ++
-    (if d.blockedBy.isEmpty then #[] else #[s!"blocked-by={",".intercalate d.blockedBy.toList}"]) ++
+    (if d.blocked then #["blocked"] else #[]) ++
     (match d.change with
       | none => #["change=unknown"]
       | some cs => if cs.isEmpty then #[] else #[changeText cs])
@@ -212,9 +216,17 @@ def run (root : System.FilePath) (json : Bool) : IO UInt32 := do
     let decls := r.report.declarations
     for d in decls do IO.println (textLine d)
     let count (s : State) := (decls.filter (·.state == s)).size
-    let blocked := (decls.filter (!·.blockedBy.isEmpty)).size
+    let blocked := (decls.filter (·.blocked)).size
     IO.println s!"{decls.size} tagged: {count .valid} valid, {count .outdated} outdated, {count .unsigned} unsigned; {blocked} blocked"
   return 0
+
+/-- What blocks `n`: its tagged dependencies, followed transitively, that are not valid. -/
+def blockedBy (r : Result) (n : String) : Array String :=
+  let states : Std.HashMap String State :=
+    r.report.declarations.foldl (init := {}) fun m d => m.insert d.decl.name d.state
+  let cutOf (x : String) := (Walk.closureOf r.new x).1.filter r.new.isTagged
+  Core.sortNames <| (Id.run <| reach (cutOf n) (pure ∘ cutOf)).filter fun y =>
+    y != n && states[y]? != some .valid
 
 /-- The id of the declaration records name `key`: an id, or a name a record gives it. -/
 def recordedId (ledger : Ledger) (key : String) : IO String := do
@@ -242,7 +254,8 @@ def blame (root : System.FilePath) (key : String) : IO UInt32 := do
     IO.println s!"{d.decl.name}  {d.decl.kind}  {d.state}  claim {d.claim}"
     IO.println s!"  id: {d.decl.id}"
     unless d.signers.isEmpty do IO.println s!"  signed by: {", ".intercalate d.signers.toList}"
-    unless d.blockedBy.isEmpty do IO.println s!"  blocked by: {", ".intercalate d.blockedBy.toList}"
+    if d.blocked then if let some r := current? then
+      IO.println s!"  blocked by: {", ".intercalate (blockedBy r d.decl.name).toList}"
   | none => IO.println s!"{id}  (not on the current boundary list)"
   for h in historyOf ledger id (decl?.map (·.claim)) do
     let renamed := if decl?.any (·.decl.name == h.name) then "" else s!"  as {h.name}"

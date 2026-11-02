@@ -170,7 +170,7 @@ every record. Viewers display it; they never need another source. With
         { "record": "sha256:…", "action": "approve", "signer": "example:jane", "date": "2026-10-23T14:02:11Z",
           "name": "Example.Ising.groundEnergy_le", "claim": "sha256:3b1f…", "note": null, "standing": "superseded" }
       ],
-      "blocked_by": [],
+      "blocked": false,
       "proof": { "status": "proven", "axioms": ["propext"], "unpermitted": [] },
       "evidence": "sha256:…",
       "tagged_deps": ["Example.Ising.Hamiltonian"],
@@ -201,7 +201,7 @@ every record. Viewers display it; they never need another source. With
 | `signers` | signers of live approvals carrying `claim` |
 | `history` | every record about this declaration, found by id, so across renames, in date order; `name` is its name in the record; a withdraw's `claim` is the one of the approval it withdraws |
 | `standing` | what an approval is worth now: `current` (live, carries `claim`), `superseded` (live, an older claim), `withdrawn`, `excluded` (by `leanblame.toml`), `not-allowed` (the signer is not in `allowed_signers`); `null` for a withdraw |
-| `blocked_by` | tagged dependencies whose state is not `valid`, recursively |
+| `blocked` | whether a tagged dependency, followed transitively, is not `valid`; `blame` names them |
 | `proof` | role `proved`: `proven` (every axiom standard, or tagged, `assumed` and valid), `open` (`sorryAx` or another axiom); `n/a` otherwise; with all axioms, and the `unpermitted` ones: neither standard, nor tagged and valid, nor `sorryAx` |
 | `evidence` | hash of an `equiv` proof that the current claim means what a live approval meant, if any |
 | `tagged_deps` | the tagged declarations the claim stops at |

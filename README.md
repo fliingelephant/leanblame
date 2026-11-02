@@ -97,7 +97,7 @@ Example `status` output:
 
 ```
 MyLib.energy outdated change=own-body:MyLib.energy;untagged:MyLib.double
-MyLib.energy_even valid blocked-by=MyLib.energy
+MyLib.energy_even valid blocked
 2 tagged: 1 valid, 1 outdated, 0 unsigned; 1 blocked
 ```
 
