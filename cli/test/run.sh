@@ -27,8 +27,9 @@
 # copy made after the first signoff: a rename keeps the id and the history (diff
 # matches it by id), blame by id, a new id is a new declaration (diff: added and removed), a shared id and a malformed one refused
 # -> tags written after the fact, `attribute [trusted] Name` in a library of their own: id writes
-# into the attribute, a second tag refused, a rename with a deprecated alias followed with the id
-# kept and the alias left untagged by id, a rename without one a build error.
+# into the attribute, a second tag refused, what deriving adds without a source position left
+# untagged by id, a rename with a deprecated alias followed with the id kept and the alias left
+# untagged by id, a rename without one a build error.
 # Before the first export, `id` writes the ids (export refuses a tag without
 # one); after the first body edit, status fails out loud when a signed graph is
 # missing or broken. Also out loud: export outside git, sign without --signer, a
@@ -938,6 +939,19 @@ printf 'attribute [trusted] Nat.succ Nat.pred\n' >> Tags.lean
 must_fail "a \`trusted\` tag names one declaration" -- "$lb" export
 git checkout -q -- Tags.lean
 ok "one tag names one declaration: two names in one attribute command are a build error"
+python3 - <<'PY'
+p = "Sample/Basic.lean"
+s = open(p).read()
+open(p, "w").write(s.replace("\nend Sample", "\n/-- A color. -/\ninductive Color where\n  | red\n  | green\n"
+  "  deriving DecidableEq\n\nend Sample", 1))
+PY
+commit "an enumeration that derives DecidableEq"
+run id
+grep -q " Sample\.Color$" <<<"$out" || fail "id did not tag Sample.Color: $out"
+! grep -q "ofNat_ctorIdx" <<<"$out" || fail "id tagged what deriving DecidableEq adds: $out"
+commit "tags: the enumeration"
+export_lib
+ok "id leaves what Lean adds without a source position untagged: Sample.Color.ofNat_ctorIdx, from deriving DecidableEq"
 python3 - <<'PY'
 p = "Sample/Basic.lean"
 s = open(p).read()

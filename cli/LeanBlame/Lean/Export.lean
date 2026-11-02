@@ -254,12 +254,15 @@ def withStatements (env : Environment) (declarations : Array (Name × BoundaryDe
 /-- Whether a user could tag `n`, that is, Lean did not generate it (trust-model.md): not a compiler
 auxiliary, recursor or recursor derivative, `noConfusion`, matcher, equation lemma or other
 reserved name, nor anything Lean's own `isAutoDeclOrPrivate_Internal` counts as generated
-(`T.brecOn.go`, `T.ctorIdx`, …). Constructors are tagged with their type, and a deprecated alias (a
-rename) with what it stands for, as a tag on it is (`renamed`). -/
+(`T.brecOn.go`, `T.ctorIdx`, …), nor what has no source position, as Lean records one for each
+declaration a user writes (`T.ofNat_ctorIdx`, which `deriving DecidableEq` adds to an enumeration).
+Constructors are tagged with their type, and a deprecated alias (a rename) with what it stands for,
+as a tag on it is (`renamed`). -/
 def taggable (n : Name) (ci : ConstantInfo) : CoreM Bool := do
   let env ← getEnv
   if n.isInternalDetail || isAuxRecursor env n || isNoConfusion env n || isRecCore env n ||
-      Meta.isMatcherCore env n || ci.isCtor || isReservedName env n || renamed env n != n then
+      Meta.isMatcherCore env n || ci.isCtor || isReservedName env n || renamed env n != n ||
+      (sourcePlace env n).isNone then
     return false
   return !(← isAutoDeclOrPrivate_Internal n)
 

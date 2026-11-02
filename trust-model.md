@@ -156,8 +156,9 @@ it publishes none.
 Tagging an `inductive` or `structure` tags the type, its constructors and its
 projections. Everything else Lean generates for it (`rec`, `casesOn`,
 `noConfusion`, `injEq`, `sizeOf`, …) is derived from those and stays untagged.
-Compiler auxiliaries (`match_n`, `proof_n`, `_unary`, …) are never tagged and
-never trigger the warning below.
+Compiler auxiliaries (`match_n`, `proof_n`, `_unary`, …) and whatever else Lean
+adds without a source position (`T.ofNat_ctorIdx`, from `deriving DecidableEq`
+on an enumeration) are never tagged and never trigger the warning below.
 
 `status` warns when a tagged declaration uses an untagged declaration from the
 same library. Usually that declaration should be tagged too, so it gets its own
