@@ -106,13 +106,10 @@ def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Arra
       | .path .. => { name := name p, git := none, rev := none, subDir := none }
   return (deps, requires)
 
-/-- The module defining `n`. (`env.header.moduleNames` would copy the module list on every call.) -/
-def moduleOf (env : Environment) (n : Name) : Except String Name :=
-  match env.getModuleIdxFor? n with
-  | some idx => match env.header.modules[idx.toNat]? with
-    | some m => .ok m.module
-    | none => .error s!"{n}: no module {idx}"
-  | none => .error s!"{n} is in no imported module"
+/-- The module defining `n`. -/
+def moduleOf (env : Environment) (n : Name) : IO Name := do
+  let some m := moduleOf? env n | fail s!"{n} is in no imported module"
+  return m
 
 /-- The `@[trusted]` declarations, tagged in any module, own or imported, with their ids and
 docstrings; and the problems. Two modules that do not import each other can tag one declaration;
@@ -234,7 +231,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
     if let some other := owner[id]? then
       errors := errors.push s!"{other} and {e.name} have the same id {id}; remove it from one of them and run `leanblame id`"
     owner := owner.insert id e.name
-    let module ← IO.ofExcept (moduleOf env e.name)
+    let module ← moduleOf env e.name
     let some place := sourcePlace env e.name <|> parent.bind (sourcePlace env)
       | errors := errors.push s!"{e.name}: Lean has no source position for it"; continue
     let d : BoundaryDecl := {
@@ -360,11 +357,10 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let boundaryList : BoundaryList := { library := package, declarations := declarations.map (·.2) }
   let mut own : Array (Name × ConstantInfo) := #[]
   for m in mods do
-    let some idx := env.getModuleIdx? m | fail s!"module {m} was not imported"
-    let some data := env.header.moduleData[idx.toNat]? | fail s!"module {m} has no data"
+    let some data := moduleData? env m | fail s!"module {m} was not imported"
     for n in data.constNames do
       -- A name in several modules belongs to the first, as in `moduleOf`.
-      unless env.getModuleIdxFor? n == some idx do continue
+      unless moduleOf? env n == some m do continue
       let some ci := env.constants.map₁[n]? | fail s!"{n} of module {m} is not in the environment"
       own := own.push (n, ci)
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
@@ -386,7 +382,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let boundary ← Store.putString root .boundaries (jsonText boundaryList)
   -- The graph: every claim hash, computed now by this LeanBlame, as the other commands only read it.
   let hashed ← try
-      let src ← Source.ofExport (← Source.parseFile tmp) fun n => IO.ofExcept (moduleOf env n)
+      let src ← Source.ofExport (← Source.parseFile tmp) (moduleOf env)
       Walk.hashExport backend src boundaryList exportHash boundary
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   Graph.save root hashed

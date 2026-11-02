@@ -45,6 +45,7 @@ state a theorem whose proof it needs.
 import Lean
 import Lean.Server.References
 import LeanBlame.Core.Store
+import LeanBlame.Lean.Modules
 
 namespace LeanBlame.Pieces
 
@@ -383,8 +384,7 @@ def readModule (env : Environment) (options : Options) (library : NameSet) (m : 
     let closes := if role != .closes then 0 else if d[1].getNumArgs == 0 then 1
       else d[1][0].getId.components.length
     cmds := cmds.push { stx, start, stop, role, ns, openDecls, opens, closes, opened }
-  let some idx := env.getModuleIdx? m | fail s!"module {m} was not imported"
-  let some data := env.header.moduleData[idx.toNat]? | fail s!"module {m} has no data"
+  let some data := moduleData? env m | fail s!"module {m} was not imported"
   let mut owner : NameMap Nat := {}
   let mut later := #[]
   for n in data.constNames do
@@ -403,8 +403,7 @@ def readModule (env : Environment) (options : Options) (library : NameSet) (m : 
   for (ident, info) in il.references do
     let .const _ text := ident | continue
     let some n := nameOf? text | continue
-    let some i := env.getModuleIdxFor? n | continue
-    let some mod := env.header.moduleNames[i.toNat]? | continue
+    let some mod := moduleOf? env n | continue
     unless library.contains mod do continue
     for u in info.usages do
       let r := u.range
@@ -583,8 +582,7 @@ def importClosure (env : Environment) (roots : Array Name) : NameSet := Id.run d
     todo := todo.pop
     if seen.contains m then continue
     seen := seen.insert m
-    if let some i := env.getModuleIdx? m then
-      todo := todo ++ (env.header.moduleData[i.toNat]?.map (·.imports.map (·.module))).getD #[]
+    todo := todo ++ importsOf env m
   return seen
 
 /-- The constants in the kernel terms of `n`: its type, and with `value` its value or proof. -/
@@ -721,10 +719,7 @@ what the library's requires (`required`); its toolchain is the library's (`toolc
 def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (options : Name → Options)
     (theorems others : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
   let libSet : NameSet := library.foldl (·.insert ·) {}
-  let moduleOf (n : Name) : Option Name := do
-    let i ← env.getModuleIdxFor? n
-    let m ← env.header.moduleNames[i.toNat]?
-    if libSet.contains m then some m else none
+  let moduleOf (n : Name) : Option Name := (moduleOf? env n).filter libSet.contains
   -- Each module read once; `fresh`: those read since `make` last looked at their `attribute` commands.
   let reads ← IO.mkRef ({} : Std.HashMap Name (Except String Read))
   let fresh ← IO.mkRef (#[] : Array Name)
@@ -774,7 +769,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     if let some x := ← makersRef.get then return x
     let map := (importClosure env library).foldl (init := ({} : Std.HashMap Name (Array Name))) fun map mod =>
       if libSet.contains mod then map else
-      match (env.getModuleIdx? mod).bind (env.header.moduleData[·.toNat]?) with
+      match moduleData? env mod with
       | none => map
       | some d => d.constNames.foldl (init := map) fun map n =>
         (namespacesOf n {}).foldl (init := map) fun map ns =>
@@ -794,8 +789,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     let mk ← makers
     let cl ← closureOf m
     return opened.filter fun ns => !((mk[ns]?).getD #[]).any cl.contains
-  let importsOf (m : Name) : Array Name :=
-    (((env.getModuleIdx? m).bind (env.header.moduleData[·.toNat]?)).map (·.imports.map (·.module))).getD #[]
   -- What module `m` imports from outside the library, through the library's modules it imports; not
   -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
   let outsideOf (m : Name) : Array Name := Id.run do
@@ -807,7 +800,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       todo := todo.pop
       if seen.contains x then continue
       seen := seen.insert x
-      for i in importsOf x do
+      for i in importsOf env x do
         if libSet.contains i then todo := todo.push i
         else if i != `Init && !(`LeanBlame).isPrefixOf i && !out.contains i then out := out.push i
     return out

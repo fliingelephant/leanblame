@@ -95,7 +95,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
     -- declarations keep the library's hashes, and only the challenge's own are hashed.
     let outside (s : String) := (lib.nodes[s]?).filter (!libModules.contains ·.decl.module.toName)
     let decl ← Source.declsIn env (present.filterMap (Pieces.nameOf? ·.name))
-      (fun n => IO.ofExcept (Export.moduleOf env n)) rename
+      (Export.moduleOf env) rename
     let h : Core.Hashed := { lib with nodes := ← Walk.hashNodes decl boundary outside, boundary, axioms := {} }
     let claim (g : Core.Hashed) (s : String) := g.nodes[s]?.map (·.claim)
     let differ := present.filter fun d => claim lib d.name != claim h d.name
@@ -111,7 +111,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
         if changed.contains ci.name.toString then consts := consts.insert ci.name ci
     -- The challenge's names of the library's private constants.
     let own := mods.flatMap fun m =>
-      ((env.getModuleIdx? m).bind (env.header.moduleData[·.toNat]?)).map (·.constNames) |>.getD #[]
+      ((moduleData? env m).map (·.constNames)).getD #[]
     let toNew : Std.HashMap Name Name := own.foldl (init := {}) fun acc c => if rename c == c then acc else acc.insert (rename c) c
     let proven ← Equiv.prove env.toKernelEnv
       { old := lib, new := h, oldConst? := (consts[·]?), newConst? := fun n => env.find? (toNew.getD n n)
