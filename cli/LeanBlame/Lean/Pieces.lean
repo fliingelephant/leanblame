@@ -62,13 +62,18 @@ def challengeFile : String := "Challenge.lean"
 def files : Array String := #[lakefileFile, toolchainFile, depsFile, challengeFile]
 
 /-- A piece of the piece graph (docs/schemas.md §6): its text in one file of a challenge;
-the pieces it needs, by index; the tagged declaration it is the root of; the tagged declarations it
-declares; and why a challenge that holds it cannot be made. -/
+the pieces it needs, by index; the tagged declaration it is the root of, with the axioms a solution
+may use for it; the tagged declarations it declares; and why a challenge that holds it cannot be
+made. -/
 structure Piece where
   file : String
   text : String
   needs : Array Nat
   root : Option String
+  /-- Of a root: the standard axioms, and those its declaration is or rests on by its statement and
+  definitions, never by a proof (`Walk.permittedAxioms`). A challenge permits the union over its
+  roots. -/
+  axioms : Array String := #[]
   declares : Array String
   problem : Option String
   deriving Inhabited
@@ -81,16 +86,18 @@ structure Graph where
 
 instance : ToJson Piece where
   toJson p := Json.mkObj [("file", p.file), ("text", p.text), ("needs", toJson p.needs),
-    ("root", toJson p.root), ("declares", toJson p.declares), ("problem", toJson p.problem)]
+    ("root", toJson p.root), ("axioms", toJson p.axioms), ("declares", toJson p.declares),
+    ("problem", toJson p.problem)]
 
 instance : ToJson Graph where
   toJson g := Json.mkObj [("pieces", toJson g.pieces)]
 
 def Piece.fromJson? (j : Json) : Except String Piece := do
-  let o ← JsonObj.read j "piece" ["file", "text", "needs", "root", "declares", "problem"]
+  let o ← JsonObj.read j "piece" ["file", "text", "needs", "root", "axioms", "declares", "problem"]
   let p : Piece := { file := ← o.get String "file", text := ← o.get String "text", needs := ← o.get (Array Nat) "needs"
-                     root := ← o.get (Option String) "root", declares := ← o.get (Array String) "declares"
-                     problem := ← o.get (Option String) "problem" }
+                     root := ← o.get (Option String) "root", axioms := ← o.get (Array String) "axioms"
+                     declares := ← o.get (Array String) "declares", problem := ← o.get (Option String) "problem" }
+  if p.root.isNone && !p.axioms.isEmpty then throw "piece: axioms on a piece that is no root"
   unless files.contains p.file do throw s!"piece: `{p.file}` is not a file of a challenge"
   return p
 
@@ -105,12 +112,18 @@ def Graph.fromJson? (j : Json) : Except String Graph := do
 def read (root : System.FilePath) (hash : String) : IO Graph := do
   readJson (← Store.objectFile root .pieces hash) Graph.fromJson?
 
-/-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
-text: their roots, the pieces those need, the pieces these need, and so on, each file the text of its
-pieces in order; and the theorems `Challenge.lean` states. Or why it cannot be made: the problems of
-the pieces it holds, and each name two of them declare (a theorem it states whose proof it needs). -/
-def Graph.cut (g : Graph) (names : Array String) :
-    Except (Array String) (Array (String × String) × Array String) := do
+/-- A challenge: each file with its text; the theorems `Challenge.lean` states; the axioms a
+solution may use, the union over its roots. -/
+structure Cut where
+  files : Array (String × String)
+  theorems : Array String
+  axioms : Array String
+
+/-- The challenge of the tagged declarations `names` (docs/schemas.md §6): their roots, the pieces
+those need, the pieces these need, and so on, each file the text of its pieces in order. Or why it
+cannot be made: the problems of the pieces it holds, and each name two of them declare (a theorem it
+states whose proof it needs). -/
+def Graph.cut (g : Graph) (names : Array String) : Except (Array String) Cut := do
   let starts ← names.mapM fun n => match g.pieces.findIdx? (·.root == some n) with
     | some i => pure i
     | none => throw #[s!"{n} has no root in the piece graph"]
@@ -125,8 +138,10 @@ def Graph.cut (g : Graph) (names : Array String) :
     twice.map (s!"{·}: the challenge needs its proof, so it cannot state it")
   unless problems.isEmpty do throw problems
   let held := order.map (g.pieces[·]!)
-  return (files.map fun f => (f, String.join (held.filterMap fun p => if p.file == f then some p.text else none).toList),
-    held.flatMap fun p => if p.file == challengeFile then p.declares else #[])
+  return {
+    files := files.map fun f => (f, String.join (held.filterMap fun p => if p.file == f then some p.text else none).toList)
+    theorems := held.flatMap fun p => if p.file == challengeFile then p.declares else #[]
+    axioms := dedup (held.flatMap (·.axioms)) }
 
 /-- Where Lean's declaration ranges put `n` in its source; a module of the module system keeps
 those of its private declarations at the private level. -/

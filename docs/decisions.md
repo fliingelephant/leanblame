@@ -84,7 +84,9 @@ what that needs, and so on. What several declarations need is there once.
 library in the lakefile) and `comparator.json`: the theorems the challenge
 states, and the axioms a solution may use, the standard ones and those the
 chosen declarations are or rest on by their statements and definitions. Which
-axioms are permitted depends on declarations, never on a proof.
+axioms are permitted depends on declarations, never on a proof. `export` puts
+each root's axioms in the piece graph; a challenge permits their union, so a
+service that cuts the graph itself (OpenVouch) applies no rule of its own.
 
 - A piece is mostly a command, from its first token (the docstring) to its end,
   as written. The others: the lakefile, the toolchain, an `import`, a

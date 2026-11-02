@@ -69,12 +69,11 @@ def tarjan [BEq α] [Hashable α] [Inhabited α] (roots : Array α) (succ : α �
   return st.sccs
 
 /--
-The assumptions each of `roots` rests on, sorted: the declarations `Source.isAssumed` names among
-those reached through `Source.uses` (statements and bodies, proofs included), in one pass over the
-components of the graph instead of one walk per root.
+The assumptions each of `roots` rests on, sorted: the declarations `isAssumed` names among those
+reached through `uses`, in one pass over the components of the graph instead of one walk per root.
 -/
-def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Array String) :=
-    Id.run do
+def assumptionsOf (roots : Array String) (uses : String → Array String) (isAssumed : String → Bool) :
+    Std.HashMap String (Array String) := Id.run do
   -- The reachable graph, each declaration's edges computed once.
   let mut succs : Std.HashMap String (Array String) := {}
   let mut todo := roots
@@ -82,7 +81,7 @@ def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Ar
     let n := todo[todo.size - 1]
     todo := todo.pop
     if succs.contains n then continue
-    let ss := src.uses n
+    let ss := uses n
     succs := succs.insert n ss
     todo := todo ++ ss
   -- Components come after every component they reach.
@@ -90,12 +89,26 @@ def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Ar
   for comp in tarjan roots (succs.getD · #[]) do
     let mut set : Std.HashSet String := {}
     for n in comp do
-      if src.isAssumed n then set := set.insert n
+      if isAssumed n then set := set.insert n
       for d in succs.getD n #[] do
         set := (axioms.getD d #[]).foldl (·.insert ·) set
     let sorted := Core.sortNames set.toArray
     for n in comp do axioms := axioms.insert n sorted
   return roots.foldl (init := {}) fun m n => m.insert n (axioms.getD n #[])
+
+/-- The assumptions each of `roots` rests on through `Source.uses`: statements and bodies, proofs
+included. -/
+def axiomsOf (src : Core.Source) (roots : Array String) : Std.HashMap String (Array String) :=
+  assumptionsOf roots src.uses src.isAssumed
+
+/-- The axioms a solution of a challenge of each of `roots` may use: the standard ones, and those it
+is or rests on by its statement and definitions, never by a proof (the graph's dependencies); not one
+standing for a missing proof. -/
+def permittedAxioms (h : Core.Hashed) (roots : Array String) : Std.HashMap String (Array String) :=
+  let deps (n : String) := (h.nodes[n]?.map (·.decl.deps)).getD #[]
+  let assumed (n : String) := h.nodes[n]?.any (·.decl.role == .assumed)
+  (assumptionsOf roots deps assumed).fold (init := {}) fun m n axs =>
+    m.insert n (h.standard ++ axs.filter fun a => !h.standard.contains a && !h.incomplete.contains a)
 
 /-- Hash every declaration reachable from the boundary list, with the facts `decl` reports; an
 untagged declaration `trusted` names is its statement alone, where the walk stops. A declaration

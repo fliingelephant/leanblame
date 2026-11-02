@@ -300,13 +300,17 @@ printf '%s' "$out" >"$logs/graph.json"
 python3 - "$work-challenge" "$logs/graph.json" <<'PY' || fail "challenge graph: the cut of its graph is not the challenge"
 import json, sys
 g = json.load(open(sys.argv[2]))["pieces"]
-assert all(set(p) == {"file", "text", "needs", "root", "declares", "problem"} for p in g), g[0]
+assert all(set(p) == {"file", "text", "needs", "root", "axioms", "declares", "problem"} for p in g), g[0]
 assert all(n < len(g) for p in g for n in p["needs"]), "a piece needs a piece the graph lacks"
 roots = {p["root"]: i for i, p in enumerate(g) if p["root"]}
 assert set(roots) == {"Sample.energy", "Sample.Point", "Sample.Point.mk", "Sample.Point.x", "Sample.Point.y",
                       "Sample.Point.norm", "Sample.pointEnergy", "Sample.second_site", "Sample.energy_even",
                       "Sample.energy_pos", "Sample.one_site_pos"}, roots
 assert all(g[i]["text"] == "" for i in roots.values()), "a root has text"
+standard = ["propext", "Classical.choice", "Quot.sound"]
+assert all(p["axioms"] == [] for p in g if not p["root"]), "axioms on a piece that is no root"
+assert g[roots["Sample.energy_pos"]]["axioms"] == standard + ["Sample.energy_pos"], g[roots["Sample.energy_pos"]]
+assert g[roots["Sample.one_site_pos"]]["axioms"] == standard, "a proof grants no axiom"
 statements = {n for p in g if p["file"] == "Challenge.lean" for n in p["declares"]}
 assert statements == {"Sample.second_site", "Sample.energy_even", "Sample.one_site_pos"}, statements
 held, todo = set(), [roots["Sample.energy_even"], roots["Sample.second_site"]]

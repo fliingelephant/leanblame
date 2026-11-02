@@ -266,13 +266,14 @@ The pieces the comparator challenges of the library's tagged declarations are cu
 ```json
 {
   "pieces": [
-    { "file": "lakefile.toml", "text": "name = \"challenge\"\n…", "needs": [], "root": null, "declares": [],
+    { "file": "lakefile.toml", "text": "name = \"challenge\"\n…", "needs": [], "root": null, "axioms": [], "declares": [],
       "problem": null },
     { "file": "ChallengeDeps.lean", "text": "\n/-- Twice a natural number. -/\ndef double …\n", "needs": [3, 4],
-      "root": null, "declares": [], "problem": null },
+      "root": null, "axioms": [], "declares": [], "problem": null },
     { "file": "Challenge.lean", "text": "\ntheorem energy_even (n : Nat) : energy n % 2 = 0 := sorry\n",
-      "needs": [5, 9], "root": null, "declares": ["Sample.energy_even"], "problem": null },
-    { "file": "Challenge.lean", "text": "", "needs": [0, 1, 12], "root": "Sample.energy_even", "declares": [],
+      "needs": [5, 9], "root": null, "axioms": [], "declares": ["Sample.energy_even"], "problem": null },
+    { "file": "Challenge.lean", "text": "", "needs": [0, 1, 12], "root": "Sample.energy_even",
+      "axioms": ["propext", "Classical.choice", "Quot.sound"], "declares": [],
       "problem": null }
   ]
 }
@@ -284,11 +285,15 @@ The pieces the comparator challenges of the library's tagged declarations are cu
 | `text` | the piece's text in that file |
 | `needs` | the pieces it needs, by index |
 | `root` | the tagged declaration this piece is the root of, or `null`. Each tagged declaration has one root: a piece of `Challenge.lean` with no text that needs the lakefile, the toolchain, and the theorem's statement or the command that declares any other declaration |
+| `axioms` | of a root: the axioms a solution may use for its declaration, the standard ones and those it is or rests on by its statement and definitions, never by a proof; `[]` for any other piece |
 | `declares` | the tagged declarations it declares: a statement, its theorem; a command, those among what it declares (a structure's command: the structure, its constructor and its fields) |
 | `problem` | why a challenge that holds it cannot be made, or `null` |
 
 The challenge of tagged declarations D: start from their roots; add the pieces they need, then the
 pieces those need, until nothing is added. It cannot be made when a piece it holds has a `problem`,
 or two pieces it holds declare the same name (a theorem it states whose proof it needs). Otherwise
-each file is the text of its pieces, in index order.
+each file is the text of its pieces, in index order. `Solution.lean` is a copy of `Challenge.lean`;
+`comparator.json` names the theorems the pieces of `Challenge.lean` declare (`theorem_names`) and the
+union of the roots' `axioms` (`permitted_axioms`), with `challenge_module` `Challenge` and
+`solution_module` `Solution`.
 

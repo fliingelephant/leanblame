@@ -374,7 +374,6 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let theorems := declarations.filterMap fun (n, d) => if states n d then some n else none
   let others := declarations.filterMap fun (n, d) => if states n d then none else some n
   let graph ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) theorems others requires toolchain
-  let pieces ← Store.putString root .pieces (jsonText graph)
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
   -- The constants to export: the boundary list's declarations; the exporter adds what they use.
@@ -398,6 +397,12 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
       Walk.hashExport backend (← Source.ofExport exported modules) boundaryList trusted.contains exportHash boundary
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   Graph.save root hashed
+  -- Each root with the axioms a solution may use for it, from the claim graph.
+  let permitted := Walk.permittedAxioms hashed (boundaryList.declarations.map (·.name))
+  let withAxioms (p : Pieces.Piece) : Pieces.Piece := match p.root with
+    | some n => { p with axioms := permitted.getD n #[] }
+    | none => p
+  let pieces ← Store.putString root .pieces (jsonText ({ pieces := graph.pieces.map withAxioms } : Pieces.Graph))
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
   let ownedHash ← Store.putString root .owned ("\n".intercalate (owned.qsort (· < ·)).toList ++ "\n")
   Store.writeCurrent root

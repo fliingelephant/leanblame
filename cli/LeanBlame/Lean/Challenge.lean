@@ -9,8 +9,7 @@ and what all of them need, and imports what that
 needs from outside the library; `lakefile.toml` has what the library's lakefile requires;
 `lean-toolchain` the library's toolchain. With them come `Solution.lean`, a copy of `Challenge.lean`
 for a solver to prove, and `comparator.json` for `lake comparator`: the theorems `Challenge.lean`
-states, and the axioms a solution may use, the standard ones and those the chosen declarations are or
-rest on by their statements and definitions, never by a proof. What stops a challenge is in the graph:
+states, and the axioms a solution may use, the union over the chosen roots (`Pieces.Piece.axioms`). What stops a challenge is in the graph:
 it stops `challenge`, not `export`. `challenge graph` prints the graph, for a service that cuts challenges
 itself.
 
@@ -38,13 +37,6 @@ namespace LeanBlame.Challenge
 
 open Lean
 
-/-- The axioms a solution may use: the standard ones, and those the chosen declarations are or rest
-on by their statements and definitions, never by a proof; not one standing for a missing proof. -/
-def permittedAxioms (g : Core.Hashed) (chosen : Array String) : Array String :=
-  let reached := Id.run <| reach chosen fun n => pure ((g.nodes[n]?.map (·.decl.deps)).getD #[])
-  g.standard ++ Core.sortNames (reached.filter fun n =>
-    g.nodes[n]?.any (·.decl.role == .assumed) && !g.standard.contains n && !g.incomplete.contains n)
-
 /-- `comparator.json`, the configuration of `lake comparator`: the theorems a solution proves, in
 `Solution`, against `Challenge`, and the axioms it may use. -/
 def comparatorConfig (theorems axioms : Array String) : String :=
@@ -63,12 +55,11 @@ def write (root out : System.FilePath) (names : Array String) : IO Unit := do
   match (← Pieces.read root cur.pieces).cut (dedup chosen) with
   | .error problems =>
     fail ("this challenge cannot be made:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
-  | .ok (files, theorems) =>
-    let axioms := permittedAxioms (← Graph.load root cur.exportHash cur.boundary) chosen
+  | .ok cut =>
     IO.FS.createDirAll out
-    for (f, text) in files do IO.FS.writeFile (out / f) text
-    IO.FS.writeFile (out / "Solution.lean") ((files.find? (·.1 == Pieces.challengeFile)).map (·.2) |>.getD "")
-    IO.FS.writeFile (out / "comparator.json") (comparatorConfig (Core.sortNames theorems) axioms)
+    for (f, text) in cut.files do IO.FS.writeFile (out / f) text
+    IO.FS.writeFile (out / "Solution.lean") ((cut.files.find? (·.1 == Pieces.challengeFile)).map (·.2) |>.getD "")
+    IO.FS.writeFile (out / "comparator.json") (comparatorConfig (Core.sortNames cut.theorems) cut.axioms)
 
 /-- The piece graph of the last export (docs/schemas.md §6). -/
 def graph (root : System.FilePath) : IO Pieces.Graph := do
