@@ -226,6 +226,7 @@ structure Read where
   refs : Array (String.Pos.Raw × String.Pos.Raw × Name)
   /-- Where the source writes the name of each constant it declares, as `refs`. -/
   defs : Array (String.Pos.Raw × String.Pos.Raw × Name)
+  /-- How its commands nest. -/
   scopes : Scopes
 
 /-- The library's constants that the names in `c` refer to. -/

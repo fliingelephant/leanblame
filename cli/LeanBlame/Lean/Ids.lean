@@ -22,25 +22,6 @@ def newId : IO String := do
   let group (start len : Nat) := String.ofList ((cs.drop start).take len)
   return s!"{group 0 8}-{group 8 4}-{group 12 4}-{group 16 4}-{group 20 12}"
 
-/-- The character index of `pos` (line from 1, column in characters from 0) in `cs`. -/
-def offsetOf (cs : Array Char) (pos : Position) : Nat := Id.run do
-  let mut line := 1
-  let mut i := 0
-  while line < pos.line && i < cs.size do
-    if cs[i]! == '\n' then line := line + 1
-    i := i + 1
-  return i + pos.column
-
-/-- `cs` with each of `texts` inserted at the offset of the same index in `offsets`. -/
-def insertAll (cs : Array Char) (offsets : Array Nat) (texts : Array String) : String := Id.run do
-  let pairs := (offsets.zip texts).qsort (·.1 < ·.1)
-  let mut out := ""
-  let mut last := 0
-  for (k, t) in pairs do
-    out := out ++ String.ofList (cs.extract last k).toList ++ t
-    last := k
-  return out ++ String.ofList (cs.extract last cs.size).toList
-
 def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
   let l ← Export.load root libsGiven
   let own : NameSet := l.mods.foldl (·.insert ·) {}
@@ -49,9 +30,9 @@ def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
     IO.eprintln "leanblame: every tagged declaration of this library has an id"
     return 0
   let shown (f : System.FilePath) : String := ((f.toString.dropPrefix? (root.toString ++ "/")).map (·.copy)).getD f.toString
-  -- Per source file: where to insert, and what.
-  let mut edits : Std.HashMap System.FilePath (Array (Name × Nat × String)) := {}
-  let mut texts : Std.HashMap System.FilePath (Array Char) := {}
+  -- Per source file: its text, and each tagged declaration with its id and where to insert it.
+  let mut texts : Std.HashMap System.FilePath FileMap := {}
+  let mut edits : Std.HashMap System.FilePath (Array (Name × String × String.Pos.Raw)) := {}
   let mut problems := #[]
   for (m, t) in missing.qsort (·.2.decl.cmp ·.2.decl == .lt) do
     let (n, id) := (t.decl, ← newId)
@@ -59,19 +40,21 @@ def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
       | problems := problems.push s!"{n}: cannot find the source of {m}; write trusted \"{id}\" by hand"
     let some pos := t.pos
       | problems := problems.push s!"{n}: its tag in {m} has no source position; write trusted \"{id}\" by hand"
-    let cs ← match texts[file]? with
-      | some cs => pure cs
-      | none => pure (← IO.FS.readFile file).toList.toArray
-    texts := texts.insert file cs
-    let k := offsetOf cs pos
-    unless k ≥ 7 && String.ofList (cs.extract (k - 7) k).toList == "trusted" do
+    let text ← match texts[file]? with
+      | some text => pure text
+      | none => pure (FileMap.ofString (← IO.FS.readFile file))
+    texts := texts.insert file text
+    let k := text.ofPosition pos
+    unless k.byteIdx ≥ 7 && String.Pos.Raw.extract text.source ⟨k.byteIdx - 7⟩ k == "trusted" do
       problems := problems.push s!"{n}: no `trusted` at {shown file}:{pos.line}:{pos.column}; write trusted \"{id}\" there"
       continue
-    edits := edits.insert file ((edits.getD file #[]).push (n, k, id))
+    edits := edits.insert file ((edits.getD file #[]).push (n, id, k))
   let mut written := #[]
   for (file, es) in edits do
-    IO.FS.writeFile file (insertAll texts[file]! (es.map (·.2.1)) (es.map fun e => s!" \"{e.2.2}\""))
-    written := written ++ es.map fun (n, _, id) => (n, id)
+    let source := texts[file]!.source
+    IO.FS.writeFile file <| Pieces.apply source.toUTF8 0 source.rawEndPos <|
+      es.map fun (_, id, k) => { start := k, stop := k, text := s!" \"{id}\"" }
+    written := written ++ es.map fun (n, id, _) => (n, id)
   for (n, id) in written.qsort (·.1.cmp ·.1 == .lt) do IO.println s!"{id} {n}"
   unless written.isEmpty do
     let files := (edits.toArray.map (shown ·.1)).qsort (· < ·)
