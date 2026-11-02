@@ -618,19 +618,33 @@ must_fail "https://example.invalid/records.git: only local directories are suppo
 git checkout -q -- leanblame.toml
 ok "a remote records repository is an error"
 
-echo "== export refuses undocumented and unsafe tagged declarations"
+echo "== a tagged declaration without docstring; export refuses an unsafe one"
 cat >> Sample/Basic.lean <<'EOF'
 
 namespace Sample
-@[trusted] def undocumented (n : Nat) : Nat := n
 /-- Unsafe code never reaches the kernel. -/
 @[trusted] unsafe def unsafeEnergy (n : Nat) : Nat := n
 end Sample
 EOF
-must_fail "Sample.undocumented: tagged declarations need a docstring" \
-  'Sample.unsafeEnergy: `unsafe` declarations cannot be tagged' -- "$lb" export
+must_fail 'Sample.unsafeEnergy: `unsafe` declarations cannot be tagged' -- "$lb" export
 git checkout -q -- Sample/Basic.lean
-ok "export refuses a tagged declaration without docstring and an unsafe one"
+ok "export refuses an unsafe tagged declaration"
+cat >> Sample/Basic.lean <<'EOF'
+
+namespace Sample
+@[trusted "0d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6"] def undocumented (n : Nat) : Nat := n
+end Sample
+EOF
+run export
+"$lb" status --json >"$logs/undocumented.json" || fail "status --json with an undocumented declaration"
+python3 - "$logs/undocumented.json" <<'PY' || fail "an undocumented tagged declaration"
+import json, sys
+d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}["Sample.undocumented"]
+assert (d["informal"], d["state"]) == ("", "unsigned"), d
+assert "".join(s["text"] for s in d["statement"]["pretty"]) == "Sample.undocumented (n : Nat) : Nat", d["statement"]
+PY
+git checkout -q -- Sample/Basic.lean
+ok "a tagged declaration without docstring is exported with empty informal text; its statement is its name and type"
 
 echo "== blueprint: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
 stored_boundary() { echo ".leanblame/store/boundaries/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }

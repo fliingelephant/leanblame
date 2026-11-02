@@ -108,7 +108,7 @@ def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Arra
   return (deps, requires)
 
 /-- The `@[trusted]` declarations, tagged in any module, own or imported, with their ids and
-docstrings; and the problems. Two modules that do not import each other can tag one declaration;
+docstrings (empty for none); and the problems. Two modules that do not import each other can tag one declaration;
 that is refused here. -/
 def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
   let mut tags := #[]
@@ -119,11 +119,7 @@ def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
     if let some m' := taggedIn.find? n then
       errors := errors.push s!"{n}: tagged in {m'} and in {m}; a declaration has one tag"; continue
     taggedIn := taggedIn.insert n m
-    let some doc ← findSimpleDocString? env n
-      | errors := errors.push s!"{n}: tagged declarations need a docstring (the informal text)"; continue
-    let informal := normalizeInformal doc
-    if informal.isEmpty then
-      errors := errors.push s!"{n}: tagged declarations need a non-empty docstring"; continue
+    let informal := ((← findSimpleDocString? env n).map normalizeInformal).getD ""
     tags := tags.push { name := n, id, informal }
   return (tags, errors)
 

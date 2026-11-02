@@ -15,7 +15,7 @@ namespace LeanBlame
 
 /--
 `@[trusted]` puts a declaration on the trusted boundary: a human must read it,
-with its docstring, for results that use it to mean anything. Tagging a
+with its docstring if it has one, for results that use it to mean anything. Tagging a
 `structure` or `inductive` also tags its constructors and projections.
 
 `@[trusted "id"]` also gives the declaration its id: a random UUID, which

@@ -39,8 +39,8 @@ import LeanBlame.Attr
 @[trusted] def energy (n : Nat) : Nat := double n
 ```
 
-A tagged declaration needs a docstring; the docstring is what the reviewer
-approves. Tagging a `structure` or `inductive` also tags its constructors and
+The reviewer approves the docstring with the statement; without a docstring,
+the statement is the name and type. Tagging a `structure` or `inductive` also tags its constructors and
 projections.
 
 A declaration of another module, also of a library you do not own, is tagged

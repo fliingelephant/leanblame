@@ -213,7 +213,7 @@ structure BoundaryDecl where
   `theorem`, `structure`, `field`, …); never interpreted, never hashed. -/
   kind : String
   role : Role
-  /-- The docstring (a member without one: its parent's), as `normalizeInformal` leaves it. -/
+  /-- The docstring (a member without one: its parent's; else empty), as `normalizeInformal` leaves it. -/
   informal : String
   statement : Statement
   deriving Inhabited, Repr
@@ -244,7 +244,7 @@ def BoundaryDecl.fromJson? (j : Json) : Except String BoundaryDecl := do
     name, id := ← o.get String "id", parent := ← o.get (Option String) "parent"
     module := ← o.get String "module", kind := ← o.get String "kind", role := ← o.get Role "role"
     informal := ← o.get String "informal", statement := ← o.get Statement "statement" }
-  for (k, v) in [("id", d.id), ("kind", d.kind), ("informal", d.informal)] do
+  for (k, v) in [("id", d.id), ("kind", d.kind)] do
     if v.isEmpty then throw s!"{o.what}: `{k}` is empty"
   unless normalizeInformal d.informal == d.informal do
     throw s!"{o.what}: the informal text has surrounding whitespace or CRLF line endings"

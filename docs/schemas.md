@@ -46,7 +46,7 @@ dependencies they come from are in `.leanblame/current` and in each record.
 | `parent` | the declaration whose id stands for this one: the first declaration of its blueprint label, else the tagged structure or inductive it is a constructor or projection of; a parent without an id of its own is passed over for its own parent; else `null` |
 | `kind` | what it is, in the proof assistant's own words; never interpreted, never hashed (the hash takes the kernel's kind, [trust-model.md](../trust-model.md)). Lean, as its documentation (doc-gen4) names it: `def`, `theorem`, `axiom`, `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's projection |
 | `role` | `assumed` (no body; the statement is taken as true), `defined` (the body is the meaning), `proved` (the body is a proof) |
-| `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings; required. An untagged member without a docstring has its parent's |
+| `informal` | the text the signer relies on, the docstring or the blueprint's statement, trimmed, with LF line endings. An untagged member without a docstring has its parent's; a declaration without one has `""`, and its statement is its name and type |
 | `statement` | the signature (name, binders, type), printed twice as segments: `pretty` as the library's documentation (doc-gen4) prints it, with the notations of the library and what it imports; `plain` with notation, field notation and coercions off. A segment is `{"text", "const"}`, `const` the printed name of the constant the text refers to, or `null` |
 
 ## 2. Record (storage, TOML)
