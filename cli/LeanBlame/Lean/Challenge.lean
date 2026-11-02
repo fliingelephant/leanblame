@@ -39,10 +39,7 @@ def write (root out : System.FilePath) (names : Array String) : IO Unit := do
   if ← out.pathExists then fail s!"{out} exists; a challenge goes into a new directory"
   let cur ← Store.readCurrent root
   let boundary ← Status.loadBoundary root cur.boundary
-  let chosen ← names.mapM fun x => do
-    let some d := boundary.declarations.find? fun d => d.name == x || d.id == x
-      | fail s!"{x} is not on the boundary list of the last export"
-    return d.name
+  let chosen ← names.mapM fun x => (·.name) <$> IO.ofExcept (boundary.resolve x)
   match (← Pieces.read root cur.pieces).cut (dedup chosen) with
   | .error problems =>
     fail ("this challenge cannot be made:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))

@@ -254,10 +254,9 @@ def blame (root : System.FilePath) (key : String) : IO UInt32 := do
       some <$> compute root ledger
     else pure none
   let decls := (current?.map (·.report.declarations)).getD #[]
-  let (id, decl?) ← match decls.filter fun d => d.decl.name == key || d.decl.id == key with
-    | #[d] => pure (d.decl.id, some d)
-    | #[] => pure (← recordedId ledger key, none)
-    | _ => fail s!"{key} is the name of one declaration and the id of another"
+  let (id, decl?) ← match ← IO.ofExcept (byNameOrId? decls (·.decl.name) (·.decl.id) key) with
+    | some d => pure (d.decl.id, some d)
+    | none => pure (← recordedId ledger key, none)
   match decl? with
   | some d =>
     IO.println s!"{d.decl.name}  {d.decl.kind}  {d.state}  claim {d.claim}"

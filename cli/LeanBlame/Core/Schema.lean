@@ -265,10 +265,12 @@ def BoundaryList.fromJson? (j : Json) : Except String BoundaryList := do
 
 /-- The declaration `key` names, by its name or its id. -/
 def BoundaryList.find? (b : BoundaryList) (key : String) : Except String (Option BoundaryDecl) :=
-  match b.declarations.filter fun d => d.name == key || d.id == key with
-  | #[] => .ok none
-  | #[d] => .ok (some d)
-  | ds => .error s!"{key} is the name of one declaration and the id of another: {", ".intercalate (ds.toList.map (·.name))}"
+  byNameOrId? b.declarations (·.name) (·.id) key
+
+/-- The declaration `key` names, by its name or its id; an error when none does. -/
+def BoundaryList.resolve (b : BoundaryList) (key : String) : Except String BoundaryDecl := do
+  let some d ← b.find? key | throw s!"{key} is not on the boundary list"
+  return d
 
 def BoundaryList.parse (contents : String) : Except String BoundaryList := do
   BoundaryList.fromJson? (← Json.parse contents)

@@ -23,6 +23,13 @@ def dedup [BEq α] [Hashable α] (xs : Array α) : Array α := Id.run do
       out := out.push x
   return out
 
+/-- The one of `xs` that `key` names, by its name or its id; an error when it names two. -/
+def byNameOrId? (xs : Array α) (name id : α → String) (key : String) : Except String (Option α) :=
+  match xs.filter fun x => name x == key || id x == key with
+  | #[] => .ok none
+  | #[x] => .ok (some x)
+  | xs => .error s!"{key} is the name of one declaration and the id of another: {", ".intercalate (xs.toList.map name)}"
+
 /-- What `roots` reach through `next`, each once, in the order a depth-first walk first takes them. -/
 def reach [Monad m] [BEq α] [Hashable α] (roots : Array α) (next : α → m (Array α)) : m (Array α) := do
   let mut seen : Std.HashSet α := {}

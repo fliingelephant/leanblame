@@ -62,9 +62,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let some commit := cur.commit
     | fail "the current export has uncommitted changes; commit them and export again: a record names the commit it signs"
   let selected ← if !keys.isEmpty then
-      keys.mapM fun k => do
-        let some d ← IO.ofExcept (boundary.find? k) | fail s!"{k} is not on the boundary list"
-        pure d
+      keys.mapM (IO.ofExcept <| boundary.resolve ·)
     else if let some m := module? then do
       let ds := boundary.declarations.filter (·.module == m)
       if ds.isEmpty then fail s!"no tagged declarations in module {m}"
@@ -103,10 +101,10 @@ def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
     if keys.isEmpty then fail "--constants lists no declaration; leave it out to withdraw all"
     let some { record := .approve a, .. } := ledger.byId[refersTo]?
       | fail s!"cannot withdraw: {refersTo} is no approve record"
-    keys.mapM fun k => match a.constants.filter fun c => c.id == k || c.name == k with
-      | #[c] => pure c.id
-      | #[] => fail s!"cannot withdraw: {k} is not in record {refersTo}"
-      | _ => fail s!"{k} is the name of one declaration of record {refersTo} and the id of another"
+    keys.mapM fun k => do
+      let some c ← IO.ofExcept (byNameOrId? a.constants (·.name) (·.id) k)
+        | fail s!"cannot withdraw: {k} is not in record {refersTo}"
+      pure c.id
   let w : WithdrawRecord := { signer, date := ← Std.Time.Timestamp.nowSeconds, refersTo, constants := constants?, note := note? }
   if let .error ps := withdrawCovers ledger.byId w then
     fail s!"cannot withdraw: {"; ".intercalate ps.toList}"

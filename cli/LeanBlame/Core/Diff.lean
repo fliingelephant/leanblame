@@ -64,14 +64,10 @@ def compute (old new : Point) (keys : Array String) : IO (Array Entry) := do
   let index (p : Point) : Std.HashMap String BoundaryDecl :=
     p.graph.boundary.declarations.foldl (init := {}) fun m d => m.insert d.id d
   let (olds, news) := (index old, index new)
-  let find (p : Point) (k : String) : IO (Option BoundaryDecl) :=
-    match p.graph.boundary.find? k with
-    | .ok d => pure d
-    | .error e => fail e
   let ids ← if keys.isEmpty then pure (olds.keys ++ news.keys).toArray else
     keys.mapM fun k => do
-      if let some d ← find new k then return d.id
-      if let some d ← find old k then return d.id
+      if let some d ← IO.ofExcept (new.graph.boundary.find? k) then return d.id
+      if let some d ← IO.ofExcept (old.graph.boundary.find? k) then return d.id
       fail s!"{k} is on neither boundary list"
   let ids := (ids.qsort (· < ·)).eraseReps
   let side (p : Point) (d : BoundaryDecl) : IO Side := do

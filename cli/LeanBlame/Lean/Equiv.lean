@@ -264,9 +264,7 @@ def run (root : System.FilePath) (keys : Array String) : IO UInt32 := do
   let r ← Status.compute root ledger
   let decls := r.report.declarations
   let new := r.new
-  let names ← keys.mapM fun k => do
-    let some d ← IO.ofExcept (new.boundary.find? k) | fail s!"{k} is not on the boundary list"
-    pure d.name
+  let names ← keys.mapM fun k => (·.name) <$> IO.ofExcept (new.boundary.resolve k)
   -- Eligible: outdated, and `untagged` the only cause; with the approve record compared with.
   let mut eligible : Array (String × StatusDecl × LoadedRecord × ApproveRecord) := #[]
   let mut left := 0
