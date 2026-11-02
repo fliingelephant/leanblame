@@ -287,6 +287,22 @@ run challenge check "$work-challenge"
 [[ "$out" == "challenge $work-challenge: the 7 tagged declarations it holds mean what the library's do, 1 of them by definitional equality" ]] \
   || fail "check: $out"
 ok "a helper written differently, Nat.add n n for n + n, has another claim but passes: the kernel finds it definitionally equal"
+edit Sample/Basic.lean 's/def double (n : Nat) : Nat := n + n/def double (n : Nat) : Nat := 2 * n/'
+lake build >/dev/null 2>&1 || fail "build with double edited"
+run challenge check "$work-challenge"
+[[ "$out" == *", 1 of them by definitional equality" ]] || fail "check reads the library's build, not the export: $out"
+git checkout -q -- Sample/Basic.lean
+cp .leanblame/current "$logs/current"
+python3 - <<'PY'
+import json
+c = json.load(open(".leanblame/current"))
+c["toolchain"] = "v4.0.0"
+json.dump(c, open(".leanblame/current", "w"))
+PY
+must_fail "the library's dependencies are not the last export's; export again" "^  Lean v4\.[0-9.]*, the export's v4\.0\.0$" \
+  -- "$lb" challenge check "$work-challenge"
+cp "$logs/current" .leanblame/current
+ok "the check reads the library from the export, not from a build made since, and refuses another toolchain"
 run challenge write Sample.energy --out "$work-challenge-x"
 grep -q "^def energy" "$work-challenge-x/ChallengeDeps.lean" || fail "challenge of a definition: ChallengeDeps.lean does not declare it"
 grep -q "theorem" "$work-challenge-x/Challenge.lean" && fail "challenge of a definition: Challenge.lean states a theorem"

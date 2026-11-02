@@ -8,15 +8,17 @@ the scope commands of their modules; `ChallengeDeps.lean` holds the other named 
 and what all of them need, and imports what that
 needs from outside the library; `lakefile.toml` has what the library's lakefile requires;
 `lean-toolchain` the library's toolchain. What stops a challenge is in the graph: it stops
-`challenge`, not `export`. `--graph` prints the graph, for a service that cuts challenges itself.
+`challenge`, not `export`. `challenge graph` prints the graph, for a service that cuts challenges
+itself.
 
-`--check` builds the challenge with `lean` against the library's build, as a comparator builds it,
-in the store's temporary space, imports it and hashes its own declarations in memory as `export`
+`challenge check` builds the challenge with `lean` against the library's build, as a comparator builds
+it, in the store's temporary space, imports it and hashes its own declarations in memory as `export`
 hashes the library (`Source.declsIn`, `Walk.hashNodes`); what it imports from outside the library is
-the library's build, whose hashes the last export has. Each tagged declaration it holds must have the
+the build of the library's dependencies, which must be the last export's: its toolchain and its
+dependencies' commits. The library itself is read from the last export alone. Each tagged declaration it holds must have the
 claim it has in the last export, or else be definitionally equal to the library's: the kernel decides,
 as `equiv` decides between two exports (`Equiv.prove`), against the library's versions of what
-differs, read from the compiled files of the modules that declare them. Lean may write a challenge's
+differs, read from the export. Lean may write a challenge's
 terms differently from the library's (in one file, a `match` can share the helper Lean made for
 another module's); a solution of the challenge then still proves the library's theorem. A private
 name holds the module it was written in; the challenge's private constants are named as the
@@ -57,6 +59,17 @@ challenge's declaration is definitionally equal to the library's. Returns how ma
 how many of them the kernel decided. Any other difference is an error. -/
 def check (root dir : System.FilePath) : IO (Nat × Nat) := do
   let cur ← Store.readCurrent root
+  -- The challenge is built against today's dependencies: they must be the export's.
+  let toolchain := "v" ++ Lean.versionString
+  let (deps, _) ← Export.manifestDeps root
+  let differs := (if toolchain == cur.toolchain then #[] else #[s!"Lean {toolchain}, the export's {cur.toolchain}"]) ++
+    (deps ++ cur.deps).filterMap fun (p, _) =>
+      let now := (deps.find? (·.1 == p)).map (·.2)
+      let was := (cur.deps.find? (·.1 == p)).map (·.2)
+      if now == was then none else some s!"{p} at {now.getD "none"}, the export's at {was.getD "none"}"
+  unless differs.isEmpty do
+    fail ("the library's dependencies are not the last export's; export again:\n" ++
+      "\n".intercalate ((dedup differs).toList.map ("  " ++ ·)))
   let lib ← Graph.load root cur.exportHash cur.boundary
   let (sysroot, leanPath, _) ← Export.lakeEnvPaths root
   let mods := #[`ChallengeDeps, `Challenge]
@@ -96,21 +109,18 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
     let claim (g : Core.Hashed) (s : String) := g.nodes[s]?.map (·.claim)
     let differ := present.filter fun d => claim lib d.name != claim h d.name
     -- Where claims differ, the kernel decides, in the challenge's environment, against the library's
-    -- versions of what differs, read from the compiled files of the modules that declare them.
+    -- versions of what differs, read from the export.
     let changed : Std.HashSet String := .ofArray <| differ.flatMap fun d =>
       ((Walk.closureOf lib d.name).2.push d.name).filter fun s => claim lib s != claim h s
-    let mut consts : Std.HashMap Name ConstantInfo := {}
-    let mut pos : Std.HashMap Name Nat := {}
-    for m in dedup (changed.toArray.filterMap (lib.nodes[·]?.map (·.decl.module.toName))) do
-      for ci in ← Load.moduleConstants m do
-        pos := pos.insert ci.name pos.size
-        if changed.contains ci.name.toString then consts := consts.insert ci.name ci
+    let exp ← if changed.isEmpty then pure { constMap := {}, constOrder := #[] } else Source.loadExported root cur.exportHash
+    let consts (n : Name) := if changed.contains n.toString then exp.constMap[n]? else none
+    let pos : Std.HashMap Name Nat := exp.constOrder.foldl (init := {}) fun m c => m.insert c m.size
     -- The challenge's names of the library's private constants.
     let own := mods.flatMap fun m =>
       ((moduleData? env m).map (·.constNames)).getD #[]
     let toNew : Std.HashMap Name Name := own.foldl (init := {}) fun acc c => if rename c == c then acc else acc.insert (rename c) c
     let proven ← Equiv.prove env.toKernelEnv
-      { old := lib, new := h, oldConst? := (consts[·]?), newConst? := fun n => env.find? (toNew.getD n n)
+      { old := lib, new := h, oldConst? := consts, newConst? := fun n => env.find? (toNew.getD n n)
         toNew := fun n => toNew.getD n n, oldPos := (pos.getD · 0) } (differ.filterMap (nameOf? ·.name))
     let mut problems := #[]
     for d in differ do
