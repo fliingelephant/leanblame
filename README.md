@@ -51,10 +51,10 @@ the tag and its id follow, with a warning to write the new name; a rename
 without an alias stops the build at the tag.
 
 ```
-lake exe leanblame id                          # write an id into each @[trusted]
-lake exe leanblame export                      # build and export the tagged declarations
-lake exe leanblame sign --signer local:alice   # one approve record per module
-lake exe leanblame status                      # every tagged declaration: valid
+lake exe leanblame id                              # write an id into each @[trusted]
+lake exe leanblame export                          # build and export the tagged declarations
+lake exe leanblame sign --signer local:alice --all # one approve record per module
+lake exe leanblame status                          # every tagged declaration: valid
 ```
 
 `id` turns `@[trusted]` into `@[trusted "3f2b8c1e-…"]`, and `attribute
@@ -79,8 +79,8 @@ Run in the library root as `lake exe leanblame <command>`.
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `diff --from RECORD [--to RECORD] [--json] [NAME\|ID...]` | What changed between two sign-offs, or a sign-off and now, as the kernel sees it; with the old and new text. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |
-| `sign --signer local:NAME [--module M] [--note TEXT] [NAME\|ID...]` | Write an approve record (default: one per module of the library). |
-| `sign --withdraw RECORD --signer local:NAME [--constants A,B] [--note TEXT]` | Withdraw your own record, or some of its declarations (names or ids). |
+| `sign --signer local:NAME [--note TEXT] (NAME\|ID... \| --module M \| --all)` | Write approve records, one per module: of the declarations named, of one module, or of the whole library. |
+| `withdraw RECORD --signer local:NAME [--note TEXT] [NAME\|ID...]` | Withdraw your own record, or some of its declarations (names or ids). |
 | `equiv [NAME\|ID...]` | Kernel check that old and new are definitionally equal, for declarations outdated only by an untagged change. |
 | `challenge NAME\|ID... --out DIR` | Write the comparator challenge of these tagged declarations: what they need from the library and nothing else, and the theorems' statements with proofs `sorry`. |
 | `challenge --graph` | Print the piece graph that challenges are cut from. |

@@ -1,5 +1,6 @@
 /-
-`leanblame init` and `leanblame sign` (docs/decisions.md, Config; trust-model.md, "Records").
+`leanblame init`, `leanblame sign` and `leanblame withdraw` (docs/decisions.md, Config;
+trust-model.md, "Records").
 
 `sign` is the terminal dev path: it writes `local:` records only. Provider
 logins (OpenReview, ORCID, GitHub) belong to the sign server.
@@ -28,7 +29,7 @@ def init (root : System.FilePath) : IO UInt32 := do
 
 /-- The signer `--signer` names; there is no default. Only `local:` ids in this slice. -/
 def resolveSigner (given? : Option String) : IO String := do
-  let some s := given? | fail "sign needs --signer local:NAME: a record names who signs"
+  let some s := given? | fail "a record names who signs: give --signer local:NAME"
   unless isSignerId s do fail s!"signer must be provider:id, got `{s}`"
   unless s.startsWith "local:" do
     fail s!"{s}: the terminal writes local: records only; provider logins go through the sign server"
@@ -50,10 +51,17 @@ def writeRecord (root dir : System.FilePath) (r : Record) : IO (String × System
   IO.FS.withFile (root / path) .writeNew (·.putStr text)
   return (mkHash hex, path)
 
-/-- Approve: one record per module, at the claim hashes of the current export. `keys` name
-declarations by name or id. -/
-def approve (root : System.FilePath) (signer? : Option String) (module? : Option String)
-    (keys : Array String) (note? : Option String) : IO UInt32 := do
+/-- What `sign` approves: the declarations `keys` name (by name or id), the tagged declarations of
+one module, or every tagged declaration of the library's own modules. -/
+inductive Selection where
+  | keys (keys : Array String)
+  | module (name : String)
+  | all
+
+/-- Approve the selected declarations: one record per module, at the claim hashes of the current
+export. -/
+def approve (root : System.FilePath) (signer? : Option String) (selection : Selection)
+    (note? : Option String) : IO UInt32 := do
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
@@ -61,15 +69,13 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let boundary := graph.boundary
   let some commit := cur.commit
     | fail "the current export has uncommitted changes; commit them and export again: a record names the commit it signs"
-  let selected ← if !keys.isEmpty then
-      keys.mapM (IO.ofExcept <| boundary.resolve ·)
-    else if let some m := module? then do
+  let selected ← match selection with
+    | .keys keys => keys.mapM (IO.ofExcept <| boundary.resolve ·)
+    | .module m => do
       let ds := boundary.declarations.filter (·.module == m)
       if ds.isEmpty then fail s!"no tagged declarations in module {m}"
       pure ds
-    else
-      -- Default: every tagged declaration of the library's own modules.
-      pure <| boundary.declarations.filter fun d => cur.modules.contains d.module
+    | .all => pure <| boundary.declarations.filter fun d => cur.modules.contains d.module
   if selected.isEmpty then fail "nothing to sign"
   let modules := dedup (selected.map (·.module))
   let dir ← recordsDir ledger.cfg
@@ -90,18 +96,17 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
     IO.println s!"approve {id} {path} ({constants.size} declarations of {m})"
   return 0
 
-/-- Withdraw some or all declarations of one of your approve records; `keys?` names them by name or
-id. -/
+/-- Withdraw one of your approve records: the declarations `keys` name (by name or id), or all of
+them when `keys` is empty. -/
 def withdraw (root : System.FilePath) (signer? : Option String) (ref : String)
-    (keys? : Option (Array String)) (note? : Option String) : IO UInt32 := do
+    (keys : Array String) (note? : Option String) : IO UInt32 := do
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let refersTo ← recordId ref
-  let constants? ← keys?.mapM fun keys => do
-    if keys.isEmpty then fail "--constants lists no declaration; leave it out to withdraw all"
+  let constants? : Option (Array String) ← if keys.isEmpty then pure none else do
     let some { record := .approve a, .. } := ledger.byId[refersTo]?
       | fail s!"cannot withdraw: {refersTo} is no approve record"
-    keys.mapM fun k => do
+    some <$> keys.mapM fun k => do
       let some c ← IO.ofExcept (byNameOrId? a.constants (·.name) (·.id) k)
         | fail s!"cannot withdraw: {k} is not in record {refersTo}"
       pure c.id

@@ -125,9 +125,11 @@ must_fail "Sample.energy unsigned" "Sample.one_site_pos unsigned" "11 of 11 tagg
 ok "release refuses unsigned declarations and names them"
 
 echo "== sign"
-must_fail "sign needs --signer local:NAME" -- "$lb" sign
+must_fail "a record names who signs: give --signer local:NAME" -- "$lb" sign --all
 ok "sign without --signer is an error"
-run sign --signer local:alice --note "first review"
+must_fail "usage: leanblame sign" -- "$lb" sign --signer local:alice
+ok "sign without names, --module or --all is an error"
+run sign --signer local:alice --note "first review" --all
 [[ "$(grep -c '^approve ' <<<"$out")" == 2 ]] || fail "expected one approve record per module: $out"
 basic_record="$(awk '/of Sample.Basic\)$/ {print $2}' <<<"$out")"
 energy_record="$(awk '/of Sample.Energy\)$/ {print $2}' <<<"$out")"
@@ -372,7 +374,7 @@ grep -q "warning: uncommitted changes in the library" "$logs/export.log" || fail
 run status --json
 python3 -c 'import json, sys; assert json.loads(sys.argv[1])["commit"] is None' "$out" \
   || fail "status --json: an export of uncommitted changes names a commit"
-must_fail "the current export has uncommitted changes" -- "$lb" sign --signer local:alice
+must_fail "the current export has uncommitted changes" -- "$lb" sign --signer local:alice --all
 must_fail "release: the current export has uncommitted changes" -- "$lb" release --tag 2026.10.2
 rm notes.txt
 export_lib
@@ -528,10 +530,10 @@ run diff --from "$basic_record" --to "$energy_record"
 ok "diff fails out loud without the signed export or for an unknown name; two records of one export differ in nothing"
 
 echo "== withdraw"
-run sign --withdraw "$basic_record" --signer local:alice --note "energy was wrong"
+run withdraw "$basic_record" --signer local:alice --note "energy was wrong"
 grep -q "^withdraw sha256:" <<<"$out" || fail "no withdraw record: $out"
 withdraw_record="$(awk '/^withdraw /{print $2}' <<<"$out")"
-must_fail "only its signer can withdraw it" -- "$lb" sign --withdraw "$basic_record" --signer local:bob
+must_fail "only its signer can withdraw it" -- "$lb" withdraw "$basic_record" --signer local:bob
 ok "only the signer can withdraw"
 must_fail "is a withdraw; compare with the approve record it withdraws, $basic_record" -- "$lb" diff --from "$withdraw_record"
 ok "diff refuses a withdraw record as a point"
@@ -725,7 +727,7 @@ run status
 expect_line Sample.energy "Sample.energy outdated change=untagged:Sample.double"
 expect_line Sample.double_zero "Sample.double_zero outdated evidence=$proof2 change=untagged:Sample.double"
 ok "n + n and 2 * n are not definitionally equal: both bodies shown; double_zero still holds by evaluation"
-run sign --withdraw "$record" --signer local:alice --constants Sample.double_zero
+run withdraw "$record" --signer local:alice Sample.double_zero
 run status
 expect_line Sample.double_zero "Sample.double_zero outdated change=untagged:Sample.double"
 ok "a proof against a withdrawn approval does not count"

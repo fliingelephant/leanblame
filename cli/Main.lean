@@ -33,8 +33,12 @@ commands:
   equiv [NAME|ID...]                     ask the kernel whether what changed under it (default:
                                          every declaration outdated by an untagged change only)
                                          is definitionally equal to what was approved
-  sign --signer local:NAME [--module M] [--note TEXT] [NAME|ID...]
-  sign --withdraw RECORD --signer local:NAME [--constants NAME|ID,...] [--note TEXT]
+  sign --signer local:NAME [--note TEXT] (NAME|ID... | --module M | --all)
+                                         approve the declarations named, a module's tagged
+                                         declarations, or all of the library's
+  withdraw RECORD --signer local:NAME [--note TEXT] [NAME|ID...]
+                                         withdraw your approve record, or only the declarations
+                                         named
   challenge NAME|ID... --out DIR         write the comparator challenge of the tagged declarations
                                          into the new directory DIR: Challenge.lean (the theorems,
                                          proofs sorry), ChallengeDeps.lean (the others and what
@@ -118,19 +122,19 @@ def cmdInit (args : List String) : IO UInt32 := do
   Sign.init (← IO.currentDir)
 
 def cmdSign (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--signer", "--module", "--note", "--withdraw", "--constants"] #[] args (positional := true)
-  let root ← IO.currentDir
-  match a.get? "--withdraw" with
-  | some ref =>
-    unless a.positional.isEmpty && (a.get? "--module").isNone do
-      fail "sign --withdraw RECORD takes --constants A,B instead of names or --module"
-    let constants? := (a.get? "--constants").map fun s =>
-      ((s.splitOn ",").map strTrim |>.filter (· != "")).toArray
-    Sign.withdraw root (a.get? "--signer") ref constants? (a.get? "--note")
-  | none =>
-    if (a.get? "--constants").isSome then
-      fail "--constants goes with --withdraw; to approve, list the names"
-    Sign.approve root (a.get? "--signer") (a.get? "--module") a.positional (a.get? "--note")
+  let a ← parseArgs #["--signer", "--module", "--note"] #["--all"] args (positional := true)
+  let selection : Sign.Selection ← match a.positional.isEmpty, a.get? "--module", a.has "--all" with
+    | false, none, false => pure (.keys a.positional)
+    | true, some m, false => pure (.module m)
+    | true, none, true => pure .all
+    | _, _, _ => fail "usage: leanblame sign --signer local:NAME [--note TEXT] (NAME|ID... | --module M | --all)"
+  Sign.approve (← IO.currentDir) (a.get? "--signer") selection (a.get? "--note")
+
+def cmdWithdraw (args : List String) : IO UInt32 := do
+  let a ← parseArgs #["--signer", "--note"] #[] args (positional := true)
+  let some ref := a.positional[0]?
+    | fail "usage: leanblame withdraw RECORD --signer local:NAME [--note TEXT] [NAME|ID...]"
+  Sign.withdraw (← IO.currentDir) (a.get? "--signer") ref (a.positional.extract 1) (a.get? "--note")
 
 def cmdChallenge (args : List String) : IO UInt32 := do
   let a ← parseArgs #["--out", "--check"] #["--graph"] args (positional := true)
@@ -169,6 +173,7 @@ def dispatch : List String → IO UInt32
   | "blame" :: args => cmdBlame args
   | "diff" :: args => cmdDiff args
   | "sign" :: args => cmdSign args
+  | "withdraw" :: args => cmdWithdraw args
   | "validate" :: args => cmdValidate args
   | "release" :: args => cmdRelease args
   | "equiv" :: args => cmdEquiv args
