@@ -295,7 +295,7 @@ def run (root : System.FilePath) (keys : Array String) : IO UInt32 := do
   let groups := dedup (targets.map fun (_, a) => (a.exportHash, a.boundary))
   let mut proven := 0
   for (e, b) in groups do
-    let old ← Status.graph root e b
+    let old ← Graph.load root e b
     let group := (targets.filter fun (_, a) => a.exportHash == e && a.boundary == b).map (·.1)
     let (ok, solution) ← proveGroup root base (new := new) (newExp := newExp) (old := old)
       (oldExp := ← Source.loadExported root e) group

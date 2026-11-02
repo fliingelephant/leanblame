@@ -36,7 +36,7 @@ def recordPoint (root : System.FilePath) (ledger : Ledger) (ref : String) : IO P
 /-- The point of the last `export`. -/
 def currentPoint (root : System.FilePath) : IO Point := do
   let cur ← Store.readCurrent root
-  return { record := none, commit := cur.commit, graph := ← Status.currentGraph root cur }
+  return { record := none, commit := cur.commit, graph := ← Graph.load root cur.exportHash cur.boundary }
 
 /-- A declaration at one point, with its claim there. -/
 structure Side where

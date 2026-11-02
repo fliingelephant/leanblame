@@ -102,9 +102,7 @@ def Graph.fromJson? (j : Json) : Except String Graph := do
 def read (root : System.FilePath) (hash : String) : IO Graph := do
   let p := Store.objectPath root .pieces hash
   unless ← p.pathExists do fail s!"piece graph {hash} is not in the store"
-  match Json.parse (← IO.FS.readFile p) >>= Graph.fromJson? with
-  | .ok g => return g
-  | .error e => fail s!"{p}: {e}"
+  readJson p Graph.fromJson?
 
 /-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
 text: their roots, the pieces those need, the pieces these need, and so on, each file the text of its
@@ -178,6 +176,42 @@ structure Cmd where
   declares : Array Name := #[]
   deriving Inhabited
 
+/-- How the commands of a module nest. -/
+structure Scopes where
+  /-- For each command: the commands that open the scopes around it, and, unless it opens or closes
+  a scope, the commands before it that set the scopes it is in. -/
+  context : Array (Array Nat)
+  /-- Each scope: the command that opens it, its name as `end` writes it, and the command that
+  closes it, if the module does. `namespace A.B` opens two scopes, and `end A.B` closes two. -/
+  scopes : Array (Nat × String × Option Nat)
+  deriving Inhabited
+
+def scopesOf (cmds : Array Cmd) : Scopes := Id.run do
+  let mut scopes : Array (Nat × String × Option Nat) := #[]
+  -- The scopes open now, innermost last, and the commands that set each, the file's first.
+  let mut stack : Array Nat := #[]
+  let mut sets : Array (Array Nat) := #[#[]]
+  let mut context := #[]
+  for c in cmds, i in [:cmds.size] do
+    let around := dedup (stack.map fun k => scopes[k]!.1)
+    context := context.push <|
+      if c.role == .opens || c.role == .closes then around else around ++ sets.flatten
+    match c.role with
+    | .opens =>
+      for h in c.opens do
+        stack := stack.push scopes.size
+        scopes := scopes.push (i, h, none)
+        sets := sets.push #[]
+    | .closes =>
+      for _ in [:c.closes] do
+        let some k := stack.back? | break
+        stack := stack.pop
+        sets := sets.pop
+        scopes := scopes.modify k fun (o, h, _) => (o, h, some i)
+    | .sets => sets := sets.modify (sets.size - 1) (·.push i)
+    | _ => pure ()
+  return { context, scopes }
+
 /-- One module, read. -/
 structure Read where
   bytes : ByteArray
@@ -192,6 +226,7 @@ structure Read where
   refs : Array (String.Pos.Raw × String.Pos.Raw × Name)
   /-- Where the source writes the name of each constant it declares, as `refs`. -/
   defs : Array (String.Pos.Raw × String.Pos.Raw × Name)
+  scopes : Scopes
 
 /-- The library's constants that the names in `c` refer to. -/
 def Read.named (r : Read) (c : Cmd) (stop := c.stop) : Array Name :=
@@ -398,7 +433,8 @@ def readModule (env : Environment) (options : Options) (library : NameSet) (m : 
       refs := refs.push (ictx.fileMap.lspPosToUtf8Pos r.start, ictx.fileMap.lspPosToUtf8Pos r.end, n)
     if let some d := info.definition? then
       defs := defs.push (ictx.fileMap.lspPosToUtf8Pos d.range.start, ictx.fileMap.lspPosToUtf8Pos d.range.end, n)
-  return { bytes := source.toUTF8, fileMap := ictx.fileMap, env, options, cmds, owner, refs, defs }
+  return { bytes := source.toUTF8, fileMap := ictx.fileMap, env, options, cmds, owner, refs, defs
+           scopes := scopesOf cmds }
 
 /-! ## Writing a command for a challenge -/
 
@@ -571,42 +607,6 @@ def termUses (env : Environment) (n : Name) (value : Bool) : Array Name :=
       (if value then ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[] else #[])
   | none => #[]
 
-/-- How the commands of a module nest. -/
-structure Scopes where
-  /-- For each command: the commands that open the scopes around it, and, unless it opens or closes
-  a scope, the commands before it that set the scopes it is in. -/
-  context : Array (Array Nat)
-  /-- Each scope: the command that opens it, its name as `end` writes it, and the command that
-  closes it, if the module does. `namespace A.B` opens two scopes, and `end A.B` closes two. -/
-  scopes : Array (Nat × String × Option Nat)
-  deriving Inhabited
-
-def scopesOf (r : Read) : Scopes := Id.run do
-  let mut scopes : Array (Nat × String × Option Nat) := #[]
-  -- The scopes open now, innermost last, and the commands that set each, the file's first.
-  let mut stack : Array Nat := #[]
-  let mut sets : Array (Array Nat) := #[#[]]
-  let mut context := #[]
-  for c in r.cmds, i in [:r.cmds.size] do
-    let around := dedup (stack.map fun k => scopes[k]!.1)
-    context := context.push <|
-      if c.role == .opens || c.role == .closes then around else around ++ sets.flatten
-    match c.role with
-    | .opens =>
-      for h in c.opens do
-        stack := stack.push scopes.size
-        scopes := scopes.push (i, h, none)
-        sets := sets.push #[]
-    | .closes =>
-      for _ in [:c.closes] do
-        let some k := stack.back? | break
-        stack := stack.pop
-        sets := sets.pop
-        scopes := scopes.modify k fun (o, h, _) => (o, h, some i)
-    | .sets => sets := sets.modify (sets.size - 1) (·.push i)
-    | _ => pure ()
-  return { context, scopes }
-
 /-- The library's constant that the `a`-th name of the `attribute` command `c` refers to, if one does. -/
 def Read.target? (r : Read) (c : Cmd) (a : Nat) : Option Name := do
   let id := (innermost c.stx)[4][a]
@@ -716,12 +716,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     match ← readOf m with
     | .ok r => return r
     | .error e => fail e
-  let scopesRef ← IO.mkRef ({} : Std.HashMap Name Scopes)
-  let scopesIn (m : Name) : IO Scopes := do
-    if let some s := (← scopesRef.get)[m]? then return s
-    let s := scopesOf (← readOk m)
-    scopesRef.modify (·.insert m s)
-    return s
   -- The piece that declares the library's constant `n`, or why none does; `none` for a constant
   -- from outside the library.
   let ownerOf (n : Name) : IO (Option (Except String Key)) := do
@@ -743,18 +737,14 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | none => pure ()
     return (dedup keys, problems)
   -- The namespaces that modules from outside the library make, each with those modules.
-  let makersRef ← IO.mkRef (none : Option (Std.HashMap Name (Array Name)))
-  let makers : IO (Std.HashMap Name (Array Name)) := do
-    if let some x := ← makersRef.get then return x
-    let map := (importClosure env library).foldl (init := ({} : Std.HashMap Name (Array Name))) fun map mod =>
+  let makers : Thunk (Std.HashMap Name (Array Name)) := Thunk.mk fun _ =>
+    (importClosure env library).foldl (init := {}) fun map mod =>
       if libSet.contains mod then map else
       match moduleData? env mod with
       | none => map
       | some d => d.constNames.foldl (init := map) fun map n =>
         (namespacesOf n {}).foldl (init := map) fun map ns =>
           map.alter ns fun ms => let ms := ms.getD #[]; some (if ms.back? == some mod then ms else ms.push mod)
-    makersRef.set (some map)
-    return map
   let closures ← IO.mkRef ({} : Std.HashMap Name NameSet)
   let closureOf (m : Name) : IO NameSet := do
     if let some c := (← closures.get)[m]? then return c
@@ -765,7 +755,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   -- which `m` imports makes.
   let undeclared (m : Name) (opened : Array Name) : IO (Array Name) := do
     if opened.isEmpty then return #[]
-    let mk ← makers
+    let mk := makers.get
     let cl ← closureOf m
     return opened.filter fun ns => !((mk[ns]?).getD #[]).any cl.contains
   -- What module `m` imports from outside the library, through the library's modules it imports; not
@@ -814,10 +804,10 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     | .instances m =>
       let r ← readOk m
       return (((Array.range r.cmds.size).filter (writesInstance r.cmds[·]!.stx)).map (Key.cmd true m ·), #[])
-    | .close deps m s => return (#[.cmd deps m (← scopesIn m).scopes[s]!.1], #[])
+    | .close deps m s => return (#[.cmd deps m (← readOk m).scopes.scopes[s]!.1], #[])
     | .cmd deps m i =>
       let r ← readOk m
-      let sc ← scopesIn m
+      let sc := r.scopes
       let c := r.cmds[i]!
       let mut needs := #[Key.head deps m] ++ sc.context[i]!.map (Key.cmd deps m ·)
       -- The other end of each scope it opens or closes.
@@ -833,7 +823,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       let c := r.cmds[i]!
       let attrEnd := ((innermost c.stx)[3].getTailPos?).getD c.stop
       let (keys, problems) ← declarers none (r.named c attrEnd ++ (r.target? c a).toArray)
-      return (#[Key.head true m] ++ (← scopesIn m).context[i]!.map (Key.cmd true m ·) ++ keys, problems)
+      return (#[Key.head true m] ++ r.scopes.context[i]!.map (Key.cmd true m ·) ++ keys, problems)
     | .statement t =>
       let base := #[Key.importDeps]
       let some m := moduleOf t | return (base, #[s!"{t} is a theorem of another library: its challenge is that library's"])
@@ -847,7 +837,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       -- A proof inside the statement may make constants of the command (`second_site._proof_1`):
       -- the statement makes them again.
       let (keys, problems) ← declarers none ((termUses env t false ++ r.named c a).filter (r.owner.find? · != some i))
-      return (base.push (.head false m) ++ (← scopesIn m).context[i]!.map (Key.cmd false m ·) ++ keys, problems)
+      return (base.push (.head false m) ++ r.scopes.context[i]!.map (Key.cmd false m ·) ++ keys, problems)
   -- Every piece the roots need, what those need, and so on. An `attribute` command comes with
   -- the declaration it names, or, for a constant from outside the library, with its module's
   -- `section`s: the commands of a module are known once the module is read.
@@ -923,7 +913,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     for m in library do
       unless has (.head deps m) do continue
       let r ← readOk m
-      let sc ← scopesIn m
+      let sc := r.scopes
       let attrs := attributes.getD m #[]
       order := order.push (.head deps m)
       if deps then order := order.push (.instances m)
@@ -962,7 +952,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | .head _ m => pure ("\n" ++ "\n".intercalate ("section" :: (optionsOf m).1.toList) ++ "\n")
       | .tail .. => pure "\nend\n"
       | .close _ m s => do
-        let h := (← scopesIn m).scopes[s]!.2.1
+        let h := (← readOk m).scopes.scopes[s]!.2.1
         pure (if h.isEmpty then "\nend\n" else s!"\nend {h}\n")
       | .cmd _ m i => do
         let r ← readOk m

@@ -38,7 +38,7 @@ def write (root out : System.FilePath) (names : Array String) : IO Unit := do
   if names.isEmpty then fail "a challenge needs tagged declarations: name at least one"
   if ← out.pathExists then fail s!"{out} exists; a challenge goes into a new directory"
   let cur ← Store.readCurrent root
-  let boundary ← Status.loadBoundary root cur.boundary
+  let boundary ← Store.readBoundary root cur.boundary
   let chosen ← names.mapM fun x => (·.name) <$> IO.ofExcept (boundary.resolve x)
   match (← Pieces.read root cur.pieces).cut (dedup chosen) with
   | .error problems =>
@@ -57,7 +57,7 @@ challenge's declaration is definitionally equal to the library's. Returns how ma
 how many of them the kernel decided. Any other difference is an error. -/
 def check (root dir : System.FilePath) : IO (Nat × Nat) := do
   let cur ← Store.readCurrent root
-  let lib ← Status.currentGraph root cur
+  let lib ← Graph.load root cur.exportHash cur.boundary
   let (sysroot, leanPath, _) ← Export.lakeEnvPaths root
   let mods := #[`ChallengeDeps, `Challenge]
   -- The library's private constants, by user name, for the challenge's.

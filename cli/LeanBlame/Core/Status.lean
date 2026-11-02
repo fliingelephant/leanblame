@@ -30,20 +30,6 @@ import LeanBlame.Core.Walk
 
 namespace LeanBlame.Status
 
-def loadBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do
-  match BoundaryList.parse (← Store.readString root .boundaries hash) with
-  | .ok b => return b
-  | .error e => fail s!"boundary list {hash}: {e}"
-
-/-- The graph of export `exportHash` against boundary list `boundary`, from the object store. -/
-def graph? (root : System.FilePath) (exportHash boundary : String) : IO (Option Core.Hashed) := do
-  Graph.load? root exportHash boundary (← loadBoundary root boundary)
-
-def graph (root : System.FilePath) (exportHash boundary : String) : IO Core.Hashed := do
-  let some h ← graph? root exportHash boundary
-    | fail s!"no graph for export {exportHash} and boundary list {boundary}"
-  return h
-
 /-- The graph of the export and boundary list approve record `r` names: `none` when this store lacks
 them (the record was made in another store). An error when the store has them but no graph of
 them, which `export` always writes, or when a declaration of the record does not have its id and
@@ -53,19 +39,13 @@ def recordGraph? (root : System.FilePath) (r : LoadedRecord) (a : ApproveRecord)
   unless (← (Store.objectPath root .exports a.exportHash).pathExists) &&
       (← (Store.objectPath root .boundaries a.boundary).pathExists) do
     return none
-  let some h ← graph? root a.exportHash a.boundary
+  let some h ← Graph.load? root a.exportHash a.boundary
     | fail s!"record {r.path}: the store has its export and boundary list but no graph of them"
   let ids : Std.HashMap String String := h.boundary.declarations.foldl (init := {}) fun m d => m.insert d.name d.id
   for c in a.constants do
     unless ids[c.name]? == some c.id && (h.nodes[c.name]?.map (·.claim)) == some c.claim do
       fail s!"record {r.path}: {c.name} does not have id {c.id} and claim {c.claim} in the export it names"
   return some h
-
-/-- The graph of the last `export`. -/
-def currentGraph (root : System.FilePath) (cur : Store.Current) : IO Core.Hashed := do
-  let some h ← graph? root cur.exportHash cur.boundary
-    | fail "no graph for the current export; run `leanblame export`"
-  return h
 
 /-- The records about declaration `id`, in (date, record id) order; `current` is its claim now,
 `none` when it is not on the current boundary list. -/
@@ -124,7 +104,7 @@ def untaggedInLibrary (h : Core.Hashed) (closures : Std.HashMap String (Array St
 /-- The status report of the last `export` against `ledger`. -/
 def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
   let cur ← Store.readCurrent root
-  let new ← currentGraph root cur
+  let new ← Graph.load root cur.exportHash cur.boundary
   -- Graphs of the exports approvals name, by (export, boundary list); `none`: not in this store.
   let mut olds : Std.HashMap (String × String) (Option Core.Hashed) := {}
   -- Pass 1: state, change, signers, history, dependencies.

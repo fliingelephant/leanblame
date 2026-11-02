@@ -67,6 +67,12 @@ def readString (root : System.FilePath) (k : Kind) (hash : String) : IO String :
     fail s!"{k.dir} object {hash} is not in the store {objectsDir root}"
   IO.FS.readFile p
 
+/-- Boundary list `hash`, from the object store. -/
+def readBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do
+  match BoundaryList.parse (← readString root .boundaries hash) with
+  | .ok b => return b
+  | .error e => fail s!"boundary list {hash}: {e}"
+
 /-- Delete every file of `d` whose name is not in `keep`; returns how many. -/
 def sweepDir (d : System.FilePath) (keep : Std.HashSet String) : IO Nat := do
   unless ← d.isDir do return 0
@@ -118,11 +124,8 @@ def writeCurrent (root : System.FilePath) (c : Current) : IO Unit :=
   writeFileMkdirs (currentPath root) (jsonText c)
 
 def readCurrent (root : System.FilePath) : IO Current := do
-  let some text ← readFileIfExists (currentPath root)
-    | fail s!"no export yet: run `leanblame export` first"
-  match Lean.Json.parse text >>= Current.fromJson? with
-  | .ok c => return c
-  | .error e => fail s!"{currentPath root}: {e}; run `leanblame export`"
+  unless ← (currentPath root).pathExists do fail s!"no export yet: run `leanblame export` first"
+  readJson (currentPath root) Current.fromJson?
 
 def evidenceDir (root : System.FilePath) : System.FilePath := dir root / "equiv" / "evidence"
 
@@ -151,10 +154,8 @@ since its name is hashed. -/
 def evidencePath (root : System.FilePath) (claim : String) : System.FilePath :=
   evidenceDir root / s!"{hashHex claim}.json"
 
-def readEvidence (path : System.FilePath) : IO Evidence := do
-  match Lean.Json.parse (← IO.FS.readFile path) >>= Evidence.fromJson? with
-  | .ok e => return e
-  | .error e => fail s!"{path}: {e}"
+def readEvidence (path : System.FilePath) : IO Evidence :=
+  readJson path Evidence.fromJson?
 
 /-- The evidence for `claim`, if `equiv` wrote one. -/
 def evidence? (root : System.FilePath) (claim : String) : IO (Option Evidence) := do

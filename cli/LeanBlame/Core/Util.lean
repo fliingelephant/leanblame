@@ -126,6 +126,12 @@ partial def runToStderr (cmd : String) (args : Array String) (cwd : Option Syste
 def readFileIfExists (p : System.FilePath) : IO (Option String) := do
   if ← p.pathExists then return some (← IO.FS.readFile p) else return none
 
+/-- File `p` as JSON, decoded by `decode`; an error names the file. -/
+def readJson (p : System.FilePath) (decode : Lean.Json → Except String α) : IO α := do
+  match Lean.Json.parse (← IO.FS.readFile p) >>= decode with
+  | .ok a => return a
+  | .error e => fail s!"{p}: {e}"
+
 /-- Write a file, creating parent directories. -/
 def writeFileMkdirs (p : System.FilePath) (contents : String) : IO Unit := do
   Lake.createParentDirs p

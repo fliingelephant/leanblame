@@ -57,7 +57,7 @@ def approve (root : System.FilePath) (signer? : Option String) (module? : Option
   let ledger ← Ledger.load root
   let signer ← resolveSigner signer?
   let cur ← Store.readCurrent root
-  let graph ← Status.currentGraph root cur
+  let graph ← Graph.load root cur.exportHash cur.boundary
   let boundary := graph.boundary
   let some commit := cur.commit
     | fail "the current export has uncommitted changes; commit them and export again: a record names the commit it signs"

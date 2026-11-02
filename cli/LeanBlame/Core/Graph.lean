@@ -160,12 +160,12 @@ def check (h : Core.Hashed) : Except String Unit := do
     for d in n.decl.deps do
       unless h.nodes.contains d do throw s!"{n.decl.name} depends on {d}, which has no node"
 
-/-- The graph of export `exportHash` against boundary list `b`, stored as `boundaryHash`: `none` when
-the store has no file for them, an error when the file does not read as their complete graph. -/
-def load? (root : System.FilePath) (exportHash boundaryHash : String) (b : BoundaryList) :
-    IO (Option Core.Hashed) := do
+/-- The graph of export `exportHash` against boundary list `boundaryHash`: `none` when the store has
+no file for them, an error when the file does not read as their complete graph. -/
+def load? (root : System.FilePath) (exportHash boundaryHash : String) : IO (Option Core.Hashed) := do
   let p := path root exportHash boundaryHash
   let some text ← readFileIfExists p | return none
+  let b ← Store.readBoundary root boundaryHash
   let parsed : Except String Core.Hashed := do
     let o ← JsonObj.read (← Json.parse text) "graph"
       ["export", "boundary", "nodes", "axioms", "standard", "incomplete", "checker"]
@@ -188,6 +188,13 @@ def load? (root : System.FilePath) (exportHash boundaryHash : String) (b : Bound
   match parsed with
   | .ok h => return some h
   | .error e => fail s!"{p}: not the graph of export {exportHash} and boundary list {boundaryHash}: {e}"
+
+/-- The graph of export `exportHash` against boundary list `boundaryHash`; an error when the store
+has none. -/
+def load (root : System.FilePath) (exportHash boundaryHash : String) : IO Core.Hashed := do
+  let some h ← load? root exportHash boundaryHash
+    | fail s!"no graph for export {exportHash} and boundary list {boundaryHash}"
+  return h
 
 end Graph
 
