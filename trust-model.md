@@ -75,7 +75,8 @@ tagged structure is on it too and names the structure as its parent.
 
 A random UUID in the source, written by `leanblame id` into the tag: `@[trusted
 "id"]` on the declaration, or `attribute [trusted "id"] Name` after the fact, in
-any module, also for a declaration of a library one does not own. It
+any module, also for a declaration of a library one does not own. `id` tags every
+declaration of the library: every declaration needs a sign-off. It
 stays when the declaration is renamed or edited, so records name declarations
 by it and a sign-off follows a rename. Cite a declaration by its id:
 `id@record`, the record fixing the commit. It is never hashed: writing an id

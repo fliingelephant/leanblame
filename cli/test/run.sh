@@ -100,20 +100,33 @@ grep -qx "/.lake/" .gitignore || fail "init dropped the existing .gitignore entr
 ok "init created leanblame.toml, records/, .gitignore entry"
 commit "sample library"
 
-echo "== id: a random id per tagged declaration, written into its source"
+echo "== id: a tag with a random id on every declaration"
 must_fail "Sample.energy: tagged without an id; run" -- "$lb" export
 ok "export refuses a tag without an id"
 run id
 ids="$out"
-[[ "$(grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} Sample\.' <<<"$ids")" -eq 8 ]] \
-  || fail "id: want 8 version-4 UUIDs, one per @[trusted]: $ids"
+[[ "$(grep -cE '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12} Sample\.' <<<"$ids")" -eq 11 ]] \
+  || fail "id: want 11 version-4 UUIDs, 8 for the @[trusted] tags and 3 new tags: $ids"
 id_of() { awk -v n="$1" '$2 == n {print $1}' <<<"$ids"; }
 energy_id="$(id_of Sample.energy)"
 grep -qF "@[trusted \"$energy_id\"] def energy" Sample/Basic.lean || fail "id: not written into the source"
-ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy"
+for n in double two_pos two; do
+  grep -qxF "attribute [trusted \"$(id_of Sample.$n)\"] Sample.$n" Sample/Basic.lean || fail "id: no tag for Sample.$n: $(cat Sample/Basic.lean)"
+done
+ok "id wrote 8 random ids into the sources, e.g. @[trusted \"$energy_id\"] def energy, and tagged the 3 untagged declarations at the end of their module"
 "$lb" id >"$logs/id.log" 2>&1 || fail "id, second run: $(cat "$logs/id.log")"
-grep -q "every tagged declaration of this library has an id" "$logs/id.log" || fail "id, second run: $(cat "$logs/id.log")"
+grep -q "every declaration of this library is tagged, with an id" "$logs/id.log" || fail "id, second run: $(cat "$logs/id.log")"
 ok "a second run writes nothing"
+# Below, the library leaves its helpers untagged: the signers of their users review them.
+untag_helpers() {
+  python3 - <<'PY'
+import re
+p = "Sample/Basic.lean"
+s = re.sub(r'\nattribute \[trusted "[0-9a-f-]+"\] Sample\.(double|two_pos|two)(?=\n)', "", open(p).read())
+open(p, "w").write(s.rstrip("\n") + "\n")
+PY
+}
+untag_helpers
 commit "ids"
 
 echo "== export"
@@ -836,8 +849,9 @@ ok "blame takes an id"
 edit Sample/Basic.lean "s/@\[trusted \"$energy_id\"\] def energy/@[trusted] def energy/"
 run id
 new_energy_id="$(awk '$2 == "Sample.energy" {print $1}' <<<"$out")"
-[[ -n "$new_energy_id" && "$new_energy_id" != "$energy_id" && "$(wc -l <<<"$out")" -eq 1 ]] \
-  || fail "id: want one new id, for Sample.energy: $out"
+[[ -n "$new_energy_id" && "$new_energy_id" != "$energy_id" && "$(wc -l <<<"$out")" -eq 4 ]] \
+  || fail "id: want a new id for Sample.energy and tags for the 3 helpers: $out"
+untag_helpers
 commit "energy: a new id"
 export_lib
 run status
@@ -871,9 +885,14 @@ must_fail "Sample.double: tagged without an id" -- "$lb" export
 ok "export refuses a tag written after the fact without an id"
 run id
 double_id="$(awk '$2 == "Sample.double" {print $1}' <<<"$out")"
-[[ -n "$double_id" && "$(wc -l <<<"$out")" -eq 1 ]] || fail "id, attribute: want one new id, for Sample.double: $out"
+[[ -n "$double_id" && "$(wc -l <<<"$out")" -eq 3 ]] || fail "id, attribute: want ids for Sample.double, two_pos and two: $out"
 grep -qxF "attribute [trusted \"$double_id\"] Sample.double" Tags.lean || fail "id, attribute: $(cat Tags.lean)"
-ok "id writes the id into the attribute command, in the library that tags"
+for n in two_pos two; do
+  grep -qxF "attribute [trusted \"$(awk -v n=Sample.$n '$2 == n {print $1}' <<<"$out")\"] Sample.$n" Tags.lean \
+    || fail "id: Sample.$n is not tagged in Tags.lean: $(cat Tags.lean)"
+done
+! grep -q "attribute \[trusted" Sample/Basic.lean || fail "id tagged in the library that declares: $(cat Sample/Basic.lean)"
+ok "id writes the id into the attribute command, in the library that tags, and tags the untagged declarations there too"
 commit "tags: an id"
 "$lb" export >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export with Tags"; }
 run status --json
@@ -888,7 +907,7 @@ printf 'attribute [trusted] Sample.energy\n' >> Tags.lean
 must_fail "Sample.energy\` is already tagged" -- "$lb" export
 git checkout -q -- Tags.lean
 ok "a second tag on one declaration is a build error"
-printf 'attribute [trusted] Sample.two Sample.two_pos\n' >> Tags.lean
+printf 'attribute [trusted] Nat.succ Nat.pred\n' >> Tags.lean
 must_fail "a \`trusted\` tag names one declaration" -- "$lb" export
 git checkout -q -- Tags.lean
 ok "one tag names one declaration: two names in one attribute command are a build error"

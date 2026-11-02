@@ -51,15 +51,20 @@ the tag and its id follow, with a warning to write the new name; a rename
 without an alias stops the build at the tag.
 
 ```
-lake exe leanblame id                              # write an id into each @[trusted]
+lake exe leanblame id                              # tag every declaration, each with an id
 lake exe leanblame export                          # build and export the tagged declarations
 lake exe leanblame sign --signer local:alice --all # one approve record per module
 lake exe leanblame status                          # every tagged declaration: valid
 ```
 
-`id` turns `@[trusted]` into `@[trusted "3f2b8c1e-…"]`, and `attribute
-[trusted] Name` into `attribute [trusted "3f2b8c1e-…"] Name`: a random id that
-stays when the declaration is renamed. Cite a declaration by its id. Commit the change.
+Every declaration needs a sign-off, so `id` tags every one. It turns `@[trusted]`
+into `@[trusted "3f2b8c1e-…"]`, and `attribute [trusted] Name` into `attribute
+[trusted "3f2b8c1e-…"] Name`: a random id that stays when the declaration is
+renamed. A declaration with no tag gets `attribute [trusted "…"] Name` at the end
+of its module; when a library `libraries` lists declares nothing (the library of
+tags of a library you do not own), it gets it there instead. A structure's
+projections and what Lean generates come with their parent. Cite a declaration
+by its id. Commit the change.
 `export` refuses a tag without an id. `sign` needs an export of committed
 files: with uncommitted changes, the export names no commit.
 
@@ -75,7 +80,7 @@ Run in the library root as `lake exe leanblame <command>`.
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
 | `export` | Build, write the list of tagged declarations, export them and what they use. |
-| `id` | Write a random id into each tag of the library that has none. |
+| `id` | Tag every declaration of the library, each with a random id. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `diff --from RECORD [--to RECORD] [--json] [NAME\|ID...]` | What changed between two sign-offs, or a sign-off and now, as the kernel sees it; with the old and new text. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |

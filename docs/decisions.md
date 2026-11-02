@@ -381,7 +381,9 @@ nothing).
 ### Declaration ids
 
 An id is written by `leanblame id`, never by `export`: a build on a server would make a new one
-each time. A cite is `id@record`, as the record fixes the commit, the Lean version and the
+each time. `id` tags every declaration: one without a tag gets `attribute [trusted "id"] Name` at
+the end of its module, or, when a listed library declares nothing (a fork's library of tags), at the
+end of that library's last module that imports it. A cite is `id@record`, as the record fixes the commit, the Lean version and the
 dependency commits. Not the commit alone (it moves when anything changes) and not the claim (it
 stops at signed dependencies). A field's id is its structure's id and its name, so a rename of the
 structure keeps the field's history.

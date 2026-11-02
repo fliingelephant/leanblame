@@ -22,8 +22,10 @@ commands:
   init                                   create leanblame.toml and records/
   export                                 build, export, write the boundary list (leanblame.toml
                                          names the libraries and any blueprint manifest)
-  id                                     write a new random id into each @[trusted] of the
-                                         library that has none: @[trusted \"id\"]
+  id                                     tag every declaration of the library, each with a new
+                                         random id: @[trusted \"id\"], or attribute [trusted \"id\"]
+                                         Name at the end of its module (of the library of tags,
+                                         when a listed library declares nothing)
   status [--json]                        state of every tagged declaration
   blame NAME|ID                          who signed it, when, at which claim hash
   diff --from RECORD [--to RECORD] [--json] [NAME|ID...]

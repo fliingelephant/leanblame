@@ -262,6 +262,19 @@ def taggable (n : Name) (ci : ConstantInfo) : CoreM Bool := do
     return false
   return !(← isAutoDeclOrPrivate_Internal n)
 
+/-- The taggable constants the modules `mods` declare, in their order; a name in several modules
+belongs to the first, as in `moduleOf`. -/
+def taggableIn (env : Environment) (mods : Array Name) : IO (Array Name) := do
+  let mut own : Array (Name × ConstantInfo) := #[]
+  for m in mods do
+    let some data := moduleData? env m | fail s!"module {m} was not imported"
+    for n in data.constNames do
+      unless moduleOf? env n == some m do continue
+      let some ci := env.constants.map₁[n]? | fail s!"{n} of module {m} is not in the environment"
+      own := own.push (n, ci)
+  (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n else none).toIO'
+    { fileName := "", fileMap := default } { env }
+
 /-- Run the toolchain's exporter on `env` from `roots` into `path`; returns the SHA-256 (hex) of the
 bytes, computed as they are written. -/
 def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
@@ -352,17 +365,8 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   IO.eprintln "leanblame: printing statements"
   let declarations ← withStatements env declarations
   let boundaryList : BoundaryList := { library := package, declarations := declarations.map (·.2) }
-  let mut own : Array (Name × ConstantInfo) := #[]
-  for m in mods do
-    let some data := moduleData? env m | fail s!"module {m} was not imported"
-    for n in data.constNames do
-      -- A name in several modules belongs to the first, as in `moduleOf`.
-      unless moduleOf? env n == some m do continue
-      let some ci := env.constants.map₁[n]? | fail s!"{n} of module {m} is not in the environment"
-      own := own.push (n, ci)
   -- The library's taggable constants, for `status`'s untagged declarations of this library.
-  let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
-    { fileName := "", fileMap := default } { env }
+  let owned := (← taggableIn env mods).map (·.toString)
   IO.eprintln "leanblame: piece graph"
   -- A challenge states the kernel's theorems, proofs `sorry`; a structure states its projections.
   let states (n : Name) (d : BoundaryDecl) :=
