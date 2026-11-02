@@ -46,6 +46,7 @@ import Lean
 import Lean.Server.References
 import LeanBlame.Core.Store
 import LeanBlame.Lean.Modules
+import LeanBlame.Lean.Names
 
 namespace LeanBlame.Pieces
 
@@ -100,9 +101,7 @@ def Graph.fromJson? (j : Json) : Except String Graph := do
   return { pieces }
 
 def read (root : System.FilePath) (hash : String) : IO Graph := do
-  let p := Store.objectPath root .pieces hash
-  unless ← p.pathExists do fail s!"piece graph {hash} is not in the store"
-  readJson p Graph.fromJson?
+  readJson (← Store.objectFile root .pieces hash) Graph.fromJson?
 
 /-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
 text: their roots, the pieces those need, the pieces these need, and so on, each file the text of its
@@ -131,16 +130,6 @@ those of its private declarations at the private level. -/
 def declRange? (env : Environment) (n : Name) : Option DeclarationRanges :=
   declRangeExt.find? (level := .exported) env n <|> declRangeExt.find? (level := .server) env n <|>
     declRangeExt.find? (level := .private) env n
-
-/-- A name as `Name.toString` prints it (as `.ilean` files have them), read back; a component of
-digits only is a number, as in private names. -/
-def nameOf? (text : String) : Option Name :=
-  (Syntax.decodeNameLit ("`" ++ text)).map fix
-where
-  fix : Name → Name
-    | .str p s => if !s.isEmpty && s.all Char.isDigit then .num (fix p) s.toNat! else .str (fix p) s
-    | .num p k => .num (fix p) k
-    | .anonymous => .anonymous
 
 /-! ## Reading a module -/
 

@@ -61,17 +61,18 @@ def tmpPath (root : System.FilePath) (tag : String) : IO System.FilePath := do
   let n ← IO.monoNanosNow
   return objectsDir root / s!".tmp-{tag}-{n}"
 
-def readString (root : System.FilePath) (k : Kind) (hash : String) : IO String := do
+/-- The file of object `hash` of kind `k`; an error when the store lacks it. -/
+def objectFile (root : System.FilePath) (k : Kind) (hash : String) : IO System.FilePath := do
   let p := objectPath root k hash
-  unless ← p.pathExists do
-    fail s!"{k.dir} object {hash} is not in the store {objectsDir root}"
-  IO.FS.readFile p
+  unless ← p.pathExists do fail s!"{k.dir} object {hash} is not in the store {objectsDir root}"
+  return p
+
+def readString (root : System.FilePath) (k : Kind) (hash : String) : IO String := do
+  IO.FS.readFile (← objectFile root k hash)
 
 /-- Boundary list `hash`, from the object store. -/
 def readBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do
-  match BoundaryList.parse (← readString root .boundaries hash) with
-  | .ok b => return b
-  | .error e => fail s!"boundary list {hash}: {e}"
+  readJson (← objectFile root .boundaries hash) BoundaryList.fromJson?
 
 /-- Delete every file of `d` whose name is not in `keep`; returns how many. -/
 def sweepDir (d : System.FilePath) (keep : Std.HashSet String) : IO Nat := do

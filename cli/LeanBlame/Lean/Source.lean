@@ -167,14 +167,11 @@ def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do
 
 /-- Export `hash` from the object store, parsed. -/
 def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.ExportedEnv := do
-  let p := Store.objectPath root .exports hash
-  unless ← p.pathExists do fail s!"export {hash} is not in the store"
-  parseFile p
+  parseFile (← Store.objectFile root .exports hash)
 
 /-- Whether the toolchain's `leanchecker` replays the export file `path` without error: the
 kernel check `release` and `equiv` run on what they store. -/
 def kernelAccepts (path : System.FilePath) : IO Bool := do
-  unless ← path.pathExists do fail s!"{path} is not in the store"
   let leanchecker := (← findSysroot) / "bin" / "leanchecker" |>.addExtension System.FilePath.exeExtension
   let child ← IO.Process.spawn { cmd := leanchecker.toString, stdin := .null, stdout := .null
                                  args := #["--silent", "--from-export", path.toString] }

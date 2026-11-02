@@ -272,9 +272,6 @@ def BoundaryList.resolve (b : BoundaryList) (key : String) : Except String Bound
   let some d ← b.find? key | throw s!"{key} is not on the boundary list"
   return d
 
-def BoundaryList.parse (contents : String) : Except String BoundaryList := do
-  BoundaryList.fromJson? (← Json.parse contents)
-
 /-! ## 2. Record -/
 
 /-- `provider:id` with a non-empty lowercase provider and a non-empty id. -/

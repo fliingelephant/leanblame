@@ -7,13 +7,11 @@ declarations in `codeData` (the `canonical` of `externalDecls`, the `name` of
 next to the manifest. Other fields are not read.
 -/
 import LeanBlame.Core.Schema
+import LeanBlame.Lean.Names
 
 namespace LeanBlame.Blueprint
 
 open Lean
-
-/-- A constant name as boundary lists write it (`Lean.Name.toString`), read back. -/
-def constName? (s : String) : Option Name := Syntax.decodeNameLit ("`" ++ s)
 
 /-- A blueprint label as its authors write it: a label of one component without the quotes Lean
 puts around it (verso-blueprint's `labelString`). -/
@@ -78,11 +76,7 @@ def nodes (path : System.FilePath) (j : Json) : IO (Array Node × Array String) 
         text? := (← str? m "raw").bind nonEmpty?
     if text?.isNone then
       if fragments?.isNone then
-        let entries ← match ← readFileIfExists cache with
-          | none => pure #[]
-          | some s => match Json.parse s with
-            | .ok c => arr c "entries"
-            | .error err => fail s!"{cache}: {err}"
+        let entries ← if ← cache.pathExists then arr (← readJson cache pure) "entries" else pure #[]
         let mut m : Std.HashMap String String := {}
         for f in entries do
           let (some k, some h) := (← str? f "key", ← str? f "html")

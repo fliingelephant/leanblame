@@ -25,7 +25,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (tag : String)
     IO.eprintln s!"release: {invalid.size} of {decls.size} tagged declarations are not valid"
     return 1
   -- 2. Kernel gate.
-  unless ← backend.kernelAccepts (Store.objectPath root .exports r.cur.exportHash) do
+  unless ← backend.kernelAccepts (← Store.objectFile root .exports r.cur.exportHash) do
     IO.eprintln "release: kernel rejected the export"
     return 1
   -- 3. Axiom gate.

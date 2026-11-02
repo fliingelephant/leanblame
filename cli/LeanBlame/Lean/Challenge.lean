@@ -62,7 +62,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
   let mods := #[`ChallengeDeps, `Challenge]
   -- The library's private constants, by user name, for the challenge's.
   let libPrivate : Std.HashMap Name Name := lib.nodes.fold (init := {}) fun acc s _ =>
-    match Pieces.nameOf? s with
+    match nameOf? s with
     | some n => if isPrivateName n then acc.insert (privateToUserName n) n else acc
     | none => acc
   let libModules : NameSet := cur.modules.foldl (·.insert ·.toName) {}
@@ -86,12 +86,12 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
     initSearchPath sysroot (build :: leanPath)
     -- Without environment extensions, as an export rebuilds its constants (`Source.declsIn`).
     let env ← importModules (mods.map ({ module := · })) {} (loadExts := false)
-    let present := lib.boundary.declarations.filter fun d => (Pieces.nameOf? d.name).any env.contains
+    let present := lib.boundary.declarations.filter fun d => (nameOf? d.name).any env.contains
     let boundary := { lib.boundary with declarations := present }
     -- What the challenge imports from outside the library is the library's own build: those
     -- declarations keep the library's hashes, and only the challenge's own are hashed.
     let outside (s : String) := (lib.nodes[s]?).filter (!libModules.contains ·.decl.module.toName)
-    let decl ← Source.declsIn env (present.filterMap (Pieces.nameOf? ·.name)) rename
+    let decl ← Source.declsIn env (present.filterMap (nameOf? ·.name)) rename
     let h : Core.Hashed := { lib with nodes := ← Walk.hashNodes decl boundary outside, boundary, axioms := {} }
     let claim (g : Core.Hashed) (s : String) := g.nodes[s]?.map (·.claim)
     let differ := present.filter fun d => claim lib d.name != claim h d.name
@@ -111,7 +111,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
     let toNew : Std.HashMap Name Name := own.foldl (init := {}) fun acc c => if rename c == c then acc else acc.insert (rename c) c
     let proven ← Equiv.prove env.toKernelEnv
       { old := lib, new := h, oldConst? := (consts[·]?), newConst? := fun n => env.find? (toNew.getD n n)
-        toNew := fun n => toNew.getD n n, oldPos := (pos.getD · 0) } (differ.filterMap (Pieces.nameOf? ·.name))
+        toNew := fun n => toNew.getD n n, oldPos := (pos.getD · 0) } (differ.filterMap (nameOf? ·.name))
     let mut problems := #[]
     for d in differ do
       unless proven.targets.any (·.toString == d.name) do

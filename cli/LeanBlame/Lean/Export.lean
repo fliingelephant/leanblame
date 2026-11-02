@@ -246,10 +246,6 @@ def taggable (n : Name) (ci : ConstantInfo) : CoreM Bool := do
     return false
   return !(← isAutoDeclOrPrivate_Internal n)
 
-/-- A constant name that reads back from its printed form, as boundary lists name constants. -/
-def roundTrips (n : Name) : Bool :=
-  Syntax.decodeNameLit ("`" ++ n.toString) == some n
-
 /-- Run the toolchain's exporter on `env` from `roots` into `path`; returns the SHA-256 (hex) of the
 bytes, computed as they are written. -/
 def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
