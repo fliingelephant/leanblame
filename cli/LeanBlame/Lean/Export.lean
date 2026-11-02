@@ -106,10 +106,14 @@ def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Arra
       | .path .. => { name := name p, git := none, rev := none, subDir := none }
   return (deps, requires)
 
-/-- The module defining `n`. -/
-def moduleOf (env : Environment) (n : Name) : IO Name := do
-  let some m := moduleOf? env n | fail s!"{n} is in no imported module"
-  return m
+/-- The module that declares each constant of `env`. It keeps only the module index of `env`, so
+that `env` can be freed while it is in use. -/
+def moduleOf (env : Environment) : Name → IO Name :=
+  let idx := env.const2ModIdx
+  let mods := env.header.modules.map (·.module)
+  fun n => do
+    let some m := idx[n]? >>= (mods[·.toNat]?) | fail s!"{n} is in no imported module"
+    return m
 
 /-- The `@[trusted]` declarations, tagged in any module, own or imported, with their ids and
 docstrings; and the problems. Two modules that do not import each other can tag one declaration;
@@ -211,6 +215,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
   let mut out := #[]
   -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
   let mut owner : Std.HashMap String Name := {}
+  let moduleOf := moduleOf env
   for (e, ci) in entries do
     let parent := e.parent.map (root entries.size)
     let id? := e.id <|> parent.bind fun p =>
@@ -221,7 +226,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
     if let some other := owner[id]? then
       errors := errors.push s!"{other} and {e.name} have the same id {id}; remove it from one of them and run `leanblame id`"
     owner := owner.insert id e.name
-    let module ← moduleOf env e.name
+    let module ← moduleOf e.name
     let some place := sourcePlace env e.name <|> parent.bind (sourcePlace env)
       | errors := errors.push s!"{e.name}: Lean has no source position for it"; continue
     let d : BoundaryDecl := {
@@ -288,9 +293,9 @@ structure Loaded where
   srcPath : System.SearchPath
 
 /-- Build the libraries of `root` (with the mathlib cache when they depend on mathlib) and import
-their modules, running their initializers and loading the environment extensions of everything they
-import (`main` allows initializers). -/
-def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
+their modules; with `loadExts`, running their initializers and loading the environment extensions of
+everything they import (`main` allows initializers), which printing statements needs. -/
+def load (root : System.FilePath) (libsGiven : Array String) (loadExts := true) : IO Loaded := do
   let pkg ← lakePackage root
   let libraries ← libraries pkg libsGiven
   let libs := libraries.map (·.name.toString (escape := false))
@@ -307,7 +312,7 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
   let (sysroot, leanPath, srcPath) ← lakeEnvPaths root
   initSearchPath sysroot leanPath
   IO.eprintln s!"leanblame: importing {", ".intercalate libs.toList}"
-  let env ← importModules (roots.map fun m => { module := m }) {} (loadExts := true)
+  let env ← importModules (roots.map fun m => { module := m }) {} (loadExts := loadExts)
   -- The libraries' modules, in import order, as Lake has them: the imported ones local to a library
   -- (a module of several belongs to the first), with its Lean options.
   let libOptions ← libraries.mapM fun l => return (l, ← libraryOptions l)

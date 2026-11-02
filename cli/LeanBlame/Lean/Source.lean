@@ -125,6 +125,8 @@ proofs in the environment `Load` builds; `uses` and `isAssumed` follow what `Lea
 follows in that environment, which leaves out unsafe and partial constants. -/
 def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) : IO Core.Source := do
   let names ← nameMap exported
+  -- Each constant's printed name, one string for all its uses.
+  let printed : Std.HashMap Name String := names.fold (init := {}) fun m s n => m.insert n s
   let find? (s : String) : Option ConstantInfo := names[s]? >>= (exported.constMap[·]?)
   let inEnv? (s : String) := (find? s).filter fun ci => !ci.isUnsafe && !ci.isPartial
   let runner ← MetaRunner.new (← Load.environmentOfExport exported)
@@ -132,7 +134,8 @@ def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) :
     decl := fun s => do
       let some ci := find? s | fail s!"Const not found in export '{s}'"
       runner.run (declOf ci (← moduleOf ci.name).toString (pure ·.toString))
-    uses := fun s => (((inEnv? s).map usesOf).getD #[]).map toString
+    uses := fun s => (((inEnv? s).map usesOf).getD #[]).map fun n =>
+      if let some p := printed[n]? then p else n.toString
     isAssumed := fun s => inEnv? s matches some (.axiomInfo _) }
 
 /-- `Source.decl` for the constants of `env`, imported without its environment extensions, as an

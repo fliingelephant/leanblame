@@ -23,7 +23,8 @@ def newId : IO String := do
   return s!"{group 0 8}-{group 8 4}-{group 12 4}-{group 16 4}-{group 20 12}"
 
 def run (root : System.FilePath) (libsGiven : Array String) : IO UInt32 := do
-  let l ← Export.load root libsGiven
+  -- The tags are entries the modules hold, which need no environment extension loaded.
+  let l ← Export.load root libsGiven (loadExts := false)
   let own : NameSet := l.mods.foldl (·.insert ·) {}
   let missing := (tags l.env).filter fun (m, t) => t.id.isNone && own.contains m
   if missing.isEmpty then
