@@ -670,7 +670,9 @@ must_fail "Sample.energy is claimed by labels def:energy and def:energy2" "no st
   "a statement entry for \[Sample.one_site_pos\] has no label" -- "$lb" export --boundary "$logs/bp/blueprint-manifest.json"
 printf '{"declarations": []}\n' > "$logs/other.json"
 must_fail "takes a verso-blueprint blueprint-manifest.json" -- "$lb" export --boundary "$logs/other.json"
-ok "a name claimed by two labels, a statement without text or label, and other files are errors"
+printf '{"entries": {}}\n' > "$logs/bp/blueprint-html-cache.json"
+must_fail "blueprint-html-cache.json: \`entries\` is not an array" -- "$lb" export --boundary "$logs/bp/blueprint-manifest.json"
+ok "a name claimed by two labels, a statement without text or label, other files and a broken HTML cache are errors"
 
 echo "== equiv: a definitional change under two tagged declarations"
 rm -rf "$work"

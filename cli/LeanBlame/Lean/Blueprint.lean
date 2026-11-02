@@ -27,28 +27,53 @@ structure Node where
   names : Array Name
   text : String
 
+/-- Field `k` of object `j`. verso-blueprint writes `null` for an absent value, or leaves the key
+out; both read as absent. -/
+def field? (j : Json) (k : String) : Option Json := match j.getObjVal? k with
+  | .ok .null | .error _ => none
+  | .ok v => some v
+
+/-- Array field `k` of `j`, empty when absent. -/
+def arr (j : Json) (k : String) : Except String (Array Json) := match field? j k with
+  | none => pure #[]
+  | some (.arr xs) => pure xs
+  | some _ => throw s!"`{k}` is not an array"
+
+/-- String field `k` of `j`, if present. -/
+def str? (j : Json) (k : String) : Except String (Option String) := match field? j k with
+  | none => pure none
+  | some (.str s) => pure (some s)
+  | some _ => throw s!"`{k}` is not a string"
+
+/-- Object field `k` of `j`, empty when absent. -/
+def obj (j : Json) (k : String) : Except String Json := match field? j k with
+  | none => pure (Json.mkObj [])
+  | some v@(.obj _) => pure v
+  | some _ => throw s!"`{k}` is not an object"
+
+/-- The statement texts of the `blueprint-html-cache.json` at `cache`, by key; none when there is
+no such file. -/
+def fragments (cache : System.FilePath) : IO (Std.HashMap String String) := do
+  unless ← cache.pathExists do return {}
+  readJson cache fun j => do
+    let mut m : Std.HashMap String String := {}
+    for f in ← arr j "entries" do
+      let (some k, some h) := (← str? f "key", ← str? f "html") | throw "an entry without `key` or `html`"
+      m := m.insert k h
+    return m
+
 /-- The nodes of the verso-blueprint manifest `j`, read from `path`, and the problems. Entries are
 statements of blueprint nodes (`facet` statement, `targetKind` block or externalMarkup, as in
 verso-blueprint's `isQueryableStatement`). A node without Lean names is not formalized yet and is
 left out. A statement entry without a label or without text and a Lean name claimed by two labels
 are problems; a value of an unexpected type, and an HTML cache that does not parse, are errors.
-verso-blueprint writes `null` for an absent value, or leaves the key out; both read as absent. -/
+-/
 def nodes (path : System.FilePath) (j : Json) : IO (Array Node × Array String) := do
-  let field (j : Json) (k : String) : Option Json := match j.getObjVal? k with
-    | .ok .null | .error _ => none
-    | .ok v => some v
-  let arr (j : Json) (k : String) : IO (Array Json) := match field j k with
-    | none => pure #[]
-    | some (.arr xs) => pure xs
-    | some _ => fail s!"{path}: `{k}` is not an array"
-  let str? (j : Json) (k : String) : IO (Option String) := match field j k with
-    | none => pure none
-    | some (.str s) => pure (some s)
-    | some _ => fail s!"{path}: `{k}` is not a string"
-  let obj (j : Json) (k : String) : IO Json := match field j k with
-    | none => pure (Json.mkObj [])
-    | some v@(.obj _) => pure v
-    | some _ => fail s!"{path}: `{k}` is not an object"
+  -- The fields of the manifest: an error names it.
+  let inManifest {α : Type} (x : Except String α) : IO α := IO.ofExcept (x.mapError (s!"{path}: {·}"))
+  let arr (j : Json) (k : String) := inManifest (Blueprint.arr j k)
+  let str? (j : Json) (k : String) := inManifest (Blueprint.str? j k)
+  let obj (j : Json) (k : String) := inManifest (Blueprint.obj j k)
   let nonEmpty? (s : String) : Option String := if strTrim s == "" then none else some s
   let cache := path.parent.getD "." / "blueprint-html-cache.json"
   let mut fragments? : Option (Std.HashMap String String) := none
@@ -75,14 +100,7 @@ def nodes (path : System.FilePath) (j : Json) : IO (Array Node × Array String) 
       if (← str? m "slot") == some "statement" && text?.isNone then
         text? := (← str? m "raw").bind nonEmpty?
     if text?.isNone then
-      if fragments?.isNone then
-        let entries ← if ← cache.pathExists then arr (← readJson cache pure) "entries" else pure #[]
-        let mut m : Std.HashMap String String := {}
-        for f in entries do
-          let (some k, some h) := (← str? f "key", ← str? f "html")
-            | fail s!"{cache}: an entry without `key` or `html`"
-          m := m.insert k h
-        fragments? := some m
+      if fragments?.isNone then fragments? := some (← fragments cache)
       text? := ((← str? e "key").bind fun k => fragments?.bind (·[k]?)).bind nonEmpty?
     let some text := text? | errors := errors.push s!"no statement text for label {label}"; continue
     let mut names := #[]
