@@ -325,7 +325,8 @@ energy = (energy[:at] + "/-- Site two, as a number proven to be two. -/\n"
           '@[trusted "8c3f9d1b-5a4e-4f6d-8ba2-4d5e6f708192"] class Positive (n : Nat) : Prop where\n  pos : 0 < n\n\n'
           "/-- Two is positive. -/\n"
           '@[trusted "9d4a0e2c-6b5f-4a7e-9cb3-5e6f70819203"] instance twoPositive : Positive 2 := ⟨two_pos⟩\n\n' + energy[at:])
-open("Sample/Energy.lean", "w").write(energy + "\nvariable (late : Nat)\n")
+open("Sample/Energy.lean", "w").write("import Sample.Attrs\n" + energy + "\nvariable (late : Nat)\n")
+open("Sample/Attrs.lean", "w").write("import Sample.Basic\n\nattribute [simp] Sample.double\n\nattribute [simp] Nat.le_of_lt_succ\n")
 PY
 export_lib
 run challenge write Sample.pointEnergy_even Sample.siteTwo_val --out "$work-challenge-two"
@@ -333,6 +334,7 @@ deps="$(cat "$work-challenge-two/ChallengeDeps.lean")"
 for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2, by decide⟩ : Fin 3).val = 2 := rfl" \
             "private def «secret (Sample.Basic)» : Nat := 0" "def zero : Nat := «secret (Sample.Basic)»" \
             "private def «secret (Sample.Energy)» : Nat := 0" "+ «secret (Sample.Energy)» + More.zero" \
+            "attribute [simp] Sample.double" "attribute [simp] Nat.le_of_lt_succ" \
             $'namespace Sample.Extra\nend Sample.Extra' "open Extra" "namespace More.Inner" "end Inner" "end More" \
             $'namespace Far.Away\n\n/-- One, far away. -/\ndef one : Nat := 1\n\nend Far.Away\n\nderiving instance BEq for Point\n\n/-- A point as a number: its norm. -/\ninstance : Coe Point Nat := ⟨Point.norm⟩\n\nend Sample\n\nend\n\nsection'; do
   [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
@@ -354,9 +356,9 @@ run challenge check "$work-challenge-two"
 [[ "$out" == *", 1 of them by definitional equality" ]] || fail "below shares down's match in one file: $out"
 [[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
   || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
-git checkout -q -- Sample
+git checkout -q -- Sample && rm Sample/Attrs.lean
 export_lib
-ok "a tagged definition that uses theorems brings their proofs, so second_site has no challenge with siteTwo_val, but one alone; instances come when used, a derived one with its deriving command, a coercion, which Lean unfolds, by its field; a Prop-valued instance is stated with proof sorry, a Prop-valued field comes with its class; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is needed, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the needed commands stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
+ok "a module of attribute commands alone is read: one for a library constant comes with it, one for Nat's with the module that imports it; a tagged definition that uses theorems brings their proofs, so second_site has no challenge with siteTwo_val, but one alone; instances come when used, a derived one with its deriving command, a coercion, which Lean unfolds, by its field; a Prop-valued instance is stated with proof sorry, a Prop-valued field comes with its class; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is needed, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the needed commands stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"

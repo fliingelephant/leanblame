@@ -13,8 +13,9 @@ record of the build (the module's `.ilean`) says refers to one, so that a lemma 
 not used counts too. Lean's terms name the instances it used, but for coercions, which it unfolds
 (`Meta.expandCoe`): a declaration also needs the library's coercions whose fields its terms hold.
 Every command needs the `namespace` and `section` around it, with their `end`s, and one that does not
-open or close a scope needs the scope commands before it. An `attribute` command comes with the
-declaration it names, or, for a constant from outside the library, with its module. A tagged
+open or close a scope needs the scope commands before it. An `attribute` command, found in any
+module, comes with the declaration it names, or, for a constant from outside the library, with its
+module and each module that imports it. A tagged
 theorem's statement is a piece of `Challenge.lean`: its command with the proof replaced by `sorry`,
 among copies of the scope commands it needs; it needs what its statement uses. Each tagged
 declaration has a root, a piece with no text that needs the lakefile, the toolchain, and the
@@ -669,9 +670,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     (theorems others : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
   let libSet : NameSet := library.foldl (·.insert ·) {}
   let moduleOf (n : Name) : Option Name := (moduleOf? env n).filter libSet.contains
-  -- Each module read once; `fresh`: those read since `make` last looked at their `attribute` commands.
+  -- Each module read once.
   let reads ← IO.mkRef ({} : Std.HashMap Name (Except String Read))
-  let fresh ← IO.mkRef (#[] : Array Name)
   let readOf (m : Name) : IO (Except String Read) := do
     if let some r := (← reads.get)[m]? then return r
     let r ← try
@@ -679,7 +679,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         pure (.ok (← readModule env (options m) libSet m file ((← findOLean m).withExtension "ilean")))
       catch e => pure (.error (toString e))
     reads.modify (·.insert m r)
-    fresh.modify (·.push m)
     return r
   -- A module that holds a piece reads.
   let readOk (m : Name) : IO Read := do
@@ -717,10 +716,26 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     ns ++ (coes.filter (·.2.all used.contains)).map (·.1)
   -- What module `m` imports from outside the library, through the library's modules it imports; not
   -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
+  let within (m : Name) : Array Name := Id.run <| reach #[m] fun x => pure ((importsOf env x).filter libSet.contains)
   let outsideOf (m : Name) : Array Name :=
-    let mods := Id.run <| reach #[m] fun x => pure ((importsOf env x).filter libSet.contains)
-    dedup <| mods.flatMap fun x => (importsOf env x).filter fun i =>
+    dedup <| (within m).flatMap fun x => (importsOf env x).filter fun i =>
       !libSet.contains i && i != `Init && !(`LeanBlame).isPrefixOf i
+  -- The `attribute` commands of every module, each for one name: by the library's constant it names
+  -- (`attrsOn`), else by module (`attrsIn`); and the modules that do not read.
+  let mut attributes : Std.HashMap Name (Array (Nat × Nat × Option Name)) := {}
+  let mut attrsOn : Std.HashMap Name (Array Key) := {}
+  let mut attrsIn : Std.HashMap Name (Array Key) := {}
+  let mut unread : Std.HashMap Name String := {}
+  for m in library do
+    match ← readOf m with
+    | .error e => unread := unread.insert m e
+    | .ok r =>
+      let found := attributesOf r
+      attributes := attributes.insert m found
+      for (i, a, target) in found do
+        match target with
+        | some n => attrsOn := attrsOn.alter n fun xs => some ((xs.getD #[]).push (.attr m i a))
+        | none => attrsIn := attrsIn.alter m fun xs => some ((xs.getD #[]).push (.attr m i a))
   let optionDecls ← getOptionDecls
   -- The Lean options Lake builds module `m` with, as `set_option` commands, and why a file cannot
   -- set some.
@@ -755,7 +770,12 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | none => return (package, #[s!"{n} is a declaration of another library: its challenge is that library's"])
     | .lakefile => return (#[], lakeProblem.toArray)
     | .toolchain | .outside _ | .declare _ | .importDeps | .tail .. => return (#[], #[])
-    | .head deps m => return (((outsideOf m).map Key.outside).push (.tail deps m), (optionsOf m).2)
+    | .head deps m =>
+      -- What module `m` sees: the `attribute` commands, for constants from outside the library, of
+      -- the library's modules it imports and its own.
+      let seen := within m
+      return (((outsideOf m).map Key.outside).push (.tail deps m) ++ seen.flatMap (attrsIn.getD · #[]),
+        (optionsOf m).2 ++ seen.filterMap fun x => unread[x]?.map (s!"{x} does not read, so its `attribute` commands are unknown: " ++ ·))
     | .close deps m s => return (#[.cmd deps m (← readOk m).scopes.scopes[s]!.1], #[])
     | .cmd deps m i =>
       let r ← readOk m
@@ -767,6 +787,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         if o == i then needs := needs.push (match e with | some e => .cmd deps m e | none => .close deps m s)
         if e == some i then needs := needs.push (.cmd deps m o)
       needs := needs ++ c.opened.map Key.declare
+      if deps then needs := needs ++ c.declares.flatMap (attrsOn.getD · #[])
       let (keys, problems) ← declarers (some (.cmd true m i))
         (withCoercions (c.declares.flatMap (termUses env · true) ++ r.named c))
       return (needs ++ keys, problems)
@@ -791,14 +812,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       let (keys, problems) ← declarers none
         ((withCoercions (termUses env t false ++ r.named c a)).filter (r.owner.find? · != some i))
       return (base.push (.head false m) ++ r.scopes.context[i]!.map (Key.cmd false m ·) ++ keys, problems)
-  -- Every piece the roots need, what those need, and so on. An `attribute` command comes with
-  -- the declaration it names, or, for a constant from outside the library, with its module's
-  -- `section`s: the commands of a module are known once the module is read.
+  -- Every piece the roots need, what those need, and so on.
   let mut visited : Std.HashMap Key (Array Key × Array String) := {}
-  let mut attributes : Std.HashMap Name (Array (Nat × Nat × Option Name)) := {}
-  let mut attrsOn : Std.HashMap Name (Array Key) := {}
-  let mut attrsIn : Std.HashMap Name (Array Key) := {}
-  let mut declared : NameSet := {}
   let roots := (theorems ++ others).map Key.root
   let mut todo := roots
   while h : todo.size > 0 do
@@ -808,32 +823,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     let (needs, problems) ← step k
     visited := visited.insert k (needs, problems)
     todo := todo ++ needs
-    match k with
-    | .cmd true m i =>
-      for n in (← readOk m).cmds[i]!.declares do
-        declared := declared.insert n
-        todo := todo ++ attrsOn.getD n #[]
-    | .head _ m => todo := todo ++ attrsIn.getD m #[]
-    | _ => pure ()
-    for m in ← fresh.swap #[] do
-      let .ok r ← readOf m | continue
-      let found := attributesOf r
-      attributes := attributes.insert m found
-      for (i, a, target) in found do
-        let x := Key.attr m i a
-        match target with
-        | some n =>
-          attrsOn := attrsOn.alter n fun xs => some ((xs.getD #[]).push x)
-          if declared.contains n then todo := todo.push x
-        | none =>
-          attrsIn := attrsIn.alter m fun xs => some ((xs.getD #[]).push x)
-          if visited.contains (.head true m) || visited.contains (.head false m) then todo := todo.push x
-  -- What comes with piece `k`.
-  let comesWith (k : Key) : IO (Array Key) := do
-    match k with
-    | .cmd true m i => return (← readOk m).cmds[i]!.declares.flatMap (attrsOn.getD · #[])
-    | .head _ m => return attrsIn.getD m #[]
-    | _ => return #[]
   -- One file holds the pieces of several modules, and Lean names a private declaration after its
   -- module: a private declaration whose name a declaration of another module in the graph has too is
   -- written with its module (`withModule`); what Lean makes with it follows its name.
@@ -891,7 +880,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   let mut pieces := #[]
   for k in order do
     let (needs, problems) := visited.getD k (#[], #[])
-    let needs ← (dedup (needs ++ (← comesWith k))).mapM fun n => match index[n]? with
+    let needs ← (dedup needs).mapM fun n => match index[n]? with
       | some j => pure j
       | none => fail "a piece needs a piece the graph lacks"
     let text ← match k with

@@ -91,7 +91,9 @@ what that needs, and so on. What several declarations need is there once.
   used, but for coercions, which it unfolds (`Meta.expandCoe`): a declaration
   also needs the library's coercions whose fields its terms hold. An `attribute` command is split by the
   names it gives the attribute to: each part comes with the declaration it
-  names, or, for a constant from outside the library, with its module.
+  names, or, for a constant from outside the library, with its module and each
+  module that imports it. Every module's `attribute` commands are read, also
+  of a module that declares nothing.
 - A command needs its scope: the `namespace` and `section` commands around it
   with their `end`s and, unless it opens or closes a scope, the `open`,
   `variable`, `universe` and `set_option` commands before it in that scope; a
