@@ -45,7 +45,7 @@ projections.
 
 A declaration of another module, also of a library you do not own, is tagged
 after the fact, as `attribute [simp]` does: `attribute [trusted] Name`, in a
-library of yours that you name with `--lib`. A declaration has one tag. When the
+library of yours that `libraries` in `leanblame.toml` lists. A declaration has one tag. When the
 library renames it with a deprecated alias (`@[deprecated] alias old := new`),
 the tag and its id follow, with a warning to write the new name; a rename
 without an alias stops the build at the tag.
@@ -63,8 +63,8 @@ stays when the declaration is renamed. Cite a declaration by its id. Commit the 
 `export` refuses a tag without an id. `sign` needs an export of committed
 files: with uncommitted changes, the export names no commit.
 
-Instead of `@[trusted]`, `export --boundary FILE` reads a verso-blueprint
-`blueprint-manifest.json`. A label is the id of the first declaration it names;
+Instead of `@[trusted]`, `export` reads the verso-blueprint
+`blueprint-manifest.json` that `boundary` in `leanblame.toml` names. A label is the id of the first declaration it names;
 its other declarations point to that one.
 
 ## Commands
@@ -74,8 +74,8 @@ Run in the library root as `lake exe leanblame <command>`.
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
-| `export [--boundary FILE] [--lib NAME]` | Build, write the list of tagged declarations, export them and what they use. |
-| `id [--lib NAME]` | Write a random id into each tag of the library that has none. |
+| `export` | Build, write the list of tagged declarations, export them and what they use. |
+| `id` | Write a random id into each tag of the library that has none. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `diff --from RECORD [--to RECORD] [--json] [NAME\|ID...]` | What changed between two sign-offs, or a sign-off and now, as the kernel sees it; with the old and new text. |
 | `blame NAME\|ID` | Who signed it, when, at which hash. |
@@ -105,7 +105,8 @@ Records are TOML files in `records/`, named by the SHA-256 of their bytes,
 never edited. They name declarations by id, so a sign-off follows a rename.
 `leanblame.toml` sets the policy, every key required: `records` directories,
 `exclude` (records the library refuses to count), `required_signers`,
-`allowed_signers`. From the terminal, `sign` writes `local:` signer ids; a service that
+`allowed_signers`; and, optionally, `libraries` (the package's libraries to read) and
+`boundary` (a blueprint manifest instead of `@[trusted]`). From the terminal, `sign` writes `local:` signer ids; a service that
 writes records with login-backed ids (OpenVouch) is not built yet.
 
 `.leanblame/` holds the object store. It is local and ignored by git.

@@ -10,7 +10,7 @@ identifies it across exports.
 ## 1. Boundary list (JSON)
 
 Produced by `export` from `@[trusted "id"]`, including tags found in imported
-libraries, or from a verso-blueprint manifest (`--boundary FILE`,
+libraries, or from a verso-blueprint manifest (`boundary` in `leanblame.toml`,
 [decisions.md](decisions.md), Blueprints). Read by `status`, from
 the object store. It holds the declarations only, in source order: a module
 after the modules it imports, then by position in the file (a member without a

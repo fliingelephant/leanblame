@@ -20,10 +20,9 @@ def usage : String :=
 
 commands:
   init                                   create leanblame.toml and records/
-  export [--boundary FILE] [--lib NAME]  build, export, write the boundary list (FILE: a
-                                         verso-blueprint blueprint-manifest.json, read
-                                         instead of @[trusted])
-  id [--lib NAME]                        write a new random id into each @[trusted] of the
+  export                                 build, export, write the boundary list (leanblame.toml
+                                         names the libraries and any blueprint manifest)
+  id                                     write a new random id into each @[trusted] of the
                                          library that has none: @[trusted \"id\"]
   status [--json]                        state of every tagged declaration
   blame NAME|ID                          who signed it, when, at which claim hash
@@ -86,17 +85,19 @@ where
         fail s!"unexpected argument {a}"
 
 def cmdExport (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--boundary", "--lib"] #[] args
+  discard <| parseArgs #[] #[] args
   let root ← IO.currentDir
-  let r ← Export.run Source.backend root (a.get? "--boundary" |>.map System.FilePath.mk) (a.getAll "--lib")
+  let cfg ← Config.load root
+  let r ← Export.run Source.backend root (cfg.boundary.map (root / ·)) cfg.libraries
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"
   return 0
 
 def cmdId (args : List String) : IO UInt32 := do
-  let a ← parseArgs #["--lib"] #[] args
-  Ids.run (← IO.currentDir) (a.getAll "--lib")
+  discard <| parseArgs #[] #[] args
+  let root ← IO.currentDir
+  Ids.run root (← Config.load root).libraries
 
 def cmdStatus (args : List String) : IO UInt32 := do
   let a ← parseArgs #[] #["--json"] args

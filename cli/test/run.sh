@@ -633,7 +633,10 @@ ok "export refuses a tagged declaration without docstring and an unsafe one"
 
 echo "== blueprint: a verso-blueprint manifest (hand-written from verso-blueprint's sources)"
 stored_boundary() { echo ".leanblame/store/boundaries/$(awk '/^boundary /{print $2}' <<<"$out" | sed 's/^sha256://')"; }
-run export --boundary "$here/blueprint/blueprint-manifest.json"
+# `boundary` in leanblame.toml names the manifest; each case writes it anew.
+boundary_is() { git checkout -q -- leanblame.toml; printf 'boundary = "%s"\n' "$1" >> leanblame.toml; }
+boundary_is "$here/blueprint/blueprint-manifest.json"
+run export
 python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
 import json, sys
 d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
@@ -668,12 +671,16 @@ m["previews"] += [
    "codeData": {"externalDecls": [{"canonical": "Sample.one_site_pos"}]}}]
 json.dump(m, open(sys.argv[2], "w"))
 PY
+boundary_is "$logs/bp/blueprint-manifest.json"
 must_fail "Sample.energy is claimed by labels def:energy and def:energy2" "no statement text for label thm:silent" \
-  "a statement entry for \[Sample.one_site_pos\] has no label" -- "$lb" export --boundary "$logs/bp/blueprint-manifest.json"
+  "a statement entry for \[Sample.one_site_pos\] has no label" -- "$lb" export
 printf '{"declarations": []}\n' > "$logs/other.json"
-must_fail "takes a verso-blueprint blueprint-manifest.json" -- "$lb" export --boundary "$logs/other.json"
+boundary_is "$logs/other.json"
+must_fail "names a verso-blueprint blueprint-manifest.json" -- "$lb" export
 printf '{"entries": {}}\n' > "$logs/bp/blueprint-html-cache.json"
-must_fail "blueprint-html-cache.json: \`entries\` is not an array" -- "$lb" export --boundary "$logs/bp/blueprint-manifest.json"
+boundary_is "$logs/bp/blueprint-manifest.json"
+must_fail "blueprint-html-cache.json: \`entries\` is not an array" -- "$lb" export
+git checkout -q -- leanblame.toml
 ok "a name claimed by two labels, a statement without text or label, other files and a broken HTML cache are errors"
 
 echo "== equiv: a definitional change under two tagged declarations"
@@ -796,17 +803,17 @@ echo "== tags written after the fact, in a library of their own"
 # As an instance tags a library it does not own: `attribute [trusted] Name` in a library of its own.
 printf '\n[[lean_lib]]\nname = "Tags"\n' >> lakefile.toml
 printf 'import Sample\n\nattribute [trusted] Sample.double\n' > Tags.lean
+printf 'libraries = ["Sample", "Tags"]\n' >> leanblame.toml
 commit "tags in a library of their own"
-libs=(--lib Sample --lib Tags)
-must_fail "Sample.double: tagged without an id" -- "$lb" export "${libs[@]}"
+must_fail "Sample.double: tagged without an id" -- "$lb" export
 ok "export refuses a tag written after the fact without an id"
-run id "${libs[@]}"
+run id
 double_id="$(awk '$2 == "Sample.double" {print $1}' <<<"$out")"
 [[ -n "$double_id" && "$(wc -l <<<"$out")" -eq 1 ]] || fail "id, attribute: want one new id, for Sample.double: $out"
 grep -qxF "attribute [trusted \"$double_id\"] Sample.double" Tags.lean || fail "id, attribute: $(cat Tags.lean)"
 ok "id writes the id into the attribute command, in the library that tags"
 commit "tags: an id"
-"$lb" export "${libs[@]}" >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export with Tags"; }
+"$lb" export >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export with Tags"; }
 run status --json
 python3 - "$out" "$double_id" <<'PY' || fail "tags: $out"
 import json, sys
@@ -816,11 +823,11 @@ assert t["id"] == sys.argv[2] and t["state"] == "unsigned", t
 PY
 ok "a declaration tagged from another library is on the boundary list, with its id"
 printf 'attribute [trusted] Sample.energy\n' >> Tags.lean
-must_fail "Sample.energy\` is already tagged" -- "$lb" export "${libs[@]}"
+must_fail "Sample.energy\` is already tagged" -- "$lb" export
 git checkout -q -- Tags.lean
 ok "a second tag on one declaration is a build error"
 printf 'attribute [trusted] Sample.two Sample.two_pos\n' >> Tags.lean
-must_fail "a \`trusted\` tag names one declaration" -- "$lb" export "${libs[@]}"
+must_fail "a \`trusted\` tag names one declaration" -- "$lb" export
 git checkout -q -- Tags.lean
 ok "one tag names one declaration: two names in one attribute command are a build error"
 python3 - <<'PY'
@@ -832,7 +839,7 @@ open(p, "w").write(s.replace(":= double n", ":= twice n"))
 PY
 commit "double renamed twice, with a deprecated alias"
 (lake build Tags 2>&1 || true) | grep -q "deprecated alias of \`Sample.twice\`" || fail "rename: no warning in the build of Tags"
-"$lb" export "${libs[@]}" >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export, rename"; }
+"$lb" export >/dev/null 2>"$logs/export.log" || { cat "$logs/export.log" >&2; fail "export, rename"; }
 run status --json
 python3 - "$out" "$double_id" <<'PY' || fail "rename with an alias: $out"
 import json, sys
@@ -848,7 +855,7 @@ s = s.replace('\n\n/-- Twice a natural number. -/\n@[deprecated twice (since := 
 open(p, "w").write(s)
 PY
 commit "the alias removed"
-must_fail "Tags.lean" "Unknown constant \`Sample.double\`" -- "$lb" export "${libs[@]}"
+must_fail "Tags.lean" "Unknown constant \`Sample.double\`" -- "$lb" export
 ok "a rename without an alias stops the build at the tag"
 
 rm -rf "$work" "$logs"

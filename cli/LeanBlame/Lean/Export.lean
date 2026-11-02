@@ -1,9 +1,10 @@
 /-
-`leanblame export [--boundary FILE] [--lib NAME]...` (README.md, Commands).
+`leanblame export` (README.md, Commands), for the libraries and the blueprint manifest that
+`leanblame.toml` names.
 
 Builds the libraries with `lake build`, imports their modules, and makes the boundary list: the
 declarations tagged `@[trusted "id"]` (own and imported), or named by the blueprint
-`--boundary FILE`, plus the members of tagged structures and inductives, with `id`, `parent`,
+manifest `boundary` names, plus the members of tagged structures and inductives, with `id`, `parent`,
 `module`, `kind`, `role` and the printed statement. Exports the boundary list's declarations and
 what they use, proofs included, with the toolchain's `leanexport` writer (in-process), and writes
 both files into the object store, with their graph: the export hashed through the backend
@@ -53,7 +54,7 @@ def lakePackage (root : System.FilePath) : IO Lake.Package := do
   let some pkg := pkg? | fail s!"Lake cannot load the package:\n{log}"
   return pkg
 
-/-- The libraries to export: the `--lib` names, else the package's default `lean_lib` targets, else
+/-- The libraries to export: the `libraries` of `leanblame.toml`, else the package's default `lean_lib` targets, else
 all its `lean_lib`s. -/
 def libraries (pkg : Lake.Package) (requested : Array String) : IO (Array Lake.LeanLib) := do
   if requested.isEmpty then
@@ -126,10 +127,10 @@ def trustedTags (env : Environment) : IO (Array Tag × Array String) := do
     tags := tags.push { name := n, id, informal }
   return (tags, errors)
 
-/-- The tags of a verso-blueprint manifest (`--boundary FILE`), and the problems. A label is the id
+/-- The tags of a verso-blueprint manifest (`boundary` in `leanblame.toml`), and the problems. A label is the id
 of the first declaration it names; the label's other declarations name that one as their parent. -/
 def blueprintTags (f : System.FilePath) : IO (Array Tag × Array String) := do
-  let accepted := "--boundary takes a verso-blueprint blueprint-manifest.json"
+  let accepted := "`boundary` names a verso-blueprint blueprint-manifest.json"
   let j ← match Json.parse (← IO.FS.readFile f) with
     | .ok j => pure j
     | .error e => fail s!"{f}: {accepted}: {e}"

@@ -1,5 +1,5 @@
 /-
-`leanblame id [--lib NAME]...`: give each tag written in the library without an id a new one,
+`leanblame id`: give each tag written in the library without an id a new one,
 written into its source just after `trusted`: `@[trusted "id"]` on a declaration, or `attribute
 [trusted "id"] Name` for one tagged after the fact, also a declaration of another library
 (trust-model.md, "Id"). An id is a random UUID, version 4. It is never hashed, so writing

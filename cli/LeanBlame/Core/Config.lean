@@ -16,6 +16,11 @@ structure Config where
   requiredSigners : Nat
   /-- `none`: any signer. -/
   allowedSigners : Option (Array String)
+  /-- The package's libraries to read; empty: its default `lean_lib` targets, else all its `lean_lib`s. -/
+  libraries : Array String
+  /-- A verso-blueprint `blueprint-manifest.json` that names the tagged declarations instead of
+  `@[trusted]`, relative to the library root. -/
+  boundary : Option String
   deriving Inhabited, Repr
 
 def Config.fileName : String := "leanblame.toml"
@@ -27,12 +32,21 @@ records = [\"records/\"]   # records repositories (local directories)
 exclude = []              # approve records this library refuses to count
 required_signers = 1      # distinct live approvals a declaration needs
 allowed_signers = \"any\"   # or a list of provider:id
+
+# The package's libraries to read (default: its default lean_lib targets). To tag a library you do not
+# own, add a library of yours holding `attribute [trusted] Name` commands and list both:
+# libraries = [\"Lib\", \"Tags\"]
+# A verso-blueprint blueprint-manifest.json that names the tagged declarations instead of @[trusted],
+# relative to this file:
+# boundary = \"blueprint-manifest.json\"
 "
 
 open Lake.Toml (DecodeM Table logDecodeErrorAt) in
-/-- Decode a parsed `leanblame.toml`, logging every problem. Every key is required. -/
+/-- Decode a parsed `leanblame.toml`, logging every problem. Every key is required but `libraries` and
+`boundary`. -/
 def Config.decode (t : Table) : DecodeM Config := do
-  checkKeys t #["records", "exclude", "required_signers", "allowed_signers"] Config.fileName
+  checkKeys t #["records", "exclude", "required_signers", "allowed_signers", "libraries", "boundary"]
+    Config.fileName
   let records : Array String ← t.tryDecode `records
   if (t.find? `records).isSome && records.isEmpty then
     logDecodeErrorAt (refOf t `records) "`records` lists no records directory"
@@ -58,8 +72,10 @@ def Config.decode (t : Table) : DecodeM Config := do
     | none =>
       logDecodeErrorAt .missing "missing required key: allowed_signers (\"any\" or a list of provider:id)"
       pure none
+  let libraries : Array String ← t.tryDecodeD `libraries #[]
+  let boundary : Option String ← t.tryDecode? `boundary
   return { records := records.map fun r => if r.length > 1 then (r.dropSuffix "/").copy else r, exclude
-           requiredSigners, allowedSigners }
+           requiredSigners, allowedSigners, libraries, boundary }
 
 /-- Parse the text of a `leanblame.toml`; `path` names it in messages. -/
 def Config.parse (contents path : String) : IO (Except String Config) :=

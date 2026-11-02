@@ -61,7 +61,7 @@ intended, and that is the one thing LeanBlame records.
 
 ### Blueprints
 
-`export --boundary FILE` reads verso-blueprint's `blueprint-manifest.json`
+With `boundary` in `leanblame.toml`, `export` reads verso-blueprint's `blueprint-manifest.json`
 instead of `@[trusted]`: statement entries name their Lean declarations in
 `codeData`, the text comes from the `statement` slot of `externalMarkup` or else
 the entry's fragment in `blueprint-html-cache.json`. A label is the id of the
@@ -158,9 +158,11 @@ records = ["records/"]          # records directories (local; a URL is an error 
 exclude = ["sha256:…"]          # approve records this library refuses to count
 required_signers = 1            # distinct live approvals a declaration needs
 allowed_signers = "any"         # or a list of provider:id
+libraries = ["Lib", "Tags"]     # optional: the libraries to read (default: the default targets)
+boundary = "blueprint-manifest.json"  # optional: tagged declarations from a blueprint
 ```
 
-Every key is required; `init` writes them all. Validity is a rule over records.
+Every key but `libraries` and `boundary` is required; `init` writes them all, those two commented out. Validity is a rule over records.
 The two signer knobs are the whole policy; `status` reads them. Who gets *asked* to review is a service's queue, not
 part of validity.
 
