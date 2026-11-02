@@ -25,6 +25,7 @@ import LeanExport.Parse
 import LeanBlame.Core.Hash
 import LeanBlame.Lean.Canon
 import LeanBlame.Lean.Load
+import LeanBlame.Lean.Modules
 
 namespace LeanBlame.Source
 
@@ -120,10 +121,10 @@ def usesOf : ConstantInfo → Array Name
   | ci => ci.type.getUsedConstants ++
     ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
 
-/-- A parsed export as the core sees it; `moduleOf` names the module of a constant. `decl` erases
-proofs in the environment `Load` builds; `uses` and `isAssumed` follow what `Lean.collectAxioms`
-follows in that environment, which leaves out unsafe and partial constants. -/
-def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) : IO Core.Source := do
+/-- A parsed export as the core sees it; `modules` names the module of each of its constants. `decl`
+erases proofs in the environment `Load` builds; `uses` and `isAssumed` follow what
+`Lean.collectAxioms` follows in that environment, which leaves out unsafe and partial constants. -/
+def ofExport (exported : LeanExport.ExportedEnv) (modules : Std.HashMap Name Name) : IO Core.Source := do
   let names ← nameMap exported
   -- Each constant's printed name, one string for all its uses.
   let printed : Std.HashMap Name String := names.fold (init := {}) fun m s n => m.insert n s
@@ -133,7 +134,8 @@ def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) :
   return {
     decl := fun s => do
       let some ci := find? s | fail s!"Const not found in export '{s}'"
-      runner.run (declOf ci (← moduleOf ci.name).toString (pure ·.toString))
+      let some m := modules[ci.name]? | fail s!"{ci.name} is in no imported module"
+      runner.run (declOf ci m.toString (pure ·.toString))
     uses := fun s => (((inEnv? s).map usesOf).getD #[]).map fun n =>
       if let some p := printed[n]? then p else n.toString
     isAssumed := fun s => inEnv? s matches some (.axiomInfo _) }
@@ -142,8 +144,8 @@ def ofExport (exported : LeanExport.ExportedEnv) (moduleOf : Name → IO Name) :
 export of them would serve it, without writing the export (`Challenge.check`); `rename?` names
 constants as another export does. A printed name maps back to the constant it was printed from:
 `roots`, and each dependency once reported; two constants that print the same are an error. -/
-def declsIn (env : Environment) (roots : Array Name) (moduleOf : Name → IO Name)
-    (rename? : Option (Name → Name) := none) : IO (String → IO Core.Decl) := do
+def declsIn (env : Environment) (roots : Array Name) (rename? : Option (Name → Name) := none) :
+    IO (String → IO Core.Decl) := do
   let rename := rename?.getD id
   let names ← IO.mkRef ({} : Std.HashMap String Name)
   let print (n : Name) : IO String := do
@@ -156,7 +158,8 @@ def declsIn (env : Environment) (roots : Array Name) (moduleOf : Name → IO Nam
   let runner ← MetaRunner.new env
   return fun s => do
     let some ci := (← names.get)[s]? >>= env.find? | fail s!"'{s}' is not a constant here"
-    runner.run (declOf ci (← moduleOf ci.name).toString print rename?)
+    let some m := moduleOf? env ci.name | fail s!"{ci.name} is in no imported module"
+    runner.run (declOf ci m.toString print rename?)
 
 /-- The export file at `path`, parsed. -/
 def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do

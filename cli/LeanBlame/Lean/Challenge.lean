@@ -91,8 +91,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
     -- What the challenge imports from outside the library is the library's own build: those
     -- declarations keep the library's hashes, and only the challenge's own are hashed.
     let outside (s : String) := (lib.nodes[s]?).filter (!libModules.contains ·.decl.module.toName)
-    let decl ← Source.declsIn env (present.filterMap (Pieces.nameOf? ·.name))
-      (Export.moduleOf env) rename
+    let decl ← Source.declsIn env (present.filterMap (Pieces.nameOf? ·.name)) rename
     let h : Core.Hashed := { lib with nodes := ← Walk.hashNodes decl boundary outside, boundary, axioms := {} }
     let claim (g : Core.Hashed) (s : String) := g.nodes[s]?.map (·.claim)
     let differ := present.filter fun d => claim lib d.name != claim h d.name

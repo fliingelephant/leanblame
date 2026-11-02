@@ -106,15 +106,6 @@ def manifestDeps (root : System.FilePath) : IO (Array (String × String) × Arra
       | .path .. => { name := name p, git := none, rev := none, subDir := none }
   return (deps, requires)
 
-/-- The module that declares each constant of `env`. It keeps only the module index of `env`, so
-that `env` can be freed while it is in use. -/
-def moduleOf (env : Environment) : Name → IO Name :=
-  let idx := env.const2ModIdx
-  let mods := env.header.modules.map (·.module)
-  fun n => do
-    let some m := idx[n]? >>= (mods[·.toNat]?) | fail s!"{n} is in no imported module"
-    return m
-
 /-- The `@[trusted]` declarations, tagged in any module, own or imported, with their ids and
 docstrings; and the problems. Two modules that do not import each other can tag one declaration;
 that is refused here. -/
@@ -215,7 +206,6 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
   let mut out := #[]
   -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
   let mut owner : Std.HashMap String Name := {}
-  let moduleOf := moduleOf env
   for (e, ci) in entries do
     let parent := e.parent.map (root entries.size)
     let id? := e.id <|> parent.bind fun p =>
@@ -226,7 +216,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
     if let some other := owner[id]? then
       errors := errors.push s!"{other} and {e.name} have the same id {id}; remove it from one of them and run `leanblame id`"
     owner := owner.insert id e.name
-    let module ← moduleOf e.name
+    let some module := moduleOf? env e.name | fail s!"{e.name} is in no imported module"
     let some place := sourcePlace env e.name <|> parent.bind (sourcePlace env)
       | errors := errors.push s!"{e.name}: Lean has no source position for it"; continue
     let d : BoundaryDecl := {
@@ -377,8 +367,13 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let boundary ← Store.putString root .boundaries (jsonText boundaryList)
   -- The graph: every claim hash, computed now by this LeanBlame, as the other commands only read it.
   let hashed ← try
-      let src ← Source.ofExport (← Source.parseFile tmp) (moduleOf env)
-      Walk.hashExport backend src boundaryList exportHash boundary
+      let exported ← Source.parseFile tmp
+      -- The module of each constant of the export, read now so that `env` is not kept while the
+      -- export is hashed.
+      let modules ← exported.constOrder.foldlM (init := ({} : Std.HashMap Name Name)) fun m n => do
+        let some mod := moduleOf? env n | fail s!"{n} is in no imported module"
+        return m.insert n mod
+      Walk.hashExport backend (← Source.ofExport exported modules) boundaryList exportHash boundary
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   Graph.save root hashed
   discard <| Store.putFile root .exports tmp (hashHex exportHash)
