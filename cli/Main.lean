@@ -40,11 +40,12 @@ commands:
   withdraw RECORD --signer local:NAME [--note TEXT] [NAME|ID...]
                                          withdraw your approve record, or only the declarations
                                          named
-  challenge write NAME|ID... --out DIR   write the comparator challenge of the tagged declarations
-                                         into the new directory DIR: Challenge.lean (the theorems,
-                                         proofs sorry), ChallengeDeps.lean (the others and what
-                                         all of them need),
-                                         lakefile.toml, lean-toolchain
+  challenge write NAME|ID... --out DIR   write the lake comparator package of the tagged
+                                         declarations into the new directory DIR: Challenge.lean
+                                         (the theorems, proofs sorry), ChallengeDeps.lean (the
+                                         others and what all of them need), Solution.lean (to
+                                         prove them in), comparator.json (the theorems, the
+                                         permitted axioms), lakefile.toml, lean-toolchain
   challenge graph                        print the piece graph challenges are cut from (JSON)
   challenge check DIR                    build the challenge in DIR against the library and
                                          check that it means what the library means

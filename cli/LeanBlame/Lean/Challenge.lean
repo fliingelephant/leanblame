@@ -7,8 +7,11 @@ export (`Pieces.Graph.cut`): `Challenge.lean` states the named tagged theorems, 
 the scope commands of their modules; `ChallengeDeps.lean` holds the other named tagged declarations
 and what all of them need, and imports what that
 needs from outside the library; `lakefile.toml` has what the library's lakefile requires;
-`lean-toolchain` the library's toolchain. What stops a challenge is in the graph: it stops
-`challenge`, not `export`. `challenge graph` prints the graph, for a service that cuts challenges
+`lean-toolchain` the library's toolchain. With them come `Solution.lean`, a copy of `Challenge.lean`
+for a solver to prove, and `comparator.json` for `lake comparator`: the theorems `Challenge.lean`
+states, and the axioms a solution may use, the standard ones and those the chosen declarations are or
+rest on by their statements and definitions, never by a proof. What stops a challenge is in the graph:
+it stops `challenge`, not `export`. `challenge graph` prints the graph, for a service that cuts challenges
 itself.
 
 `challenge check` builds the challenge with `lean` against the library's build, as a comparator builds
@@ -35,7 +38,22 @@ namespace LeanBlame.Challenge
 
 open Lean
 
-/-- Write the challenge of the tagged declarations `names` (names or ids) into the new directory `out`. -/
+/-- The axioms a solution may use: the standard ones, and those the chosen declarations are or rest
+on by their statements and definitions, never by a proof; not one standing for a missing proof. -/
+def permittedAxioms (g : Core.Hashed) (chosen : Array String) : Array String :=
+  let reached := Id.run <| reach chosen fun n => pure ((g.nodes[n]?.map (·.decl.deps)).getD #[])
+  g.standard ++ Core.sortNames (reached.filter fun n =>
+    g.nodes[n]?.any (·.decl.role == .assumed) && !g.standard.contains n && !g.incomplete.contains n)
+
+/-- `comparator.json`, the configuration of `lake comparator`: the theorems a solution proves, in
+`Solution`, against `Challenge`, and the axioms it may use. -/
+def comparatorConfig (theorems axioms : Array String) : String :=
+  (Json.mkObj [("challenge_module", "Challenge"), ("solution_module", "Solution"),
+    ("theorem_names", toJson theorems), ("permitted_axioms", toJson axioms)]).pretty ++ "\n"
+
+/-- Write the comparator package of the tagged declarations `names` (names or ids) into the new
+directory `out`: the challenge, `Solution.lean`, a copy of `Challenge.lean` for a solver to prove, and
+`comparator.json`. -/
 def write (root out : System.FilePath) (names : Array String) : IO Unit := do
   if names.isEmpty then fail "a challenge needs tagged declarations: name at least one"
   if ← out.pathExists then fail s!"{out} exists; a challenge goes into a new directory"
@@ -45,9 +63,12 @@ def write (root out : System.FilePath) (names : Array String) : IO Unit := do
   match (← Pieces.read root cur.pieces).cut (dedup chosen) with
   | .error problems =>
     fail ("this challenge cannot be made:\n" ++ "\n".intercalate (problems.toList.map ("  " ++ ·)))
-  | .ok files =>
+  | .ok (files, theorems) =>
+    let axioms := permittedAxioms (← Graph.load root cur.exportHash cur.boundary) chosen
     IO.FS.createDirAll out
     for (f, text) in files do IO.FS.writeFile (out / f) text
+    IO.FS.writeFile (out / "Solution.lean") ((files.find? (·.1 == Pieces.challengeFile)).map (·.2) |>.getD "")
+    IO.FS.writeFile (out / "comparator.json") (comparatorConfig (Core.sortNames theorems) axioms)
 
 /-- The piece graph of the last export (docs/schemas.md §6). -/
 def graph (root : System.FilePath) : IO Pieces.Graph := do

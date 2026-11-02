@@ -79,6 +79,12 @@ graph: a piece is text in a file of a challenge, its links are the pieces it
 needs. Nothing is elaborated again. Each tagged declaration has a root; the
 challenge of chosen ones is a cut of the graph: their roots, what those need,
 what that needs, and so on. What several declarations need is there once.
+`challenge write` writes the whole `lake comparator` package: the challenge,
+`Solution.lean` (a copy of `Challenge.lean` for a solver to prove, with its
+library in the lakefile) and `comparator.json`: the theorems the challenge
+states, and the axioms a solution may use, the standard ones and those the
+chosen declarations are or rest on by their statements and definitions. Which
+axioms are permitted depends on declarations, never on a proof.
 
 - A piece is mostly a command, from its first token (the docstring) to its end,
   as written. The others: the lakefile, the toolchain, an `import`, a

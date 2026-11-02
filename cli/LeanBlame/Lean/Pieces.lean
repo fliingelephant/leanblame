@@ -107,9 +107,10 @@ def read (root : System.FilePath) (hash : String) : IO Graph := do
 
 /-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
 text: their roots, the pieces those need, the pieces these need, and so on, each file the text of its
-pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each name two of
-them declare (a theorem it states whose proof it needs). -/
-def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array (String × String)) := do
+pieces in order; and the theorems `Challenge.lean` states. Or why it cannot be made: the problems of
+the pieces it holds, and each name two of them declare (a theorem it states whose proof it needs). -/
+def Graph.cut (g : Graph) (names : Array String) :
+    Except (Array String) (Array (String × String) × Array String) := do
   let starts ← names.mapM fun n => match g.pieces.findIdx? (·.root == some n) with
     | some i => pure i
     | none => throw #[s!"{n} has no root in the piece graph"]
@@ -123,9 +124,9 @@ def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array 
   let problems := dedup <| order.filterMap (g.pieces[·]!.problem) ++
     twice.map (s!"{·}: the challenge needs its proof, so it cannot state it")
   unless problems.isEmpty do throw problems
-  return files.map fun f => (f, String.join (order.filterMap fun i =>
-    let p := g.pieces[i]!
-    if p.file == f then some p.text else none).toList)
+  let held := order.map (g.pieces[·]!)
+  return (files.map fun f => (f, String.join (held.filterMap fun p => if p.file == f then some p.text else none).toList),
+    held.flatMap fun p => if p.file == challengeFile then p.declares else #[])
 
 /-- Where Lean's declaration ranges put `n` in its source; a module of the module system keeps
 those of its private declarations at the private level. -/
@@ -615,7 +616,7 @@ structure Require where
 def leanblamePackage : String := "leanblame"
 
 /-- A challenge's `lakefile.toml`: what the library's lakefile requires (`required`) but LeanBlame,
-by git, and the libraries `ChallengeDeps` and `Challenge`. It sets no Lean options: each module's
+by git, and the libraries `ChallengeDeps`, `Challenge` and `Solution`. It sets no Lean options: each module's
 part of the challenge does. And why it cannot be written: a package required by path. -/
 def lakefile (required : Array Require) : String × Option String := Id.run do
   let mut reqs : Array Lake.Toml.Table := #[]
@@ -625,7 +626,7 @@ def lakefile (required : Array Require) : String × Option String := Id.run do
     | some git => reqs := reqs.push <| Lake.Toml.Table.empty.insert `name r.name |>.insert `git git
         |>.insertSome `rev r.rev |>.insertSome `subDir r.subDir
     | none => byPath := byPath.push s!"{r.name} is required by path; a challenge requires it by git"
-  let libs := #["ChallengeDeps", "Challenge"].map (Lake.Toml.Table.empty.insert `name ·)
+  let libs := #["ChallengeDeps", "Challenge", "Solution"].map (Lake.Toml.Table.empty.insert `name ·)
   let t := Lake.Toml.Table.empty.insert `name "challenge" |>.smartInsert `require reqs |>.insert `lean_lib libs
   return (Lake.Toml.ppTable t, if byPath.isEmpty then none else some ("; ".intercalate byPath.toList))
 

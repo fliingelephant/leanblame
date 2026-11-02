@@ -275,9 +275,26 @@ assert chal.rstrip().endswith("end Sample\n\nend\n\nend"), chal
 assert "one_site_pos" not in chal and chal.count(":= sorry") == 2, chal
 assert "leanOptions" not in lake and "require" not in lake, lake
 assert toolchain.startswith("leanprover/lean4:v4."), toolchain
+# The comparator's package: a solution to write, and its configuration.
+import json
+assert open(f"{d}/Solution.lean").read() == chal and 'name = "Solution"' in lake, lake
+cfg = json.load(open(f"{d}/comparator.json"))
+assert cfg == {"challenge_module": "Challenge", "solution_module": "Solution",
+               "theorem_names": ["Sample.energy_even", "Sample.second_site"],
+               "permitted_axioms": ["propext", "Classical.choice", "Quot.sound"]}, cfg
 PY
 (cd "$work-challenge" && lake build) >"$logs/challenge.log" 2>&1 || fail "Lake does not build the challenge: $(cat "$logs/challenge.log")"
-ok "challenge writes what the theorems named (by name or id) need and nothing else, the theorems with proofs sorry, each module with its Lean options; Lake builds it"
+ok "challenge writes what the theorems named (by name or id) need and nothing else, the theorems with proofs sorry, each module with its Lean options, a solution to write and comparator.json; Lake builds it"
+run challenge write Sample.one_site_pos --out "$work-challenge-ax"
+run challenge write Sample.one_site_pos Sample.energy_pos --out "$work-challenge-ax2"
+python3 - "$work-challenge-ax" "$work-challenge-ax2" <<'PY' || fail "comparator.json: permitted axioms"
+import json, sys
+alone, both = (json.load(open(f"{d}/comparator.json")) for d in sys.argv[1:])
+standard = ["propext", "Classical.choice", "Quot.sound"]
+assert alone["theorem_names"] == ["Sample.one_site_pos"] and alone["permitted_axioms"] == standard, alone
+assert both["theorem_names"] == ["Sample.one_site_pos"] and both["permitted_axioms"] == standard + ["Sample.energy_pos"], both
+PY
+ok "comparator.json permits the standard axioms and those the chosen declarations are or rest on: energy_pos, which one_site_pos's proof uses, only when chosen"
 run challenge graph
 printf '%s' "$out" >"$logs/graph.json"
 python3 - "$work-challenge" "$logs/graph.json" <<'PY' || fail "challenge graph: the cut of its graph is not the challenge"
