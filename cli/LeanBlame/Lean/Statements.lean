@@ -47,13 +47,14 @@ def segments (c : Name) : MetaM (Array Segment) := do
   let code ← tagCodeInfos ctx infos (TaggedText.prettyTagged fmt (w := 100))
   return flatten none code #[]
 
-/-- The statements of `names`, in `env`; a printer error stops `export`. -/
+/-- The statements of `names`, in `env`; a printer error stops `export`. Each statement gets Lean's
+whole budget (`maxHeartbeats`), as each command does when it is elaborated. -/
 def print (env : Environment) (names : Array Name) : IO (Array Statement) := do
   let pretty := ({} : Options).setBool `pp.tagAppFns true
   let plain := pretty.setBool `pp.notation false |>.setBool `pp.fieldNotation false
     |>.setBool `pp.coercions false
   let under (options : Options) : IO (Array (Array Segment)) := do
-    let run : MetaM (Array (Array Segment)) := names.mapM segments
+    let run : MetaM (Array (Array Segment)) := names.mapM (withCurrHeartbeats <| segments ·)
     let (out, _) ← (run.run' {} {}).toIO { fileName := "<statements>", fileMap := default, options } { env }
     return out
   return (← under pretty).zipWith (fun pretty plain => { pretty, plain }) (← under plain)
