@@ -23,6 +23,20 @@ def dedup [BEq α] [Hashable α] (xs : Array α) : Array α := Id.run do
       out := out.push x
   return out
 
+/-- What `roots` reach through `next`, each once, in the order a depth-first walk first takes them. -/
+def reach [Monad m] [BEq α] [Hashable α] (roots : Array α) (next : α → m (Array α)) : m (Array α) := do
+  let mut seen : Std.HashSet α := {}
+  let mut out := #[]
+  let mut todo := roots
+  while h : todo.size > 0 do
+    let x := todo[todo.size - 1]
+    todo := todo.pop
+    if seen.contains x then continue
+    seen := seen.insert x
+    out := out.push x
+    todo := todo ++ (← next x)
+  return out
+
 /-! Hashes: `sha256:` plus 64 lowercase hex digits. -/
 
 def hashPrefix : String := "sha256:"

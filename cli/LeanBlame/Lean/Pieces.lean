@@ -111,19 +111,10 @@ text: their roots, the pieces those need, the pieces these need, and so on, each
 pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each name two of
 them declare (a theorem it states whose proof it needs). -/
 def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array (String × String)) := do
-  let mut todo := #[]
-  for n in names do
-    match g.pieces.findIdx? (·.root == some n) with
-    | some i => todo := todo.push i
+  let starts ← names.mapM fun n => match g.pieces.findIdx? (·.root == some n) with
+    | some i => pure i
     | none => throw #[s!"{n} has no root in the piece graph"]
-  let mut held : Std.HashSet Nat := {}
-  while h : todo.size > 0 do
-    let i := todo[todo.size - 1]
-    todo := todo.pop
-    unless held.contains i do
-      held := held.insert i
-      todo := todo ++ g.pieces[i]!.needs
-  let order := held.toArray.qsort (· < ·)
+  let order := (Id.run <| reach starts (pure g.pieces[·]!.needs)).qsort (· < ·)
   let mut declared : Std.HashSet String := {}
   let mut twice := #[]
   for i in order do
@@ -574,16 +565,8 @@ where
     | _, acc => acc
 
 /-- The modules `roots` import, directly or not, and the roots. -/
-def importClosure (env : Environment) (roots : Array Name) : NameSet := Id.run do
-  let mut seen : NameSet := {}
-  let mut todo := roots
-  while h : todo.size > 0 do
-    let m := todo[todo.size - 1]
-    todo := todo.pop
-    if seen.contains m then continue
-    seen := seen.insert m
-    todo := todo ++ importsOf env m
-  return seen
+def importClosure (env : Environment) (roots : Array Name) : NameSet :=
+  (Id.run <| reach roots (pure <| importsOf env ·)).foldl (·.insert ·) {}
 
 /-- The constants in the kernel terms of `n`: its type, and with `value` its value or proof. -/
 def termUses (env : Environment) (n : Name) (value : Bool) : Array Name :=
@@ -791,19 +774,10 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     return opened.filter fun ns => !((mk[ns]?).getD #[]).any cl.contains
   -- What module `m` imports from outside the library, through the library's modules it imports; not
   -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
-  let outsideOf (m : Name) : Array Name := Id.run do
-    let mut out := #[]
-    let mut seen : NameSet := {}
-    let mut todo := #[m]
-    while h : todo.size > 0 do
-      let x := todo[todo.size - 1]
-      todo := todo.pop
-      if seen.contains x then continue
-      seen := seen.insert x
-      for i in importsOf env x do
-        if libSet.contains i then todo := todo.push i
-        else if i != `Init && !(`LeanBlame).isPrefixOf i && !out.contains i then out := out.push i
-    return out
+  let outsideOf (m : Name) : Array Name :=
+    let mods := Id.run <| reach #[m] fun x => pure ((importsOf env x).filter libSet.contains)
+    dedup <| mods.flatMap fun x => (importsOf env x).filter fun i =>
+      !libSet.contains i && i != `Init && !(`LeanBlame).isPrefixOf i
   let optionDecls ← getOptionDecls
   -- The Lean options Lake builds module `m` with, as `set_option` commands, and why a file cannot
   -- set some.

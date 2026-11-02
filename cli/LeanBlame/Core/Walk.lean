@@ -171,22 +171,11 @@ def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : Boundary
 The closure under `x`: the tagged declarations where the walk stops (the cut, sorted), and the
 untagged declarations passed through (unsorted). `x` itself is in neither.
 -/
-def closureOf (h : Core.Hashed) (x : String) : Array String × Array String := Id.run do
-  let mut cut : Std.HashSet String := {}
-  let mut untagged : Std.HashSet String := {}
-  let mut worklist := (h.nodes[x]?.map (·.decl.deps)).getD #[]
-  let mut checked : Std.HashSet String := {}
-  while h' : worklist.size > 0 do
-    let d := worklist[worklist.size - 1]
-    worklist := worklist.pop
-    if checked.contains d || d == x then continue
-    checked := checked.insert d
-    if h.isTagged d then
-      cut := cut.insert d
-    else
-      untagged := untagged.insert d
-      worklist := worklist ++ ((h.nodes[d]?.map (·.decl.deps)).getD #[])
-  return (Core.sortNames cut.toArray, untagged.toArray)
+def closureOf (h : Core.Hashed) (x : String) : Array String × Array String :=
+  let deps (d : String) := (h.nodes[d]?.map (·.decl.deps)).getD #[]
+  let reached := Id.run <| reach (deps x) fun d => pure (if h.isTagged d || d == x then #[] else deps d)
+  let (cut, untagged) := (reached.filter (· != x)).partition h.isTagged
+  (Core.sortNames cut, untagged)
 
 /--
 What differs between two hashed exports under one declaration: each part of its claim

@@ -186,17 +186,10 @@ def compute (root : System.FilePath) (ledger : Ledger) : IO Result := do
       let some axioms := new.axioms[d.name]? | fail s!"the current graph has no axioms for {d.name}"
       let (status, unpermitted) := classifyAxioms new.standard new.incomplete axioms signed
       pure { status, axioms, unpermitted }
-    let mut seen : Std.HashSet String := {}
     let mut blocked : Array String := #[]
-    let mut stack ← cutOf d.name
-    while h : stack.size > 0 do
-      let y := stack[stack.size - 1]
-      stack := stack.pop
-      if seen.contains y || y == d.name then continue
-      seen := seen.insert y
+    for y in (← reach (← cutOf d.name) cutOf).filter (· != d.name) do
       let some s := states[y]? | fail s!"{y} is not on the current boundary list"
       if s != .valid then blocked := blocked.push y
-      stack := stack ++ (← cutOf y)
     decls := decls.push { sd with blockedBy := Core.sortNames blocked, proof }
   let owned : Std.HashSet String :=
     (← Store.readString root .owned cur.owned).lines.fold (·.insert ·.copy) {}
