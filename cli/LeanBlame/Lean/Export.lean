@@ -275,15 +275,35 @@ def taggableIn (env : Environment) (mods : Array Name) : IO (Array Name) := do
   (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n else none).toIO'
     { fileName := "", fileMap := default } { env }
 
-/-- Run the toolchain's exporter on `env` from `roots` into `path`; returns the SHA-256 (hex) of the
-bytes, computed as they are written. -/
-def dumpToFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
+/-- Run the toolchain's exporter on `env` from `roots`, as `leanexport` writes it, leaving out the
+constants in `skip`, which stay names where used: into the file `path?`, if any. Returns the
+SHA-256 (hex) of the bytes, computed as they are written. -/
+def dump (env : Environment) (roots : Array Name) (skip : NameHashSet := {})
+    (path? : Option System.FilePath := none) : IO String := do
   let sha ← IO.mkRef ({} : Sha256.State)
-  IO.FS.withFile path .write fun h =>
-    let write (b : ByteArray) : IO Unit := do h.write b; sha.modify (·.update b)
-    IO.withStdout { IO.FS.Stream.ofHandle h with write, putStr := (write ·.toUTF8) }
-      (LeanExport.dumpEnv env (some roots.toList))
+  let go (out : ByteArray → IO Unit) : IO Unit :=
+    let write (b : ByteArray) : IO Unit := do out b; sha.modify (·.update b)
+    IO.withStdout { flush := pure (), read := fun _ => pure .empty, write, getLine := pure ""
+                    putStr := (write ·.toUTF8), isTty := pure false } <|
+      LeanExport.M.run env do
+        LeanExport.initState env
+        modify fun st => { st with visitedConstants := skip }
+        LeanExport.dumpMetadata
+        for c in roots do
+          modify fun st => { st with noMDataExprs := {} }
+          LeanExport.dumpConstant c
+  match path? with
+  | some path => IO.FS.withFile path .write fun h => go h.write
+  | none => go fun _ => pure ()
   return Sha256.toHex (← sha.get).finish
+
+/-- The constants of `env` in the modules `mods`. -/
+def constantsIn (env : Environment) (mods : NameSet) : NameHashSet :=
+  env.constants.fold (init := {}) fun s n _ => if (moduleOf? env n).any mods.contains then s.insert n else s
+
+/-- The constants an export starts from: the tagged declarations, in `Name` order. -/
+def rootsOf (names : Array Name) : Array Name :=
+  names.qsort (·.cmp · == .lt)
 
 /-- Lean's sysroot, `LEAN_PATH` and `LEAN_SRC_PATH`, as `lake env` has them in `root`. -/
 def lakeEnvPaths (root : System.FilePath) : IO (System.FilePath × SearchPath × SearchPath) := do
@@ -306,6 +326,9 @@ structure Loaded where
   env : Environment
   /-- Where the sources are (`LEAN_SRC_PATH` of `lake env`). -/
   srcPath : System.SearchPath
+  /-- Where the modules were imported from (`LEAN_SYSROOT` and `LEAN_PATH` of `lake env`). -/
+  sysroot : System.FilePath
+  leanPath : System.SearchPath
 
 /-- Build the libraries of `root` (with the mathlib cache when they depend on mathlib) and import
 their modules; with `loadExts`, running their initializers and loading the environment extensions of
@@ -337,7 +360,7 @@ def load (root : System.FilePath) (libsGiven : Array String) (loadExts := true) 
     if let some (_, o) := libOptions.find? (·.1.isLocalModule m) then
       mods := mods.push m
       options := options.insert m o
-  return { package := pkg.prettyName, mods, options, deps, requires, env, srcPath }
+  return { package := pkg.prettyName, mods, options, deps, requires, env, srcPath, sysroot, leanPath }
 
 structure Result where
   exportHash : String
@@ -351,7 +374,7 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     (libsGiven : Array String) (trusted? : Option (Array String)) : IO Result := do
   let rev ← gitHead root
   let ledger ← Ledger.load root
-  let { package, mods, options, deps, requires, env, srcPath } ← load root libsGiven
+  let { package, mods, options, deps, requires, env, srcPath, sysroot, leanPath } ← load root libsGiven
   -- Checked after the build, which may update `lake-manifest.json`.
   let commit ← commitIfClean root rev
   let toolchain := "v" ++ Lean.versionString
@@ -377,24 +400,24 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   for (n, d) in declarations do
     unless roundTrips n do fail s!"{d.name}: this name does not read back from its printed form"
   -- The constants to export: the boundary list's declarations; the exporter adds what they use.
-  let roots := (declarations.map (·.1)).qsort (fun a b => a.cmp b == .lt)
-  -- Run the toolchain's exporter on `env`, hashing the bytes as they are written.
-  let tmp ← Store.tmpPath root "export"
+  let roots := rootsOf (declarations.map (·.1))
+  let trustedMods ← trustedModules root trusted? env.header.moduleNames
+  -- The constants alone, as an export has them: the library imported again, without the environment
+  -- extensions `Meta` would consult, from the paths `load` used (loading Lake's workspace resets
+  -- them); `env` is not kept from here on.
+  initSearchPath sysroot leanPath
+  let bare ← importModules (mods.map ({ module := · })) {} (loadExts := false)
+  -- The export is hashed as the toolchain's exporter writes it; the store keeps the constants of it
+  -- that are not trusted.
   IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
-  let exportHash := mkHash (← dumpToFile env roots tmp)
+  let exportHash := mkHash (← dump bare roots)
+  let tmp ← Store.tmpPath root "export"
+  discard <| dump bare roots (constantsIn bare trustedMods) (some tmp)
   let boundary ← Store.putString root .boundaries (jsonText boundaryList)
   -- The graph: every claim hash, computed now by this LeanBlame, as the other commands only read it.
+  let trusted : Std.HashSet String := trustedMods.foldl (init := {}) fun s m => s.insert m.toString
   let hashed ← try
-      let exported ← Source.parseFile tmp
-      -- The module of each constant of the export, read now so that `env` is not kept while the
-      -- export is hashed.
-      let modules ← exported.constOrder.foldlM (init := ({} : Std.HashMap Name Name)) fun m n => do
-        let some mod := moduleOf? env n | fail s!"{n} is in no imported module"
-        return m.insert n mod
-      let trustedMods ← trustedModules root trusted? env.header.moduleNames
-      let trusted : Std.HashSet String := modules.fold (init := {}) fun s n m =>
-        if trustedMods.contains m then s.insert n.toString else s
-      Walk.hashExport backend (← Source.ofExport exported modules) boundaryList trusted.contains exportHash boundary
+      Walk.hashExport backend (← Source.ofEnv bare roots) boundaryList (trusted.contains ·.module) exportHash boundary
     catch e => IO.FS.removeFile tmp; fail s!"cannot hash the export: {e}"
   Graph.save root hashed
   -- Each root with the axioms a solution may use for it, from the claim graph.
@@ -429,5 +452,60 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   Graph.sweep root exports
   if removed > 0 then IO.eprintln s!"leanblame: removed {removed} objects nothing names any more"
   return { exportHash, boundary, boundaryList, hashed := hashed.nodes.size }
+
+/-- Fails unless the library's Lean and dependencies are the last export's (`cur`). -/
+def sameDeps (root : System.FilePath) (cur : Store.Current) : IO Unit := do
+  let toolchain := "v" ++ Lean.versionString
+  let (deps, _) ← manifestDeps root
+  let differs := (if toolchain == cur.toolchain then #[] else #[s!"Lean {toolchain}, the export's {cur.toolchain}"]) ++
+    (deps ++ cur.deps).filterMap fun (p, _) =>
+      let now := (deps.find? (·.1 == p)).map (·.2)
+      let was := (cur.deps.find? (·.1 == p)).map (·.2)
+      if now == was then none else some s!"{p} at {now.getD "none"}, the export's at {was.getD "none"}"
+  unless differs.isEmpty do
+    fail ("the library's dependencies are not the last export's; export again:\n" ++
+      "\n".intercalate ((dedup differs).toList.map ("  " ++ ·)))
+
+/-- The constants the last export (`cur`) starts from. -/
+def rootsOfCurrent (root : System.FilePath) (cur : Store.Current) : IO (Array Name) := do
+  let names ← (← Store.readBoundary root cur.boundary).declarations.mapM fun d => match nameOf? d.name with
+    | some n => pure n
+    | none => fail s!"{d.name}: this name does not read back from its printed form"
+  return rootsOf names
+
+/-- The library's build, imported without environment extensions as `run` imports it to hash, for a
+command that needs the last export (`cur`) whole: the build must be that export, so the same Lean,
+the same dependencies, and the constants the store keeps of the export. -/
+def lastBuild (root : System.FilePath) (cur : Store.Current) : IO Environment := do
+  let cfg ← Config.load root
+  let l ← load root cfg.libraries (loadExts := false)
+  sameDeps root cur
+  let roots ← rootsOfCurrent root cur
+  let trustedMods ← trustedModules root cfg.trusted l.env.header.moduleNames
+  let kept ← IO.FS.readBinFile (← Store.objectFile root .exports cur.exportHash)
+  unless (← dump l.env roots (constantsIn l.env trustedMods)) == Sha256.hexOfBytes kept do
+    fail "the library's build is not the last export; export again"
+  return l.env
+
+/-- Whether `leanchecker` replays the last export (`cur`), written again from the library's build to a
+temporary file: the build must give that export. -/
+def replays (root : System.FilePath) (cur : Store.Current) : IO Bool := do
+  let l ← load root (← Config.load root).libraries (loadExts := false)
+  let roots ← rootsOfCurrent root cur
+  let tmp ← Store.tmpPath root "export"
+  try
+    unless mkHash (← dump l.env roots (path? := some tmp)) == cur.exportHash do
+      fail "the library's build is not the last export; export again"
+    Source.kernelAccepts tmp
+  finally
+    if ← tmp.pathExists then IO.FS.removeFile tmp
+
+/-- Lean as the core's backend. The standard axioms are the three every Lean library may rest on
+(docs/decisions.md, "Releases"). -/
+def backend : Core.Backend where
+  kernelAccepts := replays
+  checker := "leanchecker"
+  standard := #[``propext, ``Classical.choice, ``Quot.sound].map (·.toString)
+  incomplete := #[``sorryAx].map (·.toString)
 
 end LeanBlame.Export

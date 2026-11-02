@@ -1,13 +1,14 @@
 /-
 `leanblame equiv [NAME...]` (trust-model.md, "`equiv`").
 
-Mechanical: no build, no tactics. For each tagged declaration X that is `outdated` with `untagged`
-as the only cause (the named ones, else all), compared with X's last live approval:
+Mechanical: no tactics. For each tagged declaration X that is `outdated` with `untagged` as the
+only cause (the named ones, else all), compared with X's last live approval:
 1. Old meaning. From the export that approval names, what X's old statement (and value, for a
    definition) uses that is not shared goes under `Old.`, references renamed, into the environment
-   of the current export, and so does a definition X itself; the kernel checks each. Not shared: an
-   untagged hashed constant whose claim changed, or a constant used only in proofs (so not hashed)
-   that the current export lacks or states differently. Tagged constants are always shared.
+   of the library's build, which must be the current export (`Export.lastBuild`), and so does a
+   definition X itself; the kernel checks each. Not shared: an untagged hashed constant whose claim
+   changed, or a constant used only in proofs (so not hashed) that the current export lacks or
+   states differently. Tagged and trusted constants are always shared.
 2. Goals. For X and for each changed definition C still present, one kernel call decides whether
    old and new are definitionally equal:
    `theorem LeanBlame.Equiv.C : ∀ P, P Old.C → P C := fun P h => h`, or for a theorem X the
@@ -22,10 +23,12 @@ What is left is for a human to read: equiv prints the root causes, with the old 
 each changed definition that is not definitionally equal.
 
 The hashes come from the graphs `export` stored (docs/decisions.md, "Storage"), keyed by
-printed name; the terms from the old and current exports.
+printed name; the terms from what the store keeps of the old and current exports, their constants
+that are not trusted.
 -/
 import LeanBlame.Core.Status
 import LeanBlame.Lean.Export
+import LeanBlame.Lean.Load
 
 namespace LeanBlame.Equiv
 
@@ -187,7 +190,7 @@ def prove (base : Kernel.Environment) (sides : Sides) (targets : Array Name) : I
     let names := (comp.filter (consts.contains <| oldName ·)).qsort (oldPos · < oldPos ·) |>.map oldName
     let rebuilt ← if deps.any broken.contains then pure false else
       try
-        env ← Load.addConstants env consts names true
+        env ← Load.addConstants env consts names
         pure true
       catch e =>
         notes := notes.push (s!"cannot rebuild {e}", #[])
@@ -254,7 +257,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : C
   if proven.isEmpty then return (#[], "")
   -- The solution export: the accepted theorems and what they use, replayed by `leanchecker`.
   let tmp ← Store.tmpPath root "solution"
-  let solution ← Store.putFile root .proofs tmp (← Export.dumpToFile (.ofKernelEnv p.env) p.theorems tmp)
+  let solution ← Store.putFile root .proofs tmp (← Export.dump (.ofKernelEnv p.env) p.theorems (path? := some tmp))
   unless ← Source.kernelAccepts (← Store.objectFile root .proofs solution) do
     fail s!"leanchecker rejected the solution export {solution}"
   return (proven, solution)
@@ -285,12 +288,12 @@ def run (root : System.FilePath) (keys : Array String) : IO UInt32 := do
   if eligible.isEmpty then
     if left == 0 then IO.println "equiv: no outdated declaration whose only cause is untagged"
     return if left == 0 then 0 else 1
+  let base := (← Export.lastBuild root r.cur).toKernelEnv
   let newExp ← Source.loadExported root r.cur.exportHash
   let constOf ← Source.nameMap newExp
   let targets : Array (Target × ApproveRecord) ← eligible.mapM fun (n, d, lastRec, a) => do
     let some c := constOf[n]? | fail s!"{n} is not in the current export"
     pure ({ name := c, id := d.decl.id, record := lastRec.hash, claim := d.claim }, a)
-  let base := (← Load.environmentOfExport newExp).toKernelEnv
   -- One group per old export and boundary list.
   let groups := dedup (targets.map fun (_, a) => (a.exportHash, a.boundary))
   let mut proven := 0

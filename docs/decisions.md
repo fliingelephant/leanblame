@@ -32,11 +32,12 @@ modules form two layers:
   toolchain, Apache-2.0): seeds from the boundary list, cuts at tagged
   declarations, hashes specs, collects every mismatch, charges each change to
   a cause.
-- `Lean/`, the Lean frontend: `export` and its blueprint reader, `id`, the toolchain's export
-  parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
-  `equiv`, challenges. The export is turned back into a kernel environment by an
-  adaptation of core's `Replay.lean`. It maps printed names back to its constants and
-  fails if two constants of one export print the same.
+- `Lean/`, the Lean frontend: `export` and its blueprint reader, `id`, the toolchain's exporter
+  and export parser, canonical printing, proof erasure, the `leanchecker` kernel gate,
+  `equiv`, challenges. It hashes the constants of the library's build as an export holds them,
+  imported without environment extensions. It maps printed names back to constants and fails if
+  two of them print the same. `equiv`'s `Old.` constants go into a kernel environment by an
+  adaptation of core's `Replay.lean`.
 
 A module under `Core/` imports only `Init`, `Std`, `Lean.Data.*`, `Lake.Toml`,
 `Lake.Util.*` and other `Core/` modules: nothing in it knows what a Lean term,
@@ -48,8 +49,10 @@ Eleven commands; the [README](../README.md) lists them.
 
 Lean's toolchain ships `leanexport`, which writes every constant of an
 environment (types, values, universe levels) to one text file, and
-`leanchecker`, which replays such a file through the Lean kernel. LeanBlame
-hashes from the export and gates releases and `equiv` proofs with the checker.
+`leanchecker`, which replays such a file through the Lean kernel. An export is the
+tagged declarations and everything they use, as `leanexport` writes them, known by
+its SHA-256. LeanBlame hashes the claims from the constants it holds, keeps only those
+that are not trusted, and gates releases and `equiv` proofs with the checker.
 
 `lake comparator` (Lean FRO, in core since v4.35.0) builds on the same two
 tools: it compares an untrusted solution against a trusted statement file,
@@ -74,7 +77,7 @@ unexpected type are errors.
 
 A comparator challenge must not depend on the library it comes from: it carries
 what its tagged declarations need, and nothing else. `export` finds that in the
-one environment it imports, and takes it from the library's source as a piece
+library it imports, and takes it from the library's source as a piece
 graph: a piece is text in a file of a challenge, its links are the pieces it
 needs. Nothing is elaborated again. Each tagged declaration has a root; the
 challenge of chosen ones is a cut of the graph: their roots, what those need,
@@ -188,7 +191,10 @@ signed `axiom` in the library or its tagged dependencies.
 - Code, records, config: git.
 - Exports, boundary lists, the library's own constants, graphs, piece graphs, `equiv` proofs,
   release manifests: an object store keyed by hash, one directory per kind
-  (`.leanblame/store/<kind>/`). A graph is an export hashed against a boundary
+  (`.leanblame/store/<kind>/`). Of an export the store keeps the constants that are not
+  trusted, as `leanexport` writes them, under the hash of the whole export: what
+  `challenge check` and `equiv` read of an old or the current version; `release` writes the
+  whole export again from the build. A graph is an export hashed against a boundary
   list: every claim hash, with the parts `status` compares and the axiom
   report. `export` writes it; the other commands read it and never hash. It is
   the one kind keyed by what it was computed from instead of its own bytes:
@@ -208,8 +214,10 @@ signed `axiom` in the library or its tagged dependencies.
 ### Platform
 
 `export`, `equiv` and `release` run wherever the library's toolchain is
-installed: `export` builds the library (`lake build`), runs the exporter
-in-process and hashes; `release` and `equiv` run `leanchecker`. `status`,
+installed, and build the library (`lake build`): `export` runs the exporter
+in-process and hashes; `release` writes the export again from the build, which
+must give the same hash, and runs `leanchecker` on it; `equiv` checks that the
+build is the last export and runs `leanchecker` on its proofs. `status`,
 `blame`, `sign` and `validate` need no toolchain: they read graphs from the
 object store, and records.
 
@@ -223,7 +231,7 @@ No forks, no glue scripts: LeanBlame reads Lean's own data (kernel terms, parsed
 files, oleans), from the kernel's point of view.
 Rejected: forking the archived comparator (it lacks `--from-export`), running `lake comparator`
 on `equiv`'s proofs (the kernel has already checked them in-process; `leanchecker` replays the
-stored export), comparator-live (no role in the data flow), verso-blueprint (see "`status --json`
+stored proof export), comparator-live (no role in the data flow), verso-blueprint (see "`status --json`
 is the output").
 
 ### Data flow
@@ -256,9 +264,9 @@ Another proof assistant needs a frontend. It implements `Source`, which serves
 one export to the core: per declaration its name, kind, role, universe
 parameters, the hashes of its canonical statement and body with proofs erased,
 its dependencies, and what it rests on for the axiom report. And `Backend`:
-the `Source` of a stored export, a replay by the assistant's own checker and
-that checker's name, its standard axioms, and the axioms that stand for a
-missing proof. `export` keeps the names in the graph. Exact fields in
+a replay by the assistant's own checker of the last export, written again from
+the library's build, that checker's name, its standard axioms, and the axioms
+that stand for a missing proof. `export` keeps the names in the graph. Exact fields in
 `cli/LeanBlame/Core/Graph.lean`. `export` and `equiv` belong to the frontend too.
 The core, records, the validity rules, `status`, `blame`, `diff`, `sign`,
 `validate`, `release`, and every service on the CLI stay as they are.
@@ -275,16 +283,18 @@ Development never stops for a release.
 
 ### What `release` does
 
-Two gates, then a report.
+Two gates and a report, on an export that names a commit. The kernel gate runs
+last: it builds the library.
 
 1. **Signoff gate.** Every tagged declaration is `valid`. Fails otherwise.
-2. **Kernel gate.** `leanchecker --from-export` replays the whole export. Fails
-   on a kernel error.
-3. **Axiom report.** From the export, per theorem, the axioms it rests on:
+2. **Axiom report.** From the export, per theorem, the axioms it rests on:
    - only permitted axioms, that is the three standard ones and tagged, signed
      `axiom`s: **proven**, each axiom listed;
    - includes `sorryAx`: **open**;
    - anything else: **fail**. No axiom config.
+3. **Kernel gate.** The export, written again from the library's build, must
+   have the export's hash; `leanchecker --from-export` replays it whole. Fails
+   when the build is not the last export, or on a kernel error.
 
 Not `lake check`: it hard-codes the three standard axioms and fails on `sorry`, so it
 cannot serve a library with open theorems or signed axioms.
@@ -449,11 +459,12 @@ comparison (`Walk.compare`): each part of the claim, by hash, so a difference is
 not a change of the printer. It reads the stored graphs and never hashes; a declaration whose claim did
 not move is not walked.
 
-### One environment, challenges from the source
+### In-process imports, challenges from the source
 
-`export` imports the library once, with the environment extensions of everything it imports, as an
-editor or doc-gen4 loads it, and makes every output from that environment: the export, the
-statements (printed in-process, as doc-gen4 prints them) and the piece graph. Lake's own loader
+`export` imports the library with the environment extensions of everything it imports, as an
+editor or doc-gen4 loads it, and makes the statements (printed in-process, as doc-gen4 prints them)
+and the piece graph from that environment; the export and the claims come from the library imported
+again without them, its constants alone, as an export holds them. Lake's own loader
 gives the libraries, their modules and their Lean options. A challenge is not a copy of each module
 elaborated again in other `lean` processes: it is the commands of the library's source that its
 tagged declarations need, found from the kernel terms and the `.ilean`, with their scope, in one

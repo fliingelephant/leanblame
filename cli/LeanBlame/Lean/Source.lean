@@ -4,27 +4,26 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Henrik Böving
 -/
 /-
-The Lean frontend (docs/decisions.md, "Beyond Lean"): a parsed export served to the core as a
-`Core.Source`, the constants of an environment in memory served as the same facts (`declsIn`), and
-`backend`, what Lean contributes to the commands. `declOf` is adapted from comparator's
+The Lean frontend (docs/decisions.md, "Beyond Lean"): the constants of an environment imported
+without its environment extensions, served to the core as a `Core.Source` as an export of them
+would serve them (`ofEnv`, `declsIn`); a stored export read back (`loadExported`); and Lean's
+checker on an export file (`kernelAccepts`). `declOf` is adapted from comparator's
 `runForUsedConsts`, which ships in the Lean toolchain as `Lake/Check/Util.lean`; the licence text is
 in `cli/LICENSES/Apache-2.0.txt`.
 
-The core keys constants by their printed name (`Lean.Name.toString`); `nameMap` maps those back and
-refuses an export in which two constants print the same. Per constant the core gets its kind label,
-role, number of universe parameters, the hashes of its canonical type and body with proofs erased
-(`Erase`, `Canon`; trust-model.md, "The hash, precisely") and the dependencies the
-claim follows. All constants of one export are hashed in one `Meta` state, so that its caches serve
-every constant. That state sees the constants alone: the environment an export rebuilds has no
-environment extensions, an environment in memory is imported without them, and smart unfolding,
-which depends on helpers an export may leave out, is off.
+The core keys constants by their printed name (`Lean.Name.toString`), each mapped back to the one
+constant it was printed from: two constants that print the same are an error. Per constant the core
+gets its kind label, role, number of universe parameters, the hashes of its canonical type and body
+with proofs erased (`Erase`, `Canon`; trust-model.md, "The hash, precisely") and the dependencies
+the claim follows. All constants are hashed in one `Meta` state, so that its caches serve every
+constant. That state sees the constants alone: no environment extensions, and smart unfolding, which
+the kernel does not have, is off.
 -/
 import Lean.Util.FoldConsts
 import Lean.Util.Path
 import LeanExport.Parse
 import LeanBlame.Core.Hash
 import LeanBlame.Lean.Canon
-import LeanBlame.Lean.Load
 import LeanBlame.Lean.Modules
 
 namespace LeanBlame.Source
@@ -121,25 +120,6 @@ def usesOf : ConstantInfo → Array Name
   | ci => ci.type.getUsedConstants ++
     ((ci.value? (allowOpaque := true)).map (·.getUsedConstants)).getD #[]
 
-/-- A parsed export as the core sees it; `modules` names the module of each of its constants. `decl`
-erases proofs in the environment `Load` builds; `uses` and `isAssumed` follow what
-`Lean.collectAxioms` follows in that environment, which leaves out unsafe and partial constants. -/
-def ofExport (exported : LeanExport.ExportedEnv) (modules : Std.HashMap Name Name) : IO Core.Source := do
-  let names ← nameMap exported
-  -- Each constant's printed name, one string for all its uses.
-  let printed : Std.HashMap Name String := names.fold (init := {}) fun m s n => m.insert n s
-  let find? (s : String) : Option ConstantInfo := names[s]? >>= (exported.constMap[·]?)
-  let inEnv? (s : String) := (find? s).filter fun ci => !ci.isUnsafe && !ci.isPartial
-  let runner ← MetaRunner.new (← Load.environmentOfExport exported)
-  return {
-    decl := fun s => do
-      let some ci := find? s | fail s!"Const not found in export '{s}'"
-      let some m := modules[ci.name]? | fail s!"{ci.name} is in no imported module"
-      runner.run (declOf ci m.toString (pure ·.toString))
-    uses := fun s => (((inEnv? s).map usesOf).getD #[]).map fun n =>
-      if let some p := printed[n]? then p else n.toString
-    isAssumed := fun s => inEnv? s matches some (.axiomInfo _) }
-
 /-- `Source.decl` for the constants of `env`, imported without its environment extensions, as an
 export of them would serve it, without writing the export (`Challenge.check`); `rename?` names
 constants as another export does. A printed name maps back to the constant it was printed from:
@@ -161,6 +141,22 @@ def declsIn (env : Environment) (roots : Array Name) (rename? : Option (Name →
     let some m := moduleOf? env ci.name | fail s!"{ci.name} is in no imported module"
     runner.run (declOf ci m.toString print rename?)
 
+/-- The constants of `env`, imported without its environment extensions, as the core sees an export
+of `roots`: `decl` as `declsIn` serves it; `uses` and `isAssumed` follow what `Lean.collectAxioms`
+follows from the roots, leaving out unsafe and partial constants as an export leaves them out. -/
+def ofEnv (env : Environment) (roots : Array Name) : IO Core.Source := do
+  let inEnv? (n : Name) := (env.find? n).filter fun ci => !ci.isUnsafe && !ci.isPartial
+  let reached := Id.run <| reach roots fun n => pure (((inEnv? n).map usesOf).getD #[])
+  let names ← reached.foldlM (init := ({} : Std.HashMap String Name)) fun m n => do
+    let s := n.toString
+    if m[s]?.any (· != n) then
+      fail s!"two constants print as '{s}'; LeanBlame needs printed names to be distinct"
+    return m.insert s n
+  return {
+    decl := ← declsIn env roots
+    uses := fun s => (((names[s]? >>= inEnv?).map usesOf).getD #[]).map (·.toString)
+    isAssumed := fun s => (names[s]? >>= inEnv?) matches some (.axiomInfo _) }
+
 /-- The export file at `path`, parsed. -/
 def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk path .read))
@@ -170,19 +166,11 @@ def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.Export
   parseFile (← Store.objectFile root .exports hash)
 
 /-- Whether the toolchain's `leanchecker` replays the export file `path` without error: the
-kernel check `release` and `equiv` run on what they store. -/
+kernel check `release` and `equiv` run. -/
 def kernelAccepts (path : System.FilePath) : IO Bool := do
   let leanchecker := (← findSysroot) / "bin" / "leanchecker" |>.addExtension System.FilePath.exeExtension
   let child ← IO.Process.spawn { cmd := leanchecker.toString, stdin := .null, stdout := .null
                                  args := #["--silent", "--from-export", path.toString] }
   return (← child.wait) == 0
-
-/-- Lean as the core's backend. The standard axioms are the three every Lean library may rest on
-(docs/decisions.md, "Releases"). -/
-def backend : Core.Backend where
-  kernelAccepts := kernelAccepts
-  checker := "leanchecker"
-  standard := #[``propext, ``Classical.choice, ``Quot.sound].map (·.toString)
-  incomplete := #[``sorryAx].map (·.toString)
 
 end LeanBlame.Source

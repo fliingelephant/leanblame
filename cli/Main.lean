@@ -91,7 +91,7 @@ def cmdExport (args : List String) : IO UInt32 := do
   discard <| parseArgs #[] #[] args
   let root ← IO.currentDir
   let cfg ← Config.load root
-  let r ← Export.run Source.backend root (cfg.boundary.map (root / ·)) cfg.libraries cfg.trusted
+  let r ← Export.run Export.backend root (cfg.boundary.map (root / ·)) cfg.libraries cfg.trusted
   IO.eprintln s!"leanblame: {r.boundaryList.declarations.size} tagged declarations, {r.hashed} constants hashed"
   IO.println s!"export {r.exportHash}"
   IO.println s!"boundary {r.boundary}"
@@ -165,7 +165,7 @@ def cmdEquiv (args : List String) : IO UInt32 := do
 def cmdRelease (args : List String) : IO UInt32 := do
   let a ← parseArgs #["--tag", "--out"] #[] args
   let some tag := a.get? "--tag" | fail "usage: leanblame release --tag TAG [--out FILE]"
-  Release.run Source.backend (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
+  Release.run Export.backend (← IO.currentDir) tag ((a.get? "--out").map System.FilePath.mk)
 
 def dispatch : List String → IO UInt32
   | [] | ["--help"] | ["-h"] | ["help"] => do IO.println usage; return 0

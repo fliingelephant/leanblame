@@ -111,10 +111,10 @@ def permittedAxioms (h : Core.Hashed) (roots : Array String) : Std.HashMap Strin
     m.insert n (h.standard ++ axs.filter fun a => !h.standard.contains a && !h.incomplete.contains a)
 
 /-- Hash every declaration reachable from the boundary list, with the facts `decl` reports; an
-untagged declaration `trusted` names is its statement alone, where the walk stops. A declaration
+untagged declaration whose facts `trusted` holds of is its statement alone, where the walk stops. A declaration
 `known` gives is taken as it is, hashed already, with everything it reaches, which must be known too
 (`Challenge.check`: what the challenge imports from outside the library). -/
-def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList) (trusted : String → Bool)
+def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList) (trusted : Core.Decl → Bool)
     (known : String → Option Core.Node := fun _ => none) : IO (Std.HashMap String Core.Node) := do
   -- Tagged declarations with their informal text.
   let tagged : Std.HashMap String String :=
@@ -134,7 +134,7 @@ def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList) (truste
       continue
     let d ← decl target
     let informal := tagged[target]?
-    if informal.isNone && trusted target then
+    if informal.isNone && trusted d then
       let d := { d with bodyHash := none, deps := #[] }
       let spec := Hash.spec d ""
       nodes := nodes.insert target { decl := d, informal, own := Hash.own d none, spec, claim := spec, trusted := true }
@@ -178,10 +178,11 @@ def hashNodes (decl : String → IO Core.Decl) (boundary : BoundaryList) (truste
   return nodes
 
 /-- Hash every declaration reachable from the boundary list in the export `src` serves, those of
-trusted packages (`trusted`) by their statement; the export and the boundary list are stored as
-`exportHash` and `boundaryHash`. The graph keeps what the other commands need from `backend`. -/
+trusted packages (`trusted`, by their facts) by their statement; the export and the boundary list
+are stored as `exportHash` and `boundaryHash`. The graph keeps what the other commands need from
+`backend`. -/
 def hashExport (backend : Core.Backend) (src : Core.Source) (boundary : BoundaryList)
-    (trusted : String → Bool) (exportHash boundaryHash : String) : IO Core.Hashed :=
+    (trusted : Core.Decl → Bool) (exportHash boundaryHash : String) : IO Core.Hashed :=
   return { nodes := ← hashNodes src.decl boundary trusted, axioms := axiomsOf src (boundary.declarations.map (·.name))
            boundary, exportHash, boundaryHash, standard := backend.standard
            incomplete := backend.incomplete, checker := backend.checker }

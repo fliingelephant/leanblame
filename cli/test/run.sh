@@ -12,7 +12,8 @@
 # piece graph cuts to the same files; the check finds it means what the library
 # means, and finds a changed body; a tagged definition that uses a theorem brings
 # its proof, so the two cannot be named together; a private one keeps its meaning,
-# an `open` of a namespace nothing needed is declared first) -> release -> edit a body ->
+# an `open` of a namespace nothing needed is declared first) -> release -> edit a body (release
+# refuses the build: it is not the last export) ->
 # status (outdated, own-body) -> stored files read strictly; causes unknown
 # without the signed export -> edit a dependency body -> status (blocked) -> more
 # causes (untagged, own-text, dep-spec) -> diff since the first sign-off (the
@@ -498,6 +499,8 @@ ok "a proof inside a statement is not part of the hash; a challenge states it as
 echo "== edit a body: pointEnergy"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
+must_fail "the library's build is not the last export; export again" -- "$lb" release --tag 2026.10.3
+ok "release writes the export again from the build, and refuses a build that is not the last export"
 export_lib
 # The store keeps the signed export and the current one; the unsigned export in between is gone.
 [[ "$(ls .leanblame/store/exports | wc -l)" -eq 2 ]] || fail "store sweep: $(ls .leanblame/store/exports)"

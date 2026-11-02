@@ -3,8 +3,8 @@ Proof erasure (trust-model.md, "The hash, precisely"): every subterm of
 a type or a definition body whose type is a proposition is replaced by a marker
 before hashing.
 
-"Is this subterm a proof?" is `Lean.Meta.isProof`, asked in the environment
-`Load` builds from the export. The terms come from the kernel, so type inference
+"Is this subterm a proof?" is `Lean.Meta.isProof`, asked in the library's environment,
+imported without its environment extensions (`Source.ofEnv`). The terms come from the kernel, so type inference
 does not fail on them; if it does, hashing stops with the error.
 -/
 import Lean.Meta.InferType

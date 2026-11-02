@@ -1,9 +1,9 @@
 /-
-Canonical printing of exported terms (trust-model.md, "The hash,
+Canonical printing of kernel terms (trust-model.md, "The hash,
 precisely"). The Lean frontend hashes a type or a body as the SHA-256 of its
 printing (docs/decisions.md, "Beyond Lean").
 
-Terms are printed from the parsed export with de Bruijn indices, constants by
+Terms are printed from the kernel terms with de Bruijn indices, constants by
 name (never by export index), universe parameters by position. Binder names,
 binder info (implicitness) and metadata are not printed. An erased proof
 prints as one marker. A compound subterm is printed in full once; where it

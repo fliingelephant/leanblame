@@ -72,16 +72,7 @@ how many of them the kernel decided. Any other difference is an error. -/
 def check (root dir : System.FilePath) : IO (Nat × Nat) := do
   let cur ← Store.readCurrent root
   -- The challenge is built against today's dependencies: they must be the export's.
-  let toolchain := "v" ++ Lean.versionString
-  let (deps, _) ← Export.manifestDeps root
-  let differs := (if toolchain == cur.toolchain then #[] else #[s!"Lean {toolchain}, the export's {cur.toolchain}"]) ++
-    (deps ++ cur.deps).filterMap fun (p, _) =>
-      let now := (deps.find? (·.1 == p)).map (·.2)
-      let was := (cur.deps.find? (·.1 == p)).map (·.2)
-      if now == was then none else some s!"{p} at {now.getD "none"}, the export's at {was.getD "none"}"
-  unless differs.isEmpty do
-    fail ("the library's dependencies are not the last export's; export again:\n" ++
-      "\n".intercalate ((dedup differs).toList.map ("  " ++ ·)))
+  Export.sameDeps root cur
   let lib ← Graph.load root cur.exportHash cur.boundary
   let (sysroot, leanPath, _) ← Export.lakeEnvPaths root
   let mods := #[`ChallengeDeps, `Challenge]

@@ -459,7 +459,7 @@ claim(c) = H("leanblame.claim", own(c), sorted over direct dependencies d of c:
 terms, proofs erased. `body?` and `informal?` are `+<len>:<bytes>` when
 present (a hashed body; the informal text of a tagged declaration), else `-`.
 
-Terms are printed canonically from the parsed export with de Bruijn indices;
+Terms are printed canonically from the kernel terms, metadata dropped, with de Bruijn indices;
 constants by name, never by export index; universe parameters by position. A
 repeated subterm is printed once and referred to afterwards, so printing is
 linear in the size of the term as a graph (a term can be exponentially larger
