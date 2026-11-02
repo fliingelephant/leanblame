@@ -638,24 +638,20 @@ structure Require where
 /-- LeanBlame's own package, which a challenge leaves out. -/
 def leanblamePackage : String := "leanblame"
 
-/-- A TOML string. -/
-def tomlString (s : String) : String := (Json.str s).compress
-
 /-- A challenge's `lakefile.toml`: what the library's lakefile requires (`required`) but LeanBlame,
 by git, and the libraries `ChallengeDeps` and `Challenge`. It sets no Lean options: each module's
 part of the challenge does. And why it cannot be written: a package required by path. -/
 def lakefile (required : Array Require) : String × Option String := Id.run do
-  let mut reqs : Array String := #[]
+  let mut reqs : Array Lake.Toml.Table := #[]
   let mut byPath : Array String := #[]
   for r in required.filter (·.name != leanblamePackage) do
     match r.git with
-    | some git => reqs := reqs.push <| "\n".intercalate <| ["[[require]]", s!"name = {tomlString r.name}",
-        s!"git = {tomlString git}"] ++ (r.rev.map (s!"rev = {tomlString ·}")).toList ++
-        (r.subDir.map (s!"subDir = {tomlString ·}")).toList
+    | some git => reqs := reqs.push <| Lake.Toml.Table.empty.insert `name r.name |>.insert `git git
+        |>.insertSome `rev r.rev |>.insertSome `subDir r.subDir
     | none => byPath := byPath.push s!"{r.name} is required by path; a challenge requires it by git"
-  let text := "\n\n".intercalate (["name = \"challenge\""] ++ reqs.toList ++
-    ["ChallengeDeps", "Challenge"].map (s!"[[lean_lib]]\nname = \"{·}\"")) ++ "\n"
-  return (text, if byPath.isEmpty then none else some ("; ".intercalate byPath.toList))
+  let libs := #["ChallengeDeps", "Challenge"].map (Lake.Toml.Table.empty.insert `name ·)
+  let t := Lake.Toml.Table.empty.insert `name "challenge" |>.smartInsert `require reqs |>.insert `lean_lib libs
+  return (Lake.Toml.ppTable t, if byPath.isEmpty then none else some ("; ".intercalate byPath.toList))
 
 /-- A piece while `make` builds the graph. `deps`: in `ChallengeDeps.lean`, else in `Challenge.lean`. -/
 inductive Key where
