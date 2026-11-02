@@ -10,10 +10,12 @@ enableArtifactCache = true
 name = "leanblame"
 path = "../.."
 
-# Lean options, two ways: a challenge sets them in each module's part of its files.
+# Lean options, three ways: a challenge sets them in each module's part of its files. A strong
+# `-D` wins over a weak one, as Lake passes them.
 [leanOptions]
 relaxedAutoImplicit = false
 
 [[lean_lib]]
 name = "Sample"
 moreLeanArgs = ["-DautoImplicit=false"]
+weakLeanArgs = ["-DautoImplicit=true"]

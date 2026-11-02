@@ -67,9 +67,9 @@ def libraries (pkg : Lake.Package) (requested : Array String) : IO (Array Lake.L
 
 /-- The Lean options Lake builds the modules of `lib` with, as `lean` reads them
 (`Lean.Language.Lean.reparseOptions`, after the imports declare them): its `leanOptions`, then the
-`-D` options of its Lean arguments. -/
+`-D` options of its Lean arguments in Lake's order, weak ones first, so that a strong one wins. -/
 def libraryOptions (lib : Lake.LeanLib) : IO Options := do
-  let opts ← (lib.leanArgs ++ lib.weakLeanArgs).foldlM (init := lib.leanOptions.toOptions) fun opts a => do
+  let opts ← (lib.weakLeanArgs ++ lib.leanArgs).foldlM (init := lib.leanOptions.toOptions) fun opts a => do
     let some kv := a.dropPrefix? "-D" | return opts
     let k :: v@(_ :: _) := kv.copy.splitOn "=" | fail s!"{lib.name}: Lean argument {a}"
     return opts.insert k.toName (.ofString ("=".intercalate v))
