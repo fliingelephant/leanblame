@@ -10,7 +10,8 @@ command that sets the scope of what comes after it (`namespace`, `section`, `end
 commands that declare the library's constants in its kernel terms (proofs included, since `sorry`
 there would reach every proof of a statement that uses it) and every name in its text that Lean's
 record of the build (the module's `.ilean`) says refers to one, so that a lemma given to `simp` but
-not used counts too; and the instances of its module, since Lean uses instances without naming them.
+not used counts too. Lean's terms name the instances it used, but for coercions, which it unfolds
+(`Meta.expandCoe`): a declaration also needs the library's coercions whose fields its terms hold.
 Every command needs the `namespace` and `section` around it, with their `end`s, and one that does not
 open or close a scope needs the scope commands before it. An `attribute` command comes with the
 declaration it names, or, for a constant from outside the library, with its module. A tagged
@@ -234,27 +235,16 @@ def Read.refAt? (r : Read) (a b : String.Pos.Raw) : Option (String.Pos.Raw × Na
 def proofKinds : Array SyntaxNodeKind :=
   #[``Parser.Command.declValSimple, ``Parser.Command.declValEqns, ``Parser.Command.whereStructInst]
 
-/-- A `theorem`, `lemma` or `example`: the keyword first, the proof last. -/
-def holdsProof (stx : Syntax) : Bool :=
-  stx.getNumArgs ≥ 2 && proofKinds.contains stx.getArgs.back!.getKind &&
-    match stx[0] with
-    | .atom _ v => v == "theorem" || v == "lemma" || v == "example"
-    | _ => false
-
-/-- The proof of the theorem `stx` declares. -/
+/-- The proof of the theorem `stx` declares: the value after its modifiers and signature, whatever
+the keyword (`theorem`, `lemma`, a `Prop`-valued `instance`, …). -/
 partial def proofOf? (stx : Syntax) : Option Syntax :=
-  if stx.getNumArgs == 2 && holdsProof stx[1] then some stx[1].getArgs.back!
+  if stx.getNumArgs == 2 && stx[1].getNumArgs ≥ 2 && proofKinds.contains stx[1].getArgs.back!.getKind then
+    some stx[1].getArgs.back!
   else stx.getArgs.findSome? proofOf?
 
 /-- The command after every `… in` prefix. -/
 partial def innermost (stx : Syntax) : Syntax :=
   if stx.isOfKind ``Parser.Command.in then innermost stx[2] else stx
-
-/-- An instance written as one (`instance`, `@[instance]`). -/
-def writesInstance (stx : Syntax) : Bool :=
-  let d := innermost stx
-  d.isOfKind ``Parser.Command.declaration &&
-    (d[1].isOfKind ``Parser.Command.instance || (d[0].find? (·.isOfKind ``Parser.Attr.instance)).isSome)
 
 def setsScope : Array SyntaxNodeKind :=
   #[``Parser.Command.open, ``Parser.Command.variable, ``Parser.Command.universe,
@@ -570,6 +560,22 @@ def under (set : NameMap α) : Name → Bool
 
 /-! ## The piece graph -/
 
+/-- The coercions among the instances `inLibrary` holds, each with the constants it unfolds to: where
+Lean uses a coercion it unfolds it (`Meta.expandCoe`), so kernel terms hold its fields, not its name. -/
+def coercions (env : Environment) (inLibrary : Name → Bool) : Array (Name × Array Name) := Id.run do
+  let mut out := #[]
+  for (n, _) in (Meta.instanceExtension.getState env).instanceNames.toList do
+    let some ci := env.find? n | continue
+    let some cls := ci.type.getForallBody.getAppFn.constName? | continue
+    let some info := getStructureInfo? env cls | continue
+    unless inLibrary n && info.fieldInfo.any (Meta.isCoeDecl env ·.projFn) do continue
+    let some v := ci.value? (allowOpaque := true) | continue
+    let ctor := getStructureCtor env cls
+    let body := v.getLambdaBody
+    let fields := if body.isAppOf ctor.name then body.getAppArgs.extract ctor.numParams else #[v]
+    out := out.push (n, (fields.flatMap (·.getUsedConstants)).filter (!Meta.isCoeDecl env ·))
+  return out
+
 /-- The constants in the kernel terms of `n`: its type, and with `value` its value or proof. -/
 def termUses (env : Environment) (n : Name) (value : Bool) : Array Name :=
   match env.find? n with
@@ -638,8 +644,6 @@ inductive Key where
   | cmd (deps : Bool) (m : Name) (i : Nat)
   /-- The `attribute` command `i` of module `m`, for its `a`-th name alone. -/
   | attr (m : Name) (i a : Nat)
-  /-- The instances of module `m`, which come with its declarations; no text of its own. -/
-  | instances (m : Name)
   /-- The statement of the tagged theorem `t`. -/
   | statement (t : Name)
   /-- The root of the tagged declaration `n`, which its challenge is cut from; no text of its own. -/
@@ -655,7 +659,7 @@ def Key.file : Key → String
   | .toolchain => toolchainFile
   | .importDeps | .statement _ | .root _ => challengeFile
   | .head d _ | .cmd d _ _ | .close d _ _ | .tail d _ => if d then depsFile else challengeFile
-  | .outside _ | .declare _ | .attr .. | .instances _ => depsFile
+  | .outside _ | .declare _ | .attr .. => depsFile
 
 /-- The piece graph of the tagged theorems `theorems` and the other tagged declarations `others` of
 the library (`library`, in import order; sources on `srcPath`; Lean options from `options`): the
@@ -706,6 +710,11 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | some (.error e) => problems := problems.push e
       | none => pure ()
     return (dedup keys, problems)
+  -- The constants `ns`, and the library's coercions that unfold to constants among them.
+  let coes := coercions env (moduleOf · |>.isSome)
+  let withCoercions (ns : Array Name) : Array Name :=
+    let used : NameSet := ns.foldl (·.insert ·) {}
+    ns ++ (coes.filter (·.2.all used.contains)).map (·.1)
   -- What module `m` imports from outside the library, through the library's modules it imports; not
   -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
   let outsideOf (m : Name) : Array Name :=
@@ -747,9 +756,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     | .lakefile => return (#[], lakeProblem.toArray)
     | .toolchain | .outside _ | .declare _ | .importDeps | .tail .. => return (#[], #[])
     | .head deps m => return (((outsideOf m).map Key.outside).push (.tail deps m), (optionsOf m).2)
-    | .instances m =>
-      let r ← readOk m
-      return (((Array.range r.cmds.size).filter (writesInstance r.cmds[·]!.stx)).map (Key.cmd true m ·), #[])
     | .close deps m s => return (#[.cmd deps m (← readOk m).scopes.scopes[s]!.1], #[])
     | .cmd deps m i =>
       let r ← readOk m
@@ -761,8 +767,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         if o == i then needs := needs.push (match e with | some e => .cmd deps m e | none => .close deps m s)
         if e == some i then needs := needs.push (.cmd deps m o)
       needs := needs ++ c.opened.map Key.declare
-      if deps && !c.declares.isEmpty then needs := needs.push (.instances m)
-      let (keys, problems) ← declarers (some (.cmd true m i)) (c.declares.flatMap (termUses env · true) ++ r.named c)
+      let (keys, problems) ← declarers (some (.cmd true m i))
+        (withCoercions (c.declares.flatMap (termUses env · true) ++ r.named c))
       return (needs ++ keys, problems)
     | .attr m i a =>
       let r ← readOk m
@@ -782,7 +788,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       let (some a, some _) := (p.getPos?, p.getTailPos?) | return (base, #[s!"{t}: its proof has no position"])
       -- A proof inside the statement may make constants of the command (`second_site._proof_1`):
       -- the statement makes them again.
-      let (keys, problems) ← declarers none ((termUses env t false ++ r.named c a).filter (r.owner.find? · != some i))
+      let (keys, problems) ← declarers none
+        ((withCoercions (termUses env t false ++ r.named c a)).filter (r.owner.find? · != some i))
       return (base.push (.head false m) ++ r.scopes.context[i]!.map (Key.cmd false m ·) ++ keys, problems)
   -- Every piece the roots need, what those need, and so on. An `attribute` command comes with
   -- the declaration it names, or, for a constant from outside the library, with its module's
@@ -862,7 +869,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       let sc := r.scopes
       let attrs := attributes.getD m #[]
       order := order.push (.head deps m)
-      if deps then order := order.push (.instances m)
       for i in [:r.cmds.size] do
         order := order.push (.cmd deps m i)
         if deps then order := order ++ (attrs.filter (·.1 == i)).map fun (_, a, _) => Key.attr m i a
@@ -894,7 +900,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | .outside x => pure s!"import {x}\n"
       | .declare n => pure s!"\nnamespace {n}\nend {n}\n"
       | .importDeps => pure "import ChallengeDeps\n"
-      | .instances _ | .root _ => pure ""
+      | .root _ => pure ""
       | .head _ m => pure ("\n" ++ "\n".intercalate ("section" :: (optionsOf m).1.toList) ++ "\n")
       | .tail .. => pure "\nend\n"
       | .close _ m s => do

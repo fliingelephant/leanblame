@@ -305,19 +305,26 @@ open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- One le
     "/-- Zero, kept to this file. -/\nprivate def secret : Nat := 0\n\n"
     "namespace Extra\n/-- Nothing tagged uses this. -/\ndef unused : Nat := 0\nend Extra\n\n"
     "namespace More.Inner\n/-- Nor this. -/\ndef hidden : Nat := 0\nend Inner\n\n/-- Zero, in More. -/\ndef zero : Nat := secret\n\nend More\n\n"
-    "namespace Far.Away\n/-- One, far away. -/\ndef one : Nat := 1\nend Far.Away\n\nend Sample"))
+    "namespace Far.Away\n/-- One, far away. -/\ndef one : Nat := 1\nend Far.Away\n\n"
+    "deriving instance BEq for Point\n\n/-- A point as a number: its norm. -/\ninstance : Coe Point Nat := ⟨Point.norm⟩\n\n"
+    "/-- Points add by coordinates; nothing uses this. -/\ninstance : Add Point := ⟨fun a b => ⟨a.x + b.x, a.y + b.y⟩⟩\n\nend Sample"))
 energy = open("Sample/Energy.lean").read()
 at = energy.index("/-- The energy of a point")
 energy = (energy[:at] + "open Extra\n\n/-- Zero, kept to this file too. -/\nprivate def secret : Nat := 0\n\n"
-          "/-- One less, or zero, matched as `down` matches. -/\ndef below : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n" + energy[at:])
-energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero + 0 * Far.Away.one + down 0 + below 0\n")
+          "/-- One less, or zero, matched as `down` matches. -/\ndef below : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n"
+          "/-- The norm of a point, by coercion. -/\ndef normOf (p : Point) : Nat := p\n\n" + energy[at:])
+energy = energy.replace(":= energy p.norm\n", ":= energy p.norm + 0 * two.val + secret + More.zero + 0 * Far.Away.one + down 0 + below 0 + 0 * normOf p + (if p == p then 0 else 1)\n")
 at = energy.index("/-- The energy of every chain is even.")
 energy = (energy[:at] + "/-- Site two, as a number proven to be two. -/\n"
           '@[trusted "5f0c6a8e-2d1b-4c3a-9e7f-1a2b3c4d5e6f"] def siteTwo : {n : Nat // n = 2} := ⟨_, second_site⟩\n\n'
           "/-- The energy of a point is even. -/\n"
           '@[trusted "6a1d7b9f-3e2c-4d4b-8f80-2b3c4d5e6f70"] theorem pointEnergy_even (p : Point) : pointEnergy p % 2 = 0 := by\n  sorry\n\n'
           "/-- Site two is two. -/\n"
-          '@[trusted "7b2e8c0a-4f3d-4e5c-9a91-3c4d5e6f7081"] theorem siteTwo_val : siteTwo.val = 2 := siteTwo.property\n\n' + energy[at:])
+          '@[trusted "7b2e8c0a-4f3d-4e5c-9a91-3c4d5e6f7081"] theorem siteTwo_val : siteTwo.val = 2 := siteTwo.property\n\n'
+          "/-- Positive numbers. -/\n"
+          '@[trusted "8c3f9d1b-5a4e-4f6d-8ba2-4d5e6f708192"] class Positive (n : Nat) : Prop where\n  pos : 0 < n\n\n'
+          "/-- Two is positive. -/\n"
+          '@[trusted "9d4a0e2c-6b5f-4a7e-9cb3-5e6f70819203"] instance twoPositive : Positive 2 := ⟨two_pos⟩\n\n' + energy[at:])
 open("Sample/Energy.lean", "w").write(energy + "\nvariable (late : Nat)\n")
 PY
 export_lib
@@ -327,23 +334,29 @@ for kept in "theorem two_pos : 0 < 2 := by decide" "theorem second_site : (⟨2,
             "private def «secret (Sample.Basic)» : Nat := 0" "def zero : Nat := «secret (Sample.Basic)»" \
             "private def «secret (Sample.Energy)» : Nat := 0" "+ «secret (Sample.Energy)» + More.zero" \
             $'namespace Sample.Extra\nend Sample.Extra' "open Extra" "namespace More.Inner" "end Inner" "end More" \
-            $'namespace Far.Away\n\n/-- One, far away. -/\ndef one : Nat := 1\n\nend Far.Away\n\nend Sample\n\nend\n\nsection'; do
+            $'namespace Far.Away\n\n/-- One, far away. -/\ndef one : Nat := 1\n\nend Far.Away\n\nderiving instance BEq for Point\n\n/-- A point as a number: its norm. -/\ninstance : Coe Point Nat := ⟨Point.norm⟩\n\nend Sample\n\nend\n\nsection'; do
   [[ "$deps" == *"$kept"* ]] || fail "want '$kept' in: $deps"
 done
-for left in "def unused" "def hidden" "variable (late" "energy_even" "one_site_pos"; do
+for left in "def unused" "def hidden" "variable (late" "energy_even" "one_site_pos" "instance : Add Point" "twoPositive"; do
   [[ "$deps" != *"$left"* ]] || fail "'$left' is not needed: $deps"
 done
 must_fail "this challenge cannot be made" "  Sample.second_site: the challenge needs its proof, so it cannot state it" \
   -- "$lb" challenge write Sample.second_site Sample.siteTwo_val --out "$work-challenge-three"
 run challenge write Sample.second_site --out "$work-challenge-three"
 [[ "$(cat "$work-challenge-three/ChallengeDeps.lean")" != *"siteTwo"* ]] || fail "second_site alone needs nothing of siteTwo"
+run challenge write Sample.twoPositive Sample.Positive.pos --out "$work-challenge-inst"
+grep -qx "instance twoPositive : Positive 2 := sorry" "$work-challenge-inst/Challenge.lean" \
+  || fail "a Prop-valued instance is not stated with proof sorry: $(cat "$work-challenge-inst/Challenge.lean")"
+grep -q "^class Positive (n : Nat) : Prop where" "$work-challenge-inst/ChallengeDeps.lean" \
+  || fail "the class of a Prop-valued projection is not declared: $(cat "$work-challenge-inst/ChallengeDeps.lean")"
+run challenge check "$work-challenge-inst"
 run challenge check "$work-challenge-two"
 [[ "$out" == *", 1 of them by definitional equality" ]] || fail "below shares down's match in one file: $out"
 [[ ! -e "$work-challenge-two/.lake" ]] && ! compgen -G ".leanblame/store/.tmp-*" >/dev/null \
   || fail "the check leaves files behind: $(ls -a "$work-challenge-two" .leanblame/store)"
 git checkout -q -- Sample
 export_lib
-ok "a tagged definition that uses theorems brings their proofs, so second_site has no challenge with siteTwo_val, but one alone; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is needed, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the needed commands stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
+ok "a tagged definition that uses theorems brings their proofs, so second_site has no challenge with siteTwo_val, but one alone; instances come when used, a derived one with its deriving command, a coercion, which Lean unfolds, by its field; a Prop-valued instance is stated with proof sorry, a Prop-valued field comes with its class; two private secrets are written with their modules and mean the same; an open of Extra, of which nothing is needed, has Extra declared first; namespace More.Inner comes with end Inner, and end Far.Away closes two scopes; a variable after the needed commands stays out; below, which in one file uses the match Lean made for down, is definitionally equal; the check leaves no files"
 
 echo "== release"
 run release --tag 2026.10 --out "$logs/release.json"

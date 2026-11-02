@@ -83,12 +83,13 @@ what that needs, and so on. What several declarations need is there once.
 - A piece is mostly a command, from its first token (the docstring) to its end,
   as written. The others: the lakefile, the toolchain, an `import`, a
   `namespace N` `end N` that an `open` needs, a module's `section` and its
-  `end`, an `end` for a scope the module leaves open, and two with no text: a
-  module's instances and a declaration's root.
+  `end`, an `end` for a scope the module leaves open, and one with no text: a
+  declaration's root.
 - A declaration needs the commands that declare the constants in its kernel
   terms (the type; the value or proof) and those its source names (the
-  `.ilean`, as for "find references"), and the instances of its module, since
-  Lean uses them without naming them. An `attribute` command is split by the
+  `.ilean`, as for "find references"). Lean's terms name the instances it
+  used, but for coercions, which it unfolds (`Meta.expandCoe`): a declaration
+  also needs the library's coercions whose fields its terms hold. An `attribute` command is split by the
   names it gives the attribute to: each part comes with the declaration it
   names, or, for a constant from outside the library, with its module.
 - A command needs its scope: the `namespace` and `section` commands around it

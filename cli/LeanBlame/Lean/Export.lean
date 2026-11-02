@@ -148,7 +148,7 @@ def kindWord (env : Environment) (n : Name) (ci : ConstantInfo) : String :=
   | .inductInfo _ =>
     if isClass env n then "class" else if isStructure env n then "structure" else "inductive"
   | .ctorInfo _ => "constructor"
-  | .defnInfo _ => if Meta.isInstanceCore env n then "instance" else Source.kindOf ci
+  | .defnInfo _ | .thmInfo _ => if Meta.isInstanceCore env n then "instance" else Source.kindOf ci
   | _ => Source.kindOf ci
 
 /-- Where `n` stands in the source: its module's place in the import order (after every module it
@@ -345,8 +345,11 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   let owned ← (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n.toString else none).toIO'
     { fileName := "", fileMap := default } { env }
   IO.eprintln "leanblame: piece graph"
-  let theorems := declarations.filterMap fun (n, d) => if d.kind == "theorem" then some n else none
-  let others := declarations.filterMap fun (n, d) => if d.kind == "theorem" then none else some n
+  -- A challenge states the kernel's theorems, proofs `sorry`; a structure states its projections.
+  let states (n : Name) (d : BoundaryDecl) :=
+    d.role == .proved && !env.isProjectionFn n && (env.getAuxParentProjectionInfo? n).isNone
+  let theorems := declarations.filterMap fun (n, d) => if states n d then some n else none
+  let others := declarations.filterMap fun (n, d) => if states n d then none else some n
   let graph ← Pieces.make env mods srcPath (fun m => (options.find? m).getD {}) theorems others requires toolchain
   let pieces ← Store.putString root .pieces (jsonText graph)
   for (n, d) in declarations do
