@@ -15,11 +15,11 @@ Every command needs the `namespace` and `section` around it, with their `end`s, 
 open or close a scope needs the scope commands before it. An `attribute` command comes with the
 declaration it names, or, for a constant from outside the library, with its module. A tagged
 theorem's statement is a piece of `Challenge.lean`: its command with the proof replaced by `sorry`,
-among copies of the scope commands it needs; it needs what its statement uses. Another tagged
-declaration is the piece of `ChallengeDeps.lean` that declares it. The challenge of chosen
-declarations is their statements (a theorem's) or their pieces (any other's), what those need, what
-that needs, and so on (`Graph.cut`): it holds what they need and nothing else, and what several need
-once.
+among copies of the scope commands it needs; it needs what its statement uses. Each tagged
+declaration has a root, a piece with no text that needs the lakefile, the toolchain, and the
+theorem's statement or the command that declares any other declaration. The challenge of chosen
+declarations is their roots, what those need, what that needs, and so on (`Graph.cut`): it holds
+what they need and nothing else, and what several need once.
 
 The pieces of a module sit in a `section` of their own, which first sets the Lean options Lake builds
 the module with, so that what one module opens and sets ends with it; an `end` closes each scope the
@@ -38,8 +38,8 @@ import LeanBlame.
 What stops a challenge is part of the graph, not an error of `export`: a piece has a problem when it
 needs a declaration no command declares or a module that does not read, when its module has a Lean
 option a file cannot set, or when it is a statement with no proof to replace; the lakefile has one
-when the library requires a package by path. A challenge cannot state a theorem whose proof the
-other theorems need.
+when the library requires a package by path. A challenge declares each name once, so it cannot
+state a theorem whose proof it needs.
 -/
 import Lean
 import Lean.Server.References
@@ -57,13 +57,14 @@ def challengeFile : String := "Challenge.lean"
 def files : Array String := #[lakefileFile, toolchainFile, depsFile, challengeFile]
 
 /-- A piece of the piece graph (docs/schemas.md §6): its text in one file of a challenge;
-the pieces it needs, by index; the tagged theorem it states (in `Challenge.lean`) or the tagged
-declaration it declares (in `ChallengeDeps.lean`); and why a challenge that holds it cannot be made. -/
+the pieces it needs, by index; the tagged declaration it is the root of; the tagged declarations it
+declares; and why a challenge that holds it cannot be made. -/
 structure Piece where
   file : String
   text : String
   needs : Array Nat
-  tagged : Option String
+  root : Option String
+  declares : Array String
   problem : Option String
   deriving Inhabited
 
@@ -75,15 +76,16 @@ structure Graph where
 
 instance : ToJson Piece where
   toJson p := Json.mkObj [("file", p.file), ("text", p.text), ("needs", toJson p.needs),
-    ("theorem", toJson p.tagged), ("problem", toJson p.problem)]
+    ("root", toJson p.root), ("declares", toJson p.declares), ("problem", toJson p.problem)]
 
 instance : ToJson Graph where
   toJson g := Json.mkObj [("pieces", toJson g.pieces)]
 
 def Piece.fromJson? (j : Json) : Except String Piece := do
-  let o ← JsonObj.read j "piece" ["file", "text", "needs", "theorem", "problem"]
+  let o ← JsonObj.read j "piece" ["file", "text", "needs", "root", "declares", "problem"]
   let p : Piece := { file := ← o.get String "file", text := ← o.get String "text", needs := ← o.get (Array Nat) "needs"
-                     tagged := ← o.get (Option String) "theorem", problem := ← o.get (Option String) "problem" }
+                     root := ← o.get (Option String) "root", declares := ← o.get (Array String) "declares"
+                     problem := ← o.get (Option String) "problem" }
   unless files.contains p.file do throw s!"piece: `{p.file}` is not a file of a challenge"
   return p
 
@@ -91,6 +93,8 @@ def Graph.fromJson? (j : Json) : Except String Graph := do
   let o ← JsonObj.read j "piece graph" ["pieces"]
   let pieces ← (← o.get (Array Json) "pieces").mapM Piece.fromJson?
   unless pieces.all (·.needs.all (· < pieces.size)) do throw "piece graph: a piece needs a piece it lacks"
+  let roots := pieces.filterMap (·.root)
+  unless (dedup roots).size == roots.size do throw "piece graph: a declaration has two roots"
   return { pieces }
 
 def read (root : System.FilePath) (hash : String) : IO Graph := do
@@ -101,19 +105,15 @@ def read (root : System.FilePath) (hash : String) : IO Graph := do
   | .error e => fail s!"{p}: {e}"
 
 /-- The challenge of the tagged declarations `names` (docs/schemas.md §6), each file with its
-text: the lakefile, the toolchain, a theorem's statement, any other declaration's piece, the pieces
-those need, the pieces these need, and so on, each file the text of its pieces in order. Or why it cannot be made: the problems of
-the pieces it holds, and each named theorem whose proof its `ChallengeDeps.lean` holds. -/
+text: their roots, the pieces those need, the pieces these need, and so on, each file the text of its
+pieces in order. Or why it cannot be made: the problems of the pieces it holds, and each name two of
+them declare (a theorem it states whose proof it needs). -/
 def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array (String × String)) := do
-  -- Every challenge has the lakefile and the toolchain.
-  let mut todo := (Array.range g.pieces.size).filter fun i => [lakefileFile, toolchainFile].contains g.pieces[i]!.file
-  let mut stated := #[]
+  let mut todo := #[]
   for n in names do
-    match g.pieces.findIdx? fun p => p.file == challengeFile && p.tagged == some n with
-    | some i => todo := todo.push i; stated := stated.push n
-    | none => match g.pieces.findIdx? fun p => p.file == depsFile && p.tagged == some n with
-      | some i => todo := todo.push i
-      | none => throw #[s!"{n} has no piece in the piece graph"]
+    match g.pieces.findIdx? (·.root == some n) with
+    | some i => todo := todo.push i
+    | none => throw #[s!"{n} has no root in the piece graph"]
   let mut held : Std.HashSet Nat := {}
   while h : todo.size > 0 do
     let i := todo[todo.size - 1]
@@ -122,10 +122,14 @@ def Graph.cut (g : Graph) (names : Array String) : Except (Array String) (Array 
       held := held.insert i
       todo := todo ++ g.pieces[i]!.needs
   let order := held.toArray.qsort (· < ·)
-  let problems := dedup <| order.filterMap (g.pieces[·]!.problem) ++ order.filterMap fun i =>
-    let p := g.pieces[i]!
-    if p.file != depsFile then none else (p.tagged.filter stated.contains).map
-      (s!"{·}: the other theorems need its proof, so the challenge cannot state it")
+  let mut declared : Std.HashSet String := {}
+  let mut twice := #[]
+  for i in order do
+    for n in g.pieces[i]!.declares do
+      if declared.contains n then twice := twice.push n
+      declared := declared.insert n
+  let problems := dedup <| order.filterMap (g.pieces[·]!.problem) ++
+    twice.map (s!"{·}: the challenge needs its proof, so it cannot state it")
   unless problems.isEmpty do throw problems
   return files.map fun f => (f, String.join (order.filterMap fun i =>
     let p := g.pieces[i]!
@@ -694,6 +698,8 @@ inductive Key where
   | instances (m : Name)
   /-- The statement of the tagged theorem `t`. -/
   | statement (t : Name)
+  /-- The root of the tagged declaration `n`, which its challenge is cut from; no text of its own. -/
+  | root (n : Name)
   /-- The `end` of scope `s` of module `m`, which `m` leaves open. -/
   | close (deps : Bool) (m : Name) (s : Nat)
   /-- The `end` of the `section` of module `m`. -/
@@ -703,15 +709,14 @@ inductive Key where
 def Key.file : Key → String
   | .lakefile => lakefileFile
   | .toolchain => toolchainFile
-  | .importDeps | .statement _ => challengeFile
+  | .importDeps | .statement _ | .root _ => challengeFile
   | .head d _ | .cmd d _ _ | .close d _ _ | .tail d _ => if d then depsFile else challengeFile
   | .outside _ | .declare _ | .attr .. | .instances _ => depsFile
 
 /-- The piece graph of the tagged theorems `theorems` and the other tagged declarations `others` of
-the library (`library`, in import order; sources on `srcPath`; Lean options from `options`): every
-piece the theorems' statements and the others' commands need, what those need, and so on. A
-challenge's lakefile requires what the library's requires (`required`); its toolchain is the
-library's (`toolchain`). -/
+the library (`library`, in import order; sources on `srcPath`; Lean options from `options`): the
+root of each, every piece the roots need, what those need, and so on. A challenge's lakefile requires
+what the library's requires (`required`); its toolchain is the library's (`toolchain`). -/
 def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (options : Name → Options)
     (theorems others : Array Name) (required : Array Require) (toolchain : String) : IO Graph := do
   let libSet : NameSet := library.foldl (·.insert ·) {}
@@ -828,9 +833,17 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     let .ok r ← readOf m | continue
     if let some i := r.owner.find? t then written := written.insert t (m, i)
   let statementAt : Std.HashMap (Name × Nat) Name := written.fold (init := {}) fun acc t place => acc.insert place t
+  let theoremSet : NameSet := theorems.foldl (·.insert ·) {}
   -- What piece `k` needs, and why a challenge that holds it cannot be made.
   let step (k : Key) : IO (Array Key × Array String) := do
     match k with
+    | .root n =>
+      let package := #[Key.lakefile, .toolchain]
+      if theoremSet.contains n then return (package.push (.statement n), #[])
+      match ← ownerOf n with
+      | some (.ok c) => return (package.push c, #[])
+      | some (.error e) => return (package, #[e])
+      | none => return (package, #[s!"{n} is a declaration of another library: its challenge is that library's"])
     | .lakefile => return (#[], lakeProblem.toArray)
     | .toolchain | .outside _ | .declare _ | .importDeps | .tail .. => return (#[], #[])
     | .head deps m => return (((outsideOf m).map Key.outside).push (.tail deps m), (optionsOf m).2)
@@ -858,7 +871,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       let (keys, problems) ← declarers none (r.named c attrEnd ++ (r.target? c a).toArray)
       return (#[Key.head true m] ++ (← scopesIn m).context[i]!.map (Key.cmd true m ·) ++ keys, problems)
     | .statement t =>
-      let base := #[Key.importDeps, .lakefile, .toolchain]
+      let base := #[Key.importDeps]
       let some m := moduleOf t | return (base, #[s!"{t} is a theorem of another library: its challenge is that library's"])
       let r ← match ← readOf m with
         | .ok r => pure r
@@ -871,7 +884,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       -- the statement makes them again.
       let (keys, problems) ← declarers none ((termUses env t false ++ r.named c a).filter (r.owner.find? · != some i))
       return (base.push (.head false m) ++ (← scopesIn m).context[i]!.map (Key.cmd false m ·) ++ keys, problems)
-  -- Every piece the statements need, what those need, and so on. An `attribute` command comes with
+  -- Every piece the roots need, what those need, and so on. An `attribute` command comes with
   -- the declaration it names, or, for a constant from outside the library, with its module's
   -- `section`s: the commands of a module are known once the module is read.
   let mut visited : Std.HashMap Key (Array Key × Array String) := {}
@@ -879,10 +892,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
   let mut attrsOn : Std.HashMap Name (Array Key) := {}
   let mut attrsIn : Std.HashMap Name (Array Key) := {}
   let mut declared : NameSet := {}
-  -- Every challenge has the lakefile and the toolchain.
-  let mut todo : Array Key := #[.lakefile, .toolchain] ++ theorems.map Key.statement
-  for n in others do
-    if let some (.ok k) ← ownerOf n then todo := todo.push k
+  let roots := (theorems ++ others).map Key.root
+  let mut todo := roots
   while h : todo.size > 0 do
     let k := todo[todo.size - 1]
     todo := todo.pop
@@ -935,7 +946,8 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     if let .str _ s := privateToUserName n then renamed := renamed.insert n (withModule s m)
   -- The pieces in the order of their files: the lakefile and the toolchain; `ChallengeDeps.lean`: its
   -- imports, the namespaces it declares, then each module's part; `Challenge.lean`: its import, then
-  -- each module's part. A statement that no module's part holds (it has a problem) is last.
+  -- each module's part. A statement that no module's part holds (it has a problem) is next, then the
+  -- roots.
   let has := visited.contains
   let sortedBy (f : Key → Option Name) : Array Name :=
     (visited.toArray.filterMap (f ·.1)).qsort (·.toString < ·.toString)
@@ -958,7 +970,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       for s in (List.range sc.scopes.size).reverse do order := order.push (.close deps m s)
       order := order.push (.tail deps m)
   let placed : Std.HashSet Key := order.foldl (·.insert ·) {}
-  order := (order ++ (theorems.map Key.statement).filter (!placed.contains ·)).filter has
+  order := (order ++ (theorems.map Key.statement).filter (!placed.contains ·) ++ roots).filter has
   unless order.size == visited.size do fail "a piece of the graph has no place in a challenge's files"
   let index : Std.HashMap Key Nat := order.foldl (init := {}) fun acc k => acc.insert k acc.size
   -- Texts: a piece on lines of its own after a blank line; an import on one line.
@@ -982,7 +994,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | .outside x => pure s!"import {x}\n"
       | .declare n => pure s!"\nnamespace {n}\nend {n}\n"
       | .importDeps => pure "import ChallengeDeps\n"
-      | .instances _ => pure ""
+      | .instances _ | .root _ => pure ""
       | .head _ m => pure ("\n" ++ "\n".intercalate ("section" :: (optionsOf m).1.toList) ++ "\n")
       | .tail .. => pure "\nend\n"
       | .close _ m s => do
@@ -1004,11 +1016,14 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
         let some (m, i) := written[t]? | pure ""
         let r ← readOk m
         pure (((statementOf? r r.cmds[i]! (← editsOf m i)).map ("\n" ++ · ++ "\n")).getD "")
-    let tagged ← match k with
-      | .statement t => pure (some t.toString)
-      | .cmd true m i => pure (((← readOk m).cmds[i]!.declares.find? taggedSet.contains).map toString)
-      | _ => pure none
-    pieces := pieces.push { file := k.file, text, needs, tagged
+    let root := match k with
+      | .root n => some n.toString
+      | _ => none
+    let declares ← match k with
+      | .statement t => pure #[t.toString]
+      | .cmd _ m i => pure (((← readOk m).cmds[i]!.declares.filter taggedSet.contains).map toString)
+      | _ => pure #[]
+    pieces := pieces.push { file := k.file, text, needs, root, declares
                             problem := if problems.isEmpty then none else some ("; ".intercalate (dedup problems).toList) }
   return { pieces }
 

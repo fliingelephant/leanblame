@@ -250,11 +250,16 @@ printf '%s' "$out" >"$logs/graph.json"
 python3 - "$work-challenge" "$logs/graph.json" <<'PY' || fail "challenge --graph: the cut of its graph is not the challenge"
 import json, sys
 g = json.load(open(sys.argv[2]))["pieces"]
-assert all(set(p) == {"file", "text", "needs", "theorem", "problem"} for p in g), g[0]
+assert all(set(p) == {"file", "text", "needs", "root", "declares", "problem"} for p in g), g[0]
 assert all(n < len(g) for p in g for n in p["needs"]), "a piece needs a piece the graph lacks"
-statements = {p["theorem"]: i for i, p in enumerate(g) if p["file"] == "Challenge.lean" and p["theorem"]}
-assert set(statements) == {"Sample.second_site", "Sample.energy_even", "Sample.one_site_pos"}, statements
-held, todo = set(), [statements["Sample.energy_even"], statements["Sample.second_site"]]
+roots = {p["root"]: i for i, p in enumerate(g) if p["root"]}
+assert set(roots) == {"Sample.energy", "Sample.Point", "Sample.Point.mk", "Sample.Point.x", "Sample.Point.y",
+                      "Sample.Point.norm", "Sample.pointEnergy", "Sample.second_site", "Sample.energy_even",
+                      "Sample.energy_pos", "Sample.one_site_pos"}, roots
+assert all(g[i]["text"] == "" for i in roots.values()), "a root has text"
+statements = {n for p in g if p["file"] == "Challenge.lean" for n in p["declares"]}
+assert statements == {"Sample.second_site", "Sample.energy_even", "Sample.one_site_pos"}, statements
+held, todo = set(), [roots["Sample.energy_even"], roots["Sample.second_site"]]
 while todo:
     i = todo.pop()
     if i not in held:
@@ -265,7 +270,7 @@ for f in ["lakefile.toml", "lean-toolchain", "ChallengeDeps.lean", "Challenge.le
     cut = "".join(g[i]["text"] for i in sorted(held) if g[i]["file"] == f)
     assert cut == open(f"{sys.argv[1]}/{f}").read(), (f, cut)
 PY
-ok "challenge --graph prints the piece graph: the statements, what they need and what that needs make the challenge"
+ok "challenge --graph prints the piece graph: a root for each tagged declaration; the roots, what they need and what that needs make the challenge"
 run challenge --check "$work-challenge"
 [[ "$out" == "challenge $work-challenge: the 7 tagged declarations it holds mean what the library's do" ]] || fail "check: $out"
 ok "the check builds the challenge against the library: its 7 tagged declarations have the library's claims"
@@ -285,6 +290,11 @@ grep -q "theorem" "$work-challenge-x/Challenge.lean" && fail "challenge of a def
 (cd "$work-challenge-x" && lake build) >"$logs/challenge-x.log" 2>&1 || fail "Lake does not build the challenge of a definition: $(cat "$logs/challenge-x.log")"
 must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge Sample.energy_even --out "$work-challenge"
 ok "challenge of a definition: ChallengeDeps.lean holds it and what it needs, Challenge.lean states nothing; a directory that exists is refused"
+run challenge Sample.Point.x Sample.Point.y --out "$work-challenge-field"
+grep -q "^@\[trusted\] structure Point where\|^structure Point where" "$work-challenge-field/ChallengeDeps.lean" \
+  || fail "challenge of two fields: ChallengeDeps.lean does not declare their structure: $(cat "$work-challenge-field/ChallengeDeps.lean")"
+[[ "$(grep -c "structure Point where" "$work-challenge-field/ChallengeDeps.lean")" == 1 ]] || fail "challenge of two fields: the structure twice"
+ok "challenge of two fields of one structure: the command that declares them, once"
 python3 - <<'PY'
 basic = open("Sample/Basic.lean").read()
 open("Sample/Basic.lean", "w").write(basic.replace("\nend Sample", "\n/-- One less, or zero. -/\ndef down : Nat → Nat\n  | 0 => 0\n  | n + 1 => n\n\n"
@@ -319,7 +329,7 @@ done
 for left in "def unused" "def hidden" "variable (late" "energy_even" "one_site_pos"; do
   [[ "$deps" != *"$left"* ]] || fail "'$left' is not needed: $deps"
 done
-must_fail "this challenge cannot be made" "  Sample.second_site: the other theorems need its proof, so the challenge cannot state it" \
+must_fail "this challenge cannot be made" "  Sample.second_site: the challenge needs its proof, so it cannot state it" \
   -- "$lb" challenge Sample.second_site Sample.siteTwo_val --out "$work-challenge-three"
 run challenge Sample.second_site --out "$work-challenge-three"
 [[ "$(cat "$work-challenge-three/ChallengeDeps.lean")" != *"siteTwo"* ]] || fail "second_site alone needs nothing of siteTwo"
@@ -390,7 +400,7 @@ edit Sample/Energy.lean 's/2, by decide/2, by omega/'
 grep -q "by omega" Sample/Energy.lean || fail "test setup: proof not swapped"
 commit "second_site: another proof of 2 < 3 in the statement"
 before="$(current_export)"
-statement_of() { python3 -c 'import json, sys; print(next(p["text"] for p in json.load(sys.stdin)["pieces"] if p["file"] == "Challenge.lean" and p["theorem"] == sys.argv[1]))' "$1"; }
+statement_of() { python3 -c 'import json, sys; print(next(p["text"] for p in json.load(sys.stdin)["pieces"] if p["file"] == "Challenge.lean" and sys.argv[1] in p["declares"]))' "$1"; }
 export_lib
 [[ "$(current_export)" != "$before" ]] || fail "the proof edit did not change the export"
 run challenge --graph

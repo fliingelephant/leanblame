@@ -76,10 +76,10 @@ A comparator challenge must not depend on the library it comes from: it carries
 what its theorems need, and nothing else. `export` finds that in the one
 environment it imports, and takes it from the library's source as a piece
 graph: a piece is text in a file of a challenge, its links are the pieces it
-needs. Nothing is elaborated again. The challenge of chosen tagged declarations is
-the theorems' statements and the other declarations' commands, what those need,
-what that needs, and so on: a cut of the graph.
-What several theorems need is there once.
+needs. Nothing is elaborated again. Each tagged declaration has a root; the
+challenge of chosen tagged declarations is their roots, what those need, what
+that needs, and so on: a cut of the graph.
+What several declarations need is there once.
 
 - A piece is mostly a command, from its first token (the docstring) to its end,
   as written. The others: the lakefile, the toolchain, an `import`, a
@@ -106,6 +106,11 @@ What several theorems need is there once.
 - A tagged theorem's statement is a piece of `Challenge.lean`: its command with
   the proof `sorry`. It needs what the statement uses, copies of the scope
   commands around it, and `import ChallengeDeps`.
+- Each tagged declaration has a root: a piece with no text that needs the
+  lakefile, the toolchain, and the theorem's statement or, for any other
+  declaration, the command that declares it (a structure's fields: the
+  structure's command). A cut starts from roots alone, so a service that cuts
+  challenges follows one rule, whatever the declarations' kinds.
 - Module-system words (`module`, `public`, `meta`, `@[expose]`) and
   `@[trusted]` go. A name that would read differently in one file with the other
   modules is written as Lean writes it (`unresolveNameGlobal`): a name the
@@ -120,8 +125,8 @@ What several theorems need is there once.
   a piece holds its problem (a declaration no command declares; a module whose
   source does not read; a Lean option the library itself declares, which a
   challenge file cannot set; a package the library requires by path), and a cut
-  that holds such a piece cannot be made. A challenge cannot state a theorem
-  whose proof its other theorems need.
+  that holds such a piece cannot be made. A challenge declares each name once,
+  so it cannot state a theorem whose proof it needs.
 - `challenge X... --out DIR` writes the cut of the named tagged declarations.
   `lakefile.toml` requires what the library's lakefile requires, by git
   (LeanBlame left out), and sets no Lean options: each module's section does.
@@ -431,9 +436,9 @@ not move is not walked.
 editor or doc-gen4 loads it, and makes every output from that environment: the export, the
 statements (printed in-process, as doc-gen4 prints them) and the piece graph. A challenge is
 not a copy of each module elaborated again in other `lean` processes: it is the commands of the
-library's source that its theorems need, found from the kernel terms and the `.ilean`, with their
+library's source that its tagged declarations need, found from the kernel terms and the `.ilean`, with their
 scope. The pieces are a graph whose links are what each piece needs; the challenge of chosen
-theorems is the cut from their statements: one `ChallengeDeps.lean` (one file, not one per module)
+tagged declarations is the cut from their roots: one `ChallengeDeps.lean` (one file, not one per module)
 with what they need and nothing else, and `Challenge.lean`. `leanblame challenge` cuts it; `challenge --graph` gives a service the graph, to
 cut challenges live. Names are rewritten only where they would read differently in that file. Lake's own loader
 gives the libraries, their modules and their Lean options. `challenge --check` hashes the challenge

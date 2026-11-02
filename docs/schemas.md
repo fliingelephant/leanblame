@@ -266,11 +266,14 @@ The pieces the comparator challenges of the library's tagged declarations are cu
 ```json
 {
   "pieces": [
-    { "file": "lakefile.toml", "text": "name = \"challenge\"\n…", "needs": [], "theorem": null, "problem": null },
+    { "file": "lakefile.toml", "text": "name = \"challenge\"\n…", "needs": [], "root": null, "declares": [],
+      "problem": null },
     { "file": "ChallengeDeps.lean", "text": "\n/-- Twice a natural number. -/\ndef double …\n", "needs": [3, 4],
-      "theorem": null, "problem": null },
+      "root": null, "declares": [], "problem": null },
     { "file": "Challenge.lean", "text": "\ntheorem energy_even (n : Nat) : energy n % 2 = 0 := sorry\n",
-      "needs": [0, 1, 5, 9], "theorem": "Sample.energy_even", "problem": null }
+      "needs": [5, 9], "root": null, "declares": ["Sample.energy_even"], "problem": null },
+    { "file": "Challenge.lean", "text": "", "needs": [0, 1, 12], "root": "Sample.energy_even", "declares": [],
+      "problem": null }
   ]
 }
 ```
@@ -280,13 +283,12 @@ The pieces the comparator challenges of the library's tagged declarations are cu
 | `file` | `lakefile.toml`, `lean-toolchain`, `ChallengeDeps.lean` or `Challenge.lean` |
 | `text` | the piece's text in that file |
 | `needs` | the pieces it needs, by index |
-| `theorem` | in `Challenge.lean`: the tagged theorem it states; in `ChallengeDeps.lean`: the tagged declaration it declares (a theorem with its proof); else `null` |
+| `root` | the tagged declaration this piece is the root of, or `null`. Each tagged declaration has one root: a piece of `Challenge.lean` with no text that needs the lakefile, the toolchain, and the theorem's statement or the command that declares any other declaration |
+| `declares` | the tagged declarations it declares: a statement, its theorem; a command, those among what it declares (a structure's command: the structure, its constructor and its fields) |
 | `problem` | why a challenge that holds it cannot be made, or `null` |
 
-The challenge of tagged declarations D: start from the lakefile and toolchain pieces, the
-`Challenge.lean` pieces whose `theorem` is in D, and, for each other declaration in D, the
-`ChallengeDeps.lean` piece whose `theorem` it is; add the pieces they need, then the pieces those
-need, until nothing is added. It cannot be made when a piece it holds has a `problem`, or a
-`ChallengeDeps.lean` piece it holds has its `theorem` among the theorems of D that have a statement
-(the others need that one's proof). Otherwise each file is the text of its pieces, in index order.
+The challenge of tagged declarations D: start from their roots; add the pieces they need, then the
+pieces those need, until nothing is added. It cannot be made when a piece it holds has a `problem`,
+or two pieces it holds declare the same name (a theorem it states whose proof it needs). Otherwise
+each file is the text of its pieces, in index order.
 

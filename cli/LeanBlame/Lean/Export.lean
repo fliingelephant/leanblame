@@ -8,7 +8,7 @@ declarations tagged `@[trusted "id"]` (own and imported), or named by the bluepr
 what they use, proofs included, with the toolchain's `leanexport` writer (in-process), and writes
 both files into the object store, with their graph: the export hashed through the backend
 (docs/decisions.md, "Storage"). Makes the piece graph the challenges of the tagged
-theorems are cut from (`Pieces`). Then points `.leanblame/current` at them, with
+declarations are cut from (`Pieces`). Then points `.leanblame/current` at them, with
 the commit, toolchain and dependencies they were made from. Prints the two hashes.
 
 The library is imported once, with the environment extensions of everything it imports, as an
