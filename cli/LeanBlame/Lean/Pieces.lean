@@ -37,8 +37,9 @@ import LeanBlame.
 
 What stops a challenge is part of the graph, not an error of `export`: a piece has a problem when it
 needs a declaration no command declares or a module that does not read, when its module has a Lean
-option a file cannot set, or when it is a statement with no proof to replace; the lakefile has one
-when the library requires a package by path. A challenge declares each name once, so it cannot
+option a file cannot set, when it is a statement with no proof to replace, or when it is the root or
+statement of another library's declaration; the lakefile has one when the library requires a package
+by path. A challenge declares each name once, so it cannot
 state a theorem whose proof it needs.
 -/
 import Lean

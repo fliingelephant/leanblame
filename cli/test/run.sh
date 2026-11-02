@@ -6,8 +6,9 @@
 # Copies the sample library to a scratch directory, makes it a git repository,
 # and walks through: init -> export -> sign (records name declarations by id) ->
 # status (valid; --json complete, nothing on stderr) -> challenge (the commands the
-# named theorems need and nothing else, @[trusted] dropped, the theorems with proofs
-# `sorry`, the library's Lean options; Lake builds it without the library; the
+# named declarations need and nothing else, @[trusted] dropped, the theorems with proofs
+# `sorry`, the library's Lean options; a definition alone states nothing; two fields
+# bring their structure once; Lake builds it without the library; the
 # piece graph cuts to the same files; the check finds it means what the library
 # means, and finds a changed body; a tagged definition that uses a theorem brings
 # its proof, so the two cannot be named together; a private one keeps its meaning,
@@ -291,7 +292,7 @@ grep -q "theorem" "$work-challenge-x/Challenge.lean" && fail "challenge of a def
 must_fail "exists; a challenge goes into a new directory" -- "$lb" challenge Sample.energy_even --out "$work-challenge"
 ok "challenge of a definition: ChallengeDeps.lean holds it and what it needs, Challenge.lean states nothing; a directory that exists is refused"
 run challenge Sample.Point.x Sample.Point.y --out "$work-challenge-field"
-grep -q "^@\[trusted\] structure Point where\|^structure Point where" "$work-challenge-field/ChallengeDeps.lean" \
+grep -q "^structure Point where" "$work-challenge-field/ChallengeDeps.lean" \
   || fail "challenge of two fields: ChallengeDeps.lean does not declare their structure: $(cat "$work-challenge-field/ChallengeDeps.lean")"
 [[ "$(grep -c "structure Point where" "$work-challenge-field/ChallengeDeps.lean")" == 1 ]] || fail "challenge of two fields: the structure twice"
 ok "challenge of two fields of one structure: the command that declares them, once"
@@ -489,7 +490,6 @@ expect_line Sample.energy_even \
   "Sample.energy_even outdated blocked-by=Sample.energy change=dep-spec:Sample.energy"
 
 echo "== diff: what changed since a sign-off, as the kernel sees it"
-run status
 status_out="$out"
 run diff --from "$basic_record"
 python3 - "$status_out" "$out" <<'PY2' || fail "diff and status disagree: $out"
@@ -635,8 +635,6 @@ run export --boundary "$here/blueprint/blueprint-manifest.json"
 python3 - "$(stored_boundary)" <<'PY' || fail "boundary list from the blueprint manifest"
 import json, sys
 d = {x["name"]: x for x in json.load(open(sys.argv[1]))["declarations"]}
-assert set(d) == {"Sample.energy", "Sample.energy_even", "Sample.Point", "Sample.Point.mk", "Sample.Point.x",
-                  "Sample.Point.y", "Sample.Point.norm", "Sample.pointEnergy"}, sorted(d)
 ids = {n: x["id"] for n, x in d.items()}
 assert ids == {"Sample.energy": "def:energy", "Sample.energy_even": "thm:even", "Sample.Point": "def:point",
                "Sample.pointEnergy": "def:pointEnergy", "Sample.Point.mk": "def:point/mk", "Sample.Point.x": "def:point/x",
@@ -697,7 +695,6 @@ run equiv
 proof="$(awk '/^Sample.energy proven /{print $3}' <<<"$out")"
 [[ "$proof" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "equiv did not prove Sample.energy: $out"
 grep -qxF "Sample.double_zero proven $proof" <<<"$out" || fail "equiv did not prove Sample.double_zero: $out"
-[[ -f ".leanblame/store/proofs/${proof#sha256:}" ]] || fail "the proof $proof is not in the object store"
 # The proof is an export anyone can replay with the toolchain's checker.
 "$(lean --print-prefix)/bin/leanchecker" --silent --from-export ".leanblame/store/proofs/${proof#sha256:}" \
   || fail "leanchecker rejects the proof export $proof"
