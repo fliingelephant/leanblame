@@ -63,7 +63,8 @@ into `@[trusted "3f2b8c1e-…"]`, and `attribute [trusted] Name` into `attribute
 renamed. A declaration with no tag gets `attribute [trusted "…"] Name` at the end
 of its module; when a library `libraries` lists declares nothing (the library of
 tags of a library you do not own), it gets it there instead. A structure's
-projections and what Lean generates come with their parent. Cite a declaration
+projections, an inductive's constructors and what Lean generates come with their parent, and a
+deprecated alias with what it renames. Cite a declaration
 by its id. Commit the change.
 `export` refuses a tag without an id. `sign` needs an export of committed
 files: with uncommitted changes, the export names no commit.
@@ -91,7 +92,7 @@ Run in the library root as `lake exe leanblame <command>`.
 | `challenge graph` | Print the piece graph that challenges are cut from. |
 | `challenge check DIR` | Build the challenge against the library: each tagged declaration in it has the library's claim hash, or the kernel finds it definitionally equal to the library's. |
 | `validate [--base-ref REF]` | Check record files: schema, signer authority, no edits or deletions since `REF`. |
-| `release --tag TAG [--out FILE]` | Signoff and kernel gates, axiom report, manifest. |
+| `release --tag TAG [--out FILE]` | Signoff, axiom and kernel gates, manifest. |
 
 Example `status` output:
 
@@ -101,8 +102,8 @@ MyLib.energy_even valid blocked
 2 tagged: 1 valid, 1 outdated, 0 unsigned; 1 blocked
 ```
 
-Causes: `own-text`, `own-body`, `dep-spec` (a tagged dependency's name, type or
-docstring), `cut-moved` (a dependency gained or lost its tag), `untagged`.
+Causes: `own-text`, `own-body`, `dep-spec` (the spec of a tagged or trusted
+dependency), `cut-moved` (a dependency gained or lost its tag or its trust), `untagged`.
 
 ## Records and policy
 
@@ -113,8 +114,8 @@ never edited. They name declarations by id, so a sign-off follows a rename.
 `allowed_signers`; and, optionally, `libraries` (the package's libraries to read),
 `boundary` (a blueprint manifest instead of `@[trusted]`) and `trusted` (the packages
 whose declarations enter claims by their statement alone, with what they require;
-default `mathlib`; Lean's own always do). From the terminal, `sign` writes `local:` signer ids; a service that
-writes records with login-backed ids (OpenVouch) is not built yet.
+default `mathlib`; Lean's own always do). From the terminal, `sign` writes `local:` signer ids; records with
+login-backed ids come from a service (OpenVouch), whose write path is not built yet.
 
 `.leanblame/` holds the object store. It is local and ignored by git.
 

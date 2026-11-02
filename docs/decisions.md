@@ -43,7 +43,7 @@ A module under `Core/` imports only `Init`, `Std`, `Lean.Data.*`, `Lake.Toml`,
 `Lake.Util.*` and other `Core/` modules: nothing in it knows what a Lean term,
 environment or kernel is. `Main` passes the Lean frontend to the core commands.
 
-Eleven commands; the [README](../README.md) lists them.
+Twelve commands; the [README](../README.md) lists them.
 
 ### Export, checker, comparator
 
@@ -54,7 +54,7 @@ tagged declarations and everything they use, as `leanexport` writes them, known 
 its SHA-256. LeanBlame hashes the claims from the constants it holds, keeps only those
 that are not trusted, and gates releases and `equiv` proofs with the checker.
 
-`lake comparator` (Lean FRO, in core since v4.35.0) builds on the same two
+`lake comparator` builds on the same two
 tools: it compares an untrusted solution against a trusted statement file,
 walking the dependency closure of each target theorem. LeanBlame copies its
 closure walk and changes it (cut at tagged declarations, skip proofs, collect
@@ -140,7 +140,7 @@ service that cuts the graph itself (OpenVouch) applies no rule of its own.
   library requires by path), and a cut that holds such a piece cannot be made.
   A challenge declares each name once, so it cannot state a theorem whose proof
   it needs.
-- `challenge X... --out DIR` writes the cut of the named tagged declarations.
+- `challenge write X... --out DIR` writes the cut of the named tagged declarations.
   `lakefile.toml` requires what the library's lakefile requires, by git
   (LeanBlame left out), and sets no Lean options: each module's section does.
   `lean-toolchain` is the library's. `ChallengeDeps.lean` holds the imports, the
@@ -159,7 +159,7 @@ service that cuts the graph itself (OpenVouch) applies no rule of its own.
   library's theorem. Lean can write the same source as other terms in one file
   (a `match` shares the helper Lean made for another module's); the kernel
   decides as `equiv` does, against the library's versions of what differs, read
-  from the compiled files of the modules that declare them. A private name holds
+  from the last export. A private name holds
   the module it is written in, so the challenge's private constants are hashed
   under the library's names: by their names, or by the module a name written
   with its module gives.
@@ -197,7 +197,7 @@ signed `axiom` in the library or its tagged dependencies.
   whole export again from the build. A graph is an export hashed against a boundary
   list: every claim hash, with the parts `status` compares and the axiom
   report. `export` writes it; the other commands read it and never hash. It is
-  the one kind keyed by what it was computed from instead of its own bytes:
+  keyed by what it was computed from:
   `graphs/<export>-<boundary list>.json`, both by their hashes; a graph that is
   not complete is an error. `.leanblame/current` points at the last export and
   its piece graph, with the commit, toolchain and dependencies it was made from.
@@ -283,11 +283,11 @@ Development never stops for a release.
 
 ### What `release` does
 
-Two gates and a report, on an export that names a commit. The kernel gate runs
+Three gates and a report, on an export that names a commit. The kernel gate runs
 last: it builds the library.
 
 1. **Signoff gate.** Every tagged declaration is `valid`. Fails otherwise.
-2. **Axiom report.** From the export, per theorem, the axioms it rests on:
+2. **Axiom gate.** From the export, per theorem, the axioms it rests on:
    - only permitted axioms, that is the three standard ones and tagged, signed
      `axiom`s: **proven**, each axiom listed;
    - includes `sorryAx`: **open**;
@@ -441,8 +441,8 @@ data is made again.
    the record files, the standing of approvals, the toolchain, the standard
    axioms. A viewer only displays it.
 2. **No defaults on errors.** Every JSON file is read strictly:
-   a missing or an unknown key is an error. Every `leanblame.toml` key is
-   required. No fallback on a failure: proof erasure, the statement printer,
+   a missing or an unknown key is an error. Every `leanblame.toml` key but
+   `libraries`, `boundary` and `trusted` is required. No fallback on a failure: proof erasure, the statement printer,
    the mathlib cache, Lake's output. A withdraw that breaks the rules, an
    `exclude` entry that names no approve record, and a record in two
    directories stop every command but `validate`, which lists them. `export`
@@ -505,8 +505,8 @@ filters, not gates. lean-eval's per-problem TOML files were the model for record
   building against each Isabelle release; old versions stay available. Public
   maintainer for buildability, anonymous reviewer for content: the opposite of
   LeanBlame on the review side.
-- **Formal Abstracts** (Thomas Hales, ~2018). Registry of formal statements
-  from papers. Stalled. From memory, not verified.
+- **Formal Abstracts** (Thomas Hales). Registry of formal statements
+  from papers. Stalled.
 
 ### Other fields
 

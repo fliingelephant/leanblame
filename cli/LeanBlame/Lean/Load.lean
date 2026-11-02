@@ -16,8 +16,6 @@ ones.
 -/
 import Lean.AddDecl
 import Lean.Message
-import Lean.Util.Path
-import LeanExport.Parse
 
 namespace LeanBlame.Load
 

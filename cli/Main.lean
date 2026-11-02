@@ -1,7 +1,7 @@
 /-
 `leanblame`: command-line entry point (README.md, Commands). It passes
 the Lean frontend's backend to the two commands that need one (docs/decisions.md, "Beyond Lean"):
-`export` hashes with it, `release` runs its kernel check.
+`export` records its checker and assumptions in the graph, `release` runs its kernel check.
 -/
 import LeanBlame.Core.Diff
 import LeanBlame.Core.Release
@@ -10,8 +10,8 @@ import LeanBlame.Core.Status
 import LeanBlame.Core.Validate
 import LeanBlame.Lean.Challenge
 import LeanBlame.Lean.Equiv
+import LeanBlame.Lean.Export
 import LeanBlame.Lean.Ids
-import LeanBlame.Lean.Source
 
 open LeanBlame
 
@@ -60,9 +60,6 @@ structure Args where
 
 def Args.get? (a : Args) (k : String) : Option String :=
   (a.flags.find? (·.1 == k)).map (·.2)
-
-def Args.getAll (a : Args) (k : String) : Array String :=
-  (a.flags.filter (·.1 == k)).map (·.2)
 
 def Args.has (a : Args) (k : String) : Bool := a.switches.contains k
 

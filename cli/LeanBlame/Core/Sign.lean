@@ -3,7 +3,7 @@
 trust-model.md, "Records").
 
 `sign` is the terminal dev path: it writes `local:` records only. Provider
-logins (OpenReview, ORCID, GitHub) belong to the sign server.
+logins (OpenReview, ORCID, GitHub) belong to the service (OpenVouch).
 -/
 import LeanBlame.Core.Status
 
@@ -27,12 +27,12 @@ def init (root : System.FilePath) : IO UInt32 := do
     IO.println "updated  .gitignore (.leanblame/)"
   return 0
 
-/-- The signer `--signer` names; there is no default. Only `local:` ids in this slice. -/
+/-- The signer `--signer` names; there is no default. Only `local:` ids. -/
 def resolveSigner (given? : Option String) : IO String := do
   let some s := given? | fail "a record names who signs: give --signer local:NAME"
   unless isSignerId s do fail s!"signer must be provider:id, got `{s}`"
   unless s.startsWith "local:" do
-    fail s!"{s}: the terminal writes local: records only; provider logins go through the sign server"
+    fail s!"{s}: the terminal writes local: records only; provider logins go through the service"
   return s
 
 /-- The first records directory, relative to the library root: where new records go. -/

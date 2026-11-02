@@ -1,6 +1,7 @@
 /-
 The object store (docs/decisions.md, Storage): `.leanblame/store/<kind>/<hex>`, where
-`<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports,
+`<hex>` is the SHA-256 of the file's bytes, of an export the whole export's (the file keeps its
+untrusted constants), and `<kind>` one directory per kind of object: exports,
 boundary lists, listings of a library's own constants, `equiv` proofs (exports too), release
 manifests and piece graphs (`Pieces`). Graphs, exports hashed against boundary
 lists (`Graph`), are keyed by what made them: `graphs/<export hex>-<boundary hex>.json`.
@@ -41,7 +42,8 @@ def kindDir (root : System.FilePath) (k : Kind) : System.FilePath := objectsDir 
 def objectPath (root : System.FilePath) (k : Kind) (hash : String) : System.FilePath :=
   kindDir root k / hashHex hash
 
-/-- Move a finished file, whose SHA-256 is `hex`, into the store; returns `sha256:<hex>`. -/
+/-- Move a finished file into the store under `hex`: its SHA-256, of an export the whole export's;
+returns `sha256:<hex>`. -/
 def putFile (root : System.FilePath) (k : Kind) (tmp : System.FilePath) (hex : String) : IO String := do
   let dest := kindDir root k / hex
   IO.FS.createDirAll (kindDir root k)

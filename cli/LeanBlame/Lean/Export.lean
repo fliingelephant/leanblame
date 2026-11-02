@@ -6,14 +6,15 @@ Builds the libraries with `lake build`, imports their modules, and makes the bou
 declarations tagged `@[trusted "id"]` (own and imported), or named by the blueprint
 manifest `boundary` names, plus the members of tagged structures and inductives, with `id`, `parent`,
 `module`, `kind`, `role` and the printed statement. Exports the boundary list's declarations and
-what they use, proofs included, with the toolchain's `leanexport` writer (in-process), and writes
-both files into the object store, with their graph: the export hashed through the backend
-(docs/decisions.md, "Storage"). Makes the piece graph the challenges of the tagged
-declarations are cut from (`Pieces`). Then points `.leanblame/current` at them, with
-the commit, toolchain and dependencies they were made from. Prints the two hashes.
+what they use, proofs included, with the toolchain's `leanexport` writer (in-process), and hashes
+it; the store keeps the boundary list, the export's untrusted constants under the whole export's
+hash, and the graph: every claim hash (docs/decisions.md, "Storage"). Makes the piece graph the
+challenges of the tagged declarations are cut from (`Pieces`). Then points `.leanblame/current` at
+them, with the commit, toolchain and dependencies they were made from. Prints the two hashes.
 
-The library is imported once, with the environment extensions of everything it imports, as an
-editor or doc-gen4 loads it; every output comes from that one environment.
+The library is imported with the environment extensions of everything it imports, as an editor or
+doc-gen4 loads it, for the boundary list, the statements and the piece graph; the export and the
+claims come from the library imported again without them, its constants alone.
 -/
 import Lean
 import Lake.Config.InstallPath
@@ -373,7 +374,7 @@ structure Result where
   /-- Constants hashed into the claims. -/
   hashed : Nat
 
-/-- Run the export in library root `root`; `backend` hashes it. -/
+/-- Run the export in library root `root`; the graph records `backend`'s checker and assumptions. -/
 def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Option System.FilePath)
     (libsGiven : Array String) (trusted? : Option (Array String)) : IO Result := do
   let rev ← gitHead root

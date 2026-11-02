@@ -5,7 +5,8 @@ tag written without an id gets one, just after `trusted`: `@[trusted "id"]` on a
 library. A declaration with no tag gets `attribute [trusted "id"] Name`, at the end of its module;
 or, when a library `leanblame.toml` lists declares nothing, at the end of that library's last module
 that imports it: a library one does not own is tagged in a library of one's own. A structure's
-projections and what Lean generates come with their parent (`Export.taggable`). An id is a random
+projections, an inductive's constructors and what Lean generates come with their parent, and a
+deprecated alias with what it renames (`Export.taggable`). An id is a random
 UUID, version 4. It is never hashed, so writing one changes no claim. Tags written in imported
 libraries are not touched.
 

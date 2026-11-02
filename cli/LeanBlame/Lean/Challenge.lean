@@ -100,7 +100,7 @@ def check (root dir : System.FilePath) : IO (Nat × Nat) := do
                                     env := #[("LEAN_PATH", some path)] }
       unless out.exitCode == 0 do fail s!"{dir / s!"{m}.lean"} does not build:\n{out.stdout}{out.stderr}"
     initSearchPath sysroot (build :: leanPath)
-    -- Without environment extensions, as an export rebuilds its constants (`Source.declsIn`).
+    -- Without environment extensions, as `export` imports the library for its constants (`Source.ofEnv`).
     let env ← importModules (mods.map ({ module := · })) {} (loadExts := false)
     let present := lib.boundary.declarations.filter fun d => (nameOf? d.name).any env.contains
     let boundary := { lib.boundary with declarations := present }
