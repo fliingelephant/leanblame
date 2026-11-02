@@ -28,8 +28,8 @@ library. A file holds the pieces of several modules, where a name could read dif
 module's declaration, or its imports, may share it. So each recorded name is checked to read back as
 the constant it named, in the scope it was written in, among everything the library imports (Lean's
 name resolution); a name that would not is written as Lean writes names (`unresolveNameGlobal`). An
-`open` needs its namespace to exist: one that no module from outside the library which its module
-imports makes is declared first (`namespace N end N`); declaring one that exists changes nothing.
+`open` needs its namespace to exist: every namespace an `open` opens is declared first
+(`namespace N end N`); declaring one that exists changes nothing.
 Lean names a private declaration after its module: one whose name a declaration of another module in
 the graph has too is written with its module (`«secret (M)»`). Module-system words (`public`, `meta`,
 `@[expose]`) and the `trusted` attribute are dropped: a challenge is a plain file that does not
@@ -570,26 +570,6 @@ def under (set : NameMap α) : Name → Bool
 
 /-! ## The piece graph -/
 
-/-- The namespaces Lean makes for constant `n` (`Lean.registerNamePrefixes`): the prefixes of its
-user name, up to the first that is not made of words alone, unless the name's last part starts with
-`_`. -/
-def namespacesOf (n : Name) (acc : NameSet) : NameSet :=
-  match privateToUserName n with
-  | .str p s => if s.startsWith "_" then acc else go p acc
-  | _ => acc
-where
-  words : Name → Bool
-    | .str .anonymous _ => true
-    | .str p _ => words p
-    | _ => false
-  go : Name → NameSet → NameSet
-    | p@(.str q _), acc => if words p then go q (acc.insert p) else acc
-    | _, acc => acc
-
-/-- The modules `roots` import, directly or not, and the roots. -/
-def importClosure (env : Environment) (roots : Array Name) : NameSet :=
-  (Id.run <| reach roots (pure <| importsOf env ·)).foldl (·.insert ·) {}
-
 /-- The constants in the kernel terms of `n`: its type, and with `value` its value or proof. -/
 def termUses (env : Environment) (n : Name) (value : Bool) : Array Name :=
   match env.find? n with
@@ -726,28 +706,6 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       | some (.error e) => problems := problems.push e
       | none => pure ()
     return (dedup keys, problems)
-  -- The namespaces that modules from outside the library make, each with those modules.
-  let makers : Thunk (Std.HashMap Name (Array Name)) := Thunk.mk fun _ =>
-    (importClosure env library).foldl (init := {}) fun map mod =>
-      if libSet.contains mod then map else
-      match moduleData? env mod with
-      | none => map
-      | some d => d.constNames.foldl (init := map) fun map n =>
-        (namespacesOf n {}).foldl (init := map) fun map ns =>
-          map.alter ns fun ms => let ms := ms.getD #[]; some (if ms.back? == some mod then ms else ms.push mod)
-  let closures ← IO.mkRef ({} : Std.HashMap Name NameSet)
-  let closureOf (m : Name) : IO NameSet := do
-    if let some c := (← closures.get)[m]? then return c
-    let c := importClosure env #[m]
-    closures.modify (·.insert m c)
-    return c
-  -- Of the namespaces an `open` of module `m` opens, those that no module from outside the library
-  -- which `m` imports makes.
-  let undeclared (m : Name) (opened : Array Name) : IO (Array Name) := do
-    if opened.isEmpty then return #[]
-    let mk := makers.get
-    let cl ← closureOf m
-    return opened.filter fun ns => !((mk[ns]?).getD #[]).any cl.contains
   -- What module `m` imports from outside the library, through the library's modules it imports; not
   -- `Init`, which every file imports, nor LeanBlame, which a challenge leaves out.
   let outsideOf (m : Name) : Array Name :=
@@ -802,7 +760,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
       for (o, _, e) in sc.scopes, s in [:sc.scopes.size] do
         if o == i then needs := needs.push (match e with | some e => .cmd deps m e | none => .close deps m s)
         if e == some i then needs := needs.push (.cmd deps m o)
-      needs := needs ++ (← undeclared m c.opened).map Key.declare
+      needs := needs ++ c.opened.map Key.declare
       if deps && !c.declares.isEmpty then needs := needs.push (.instances m)
       let (keys, problems) ← declarers (some (.cmd true m i)) (c.declares.flatMap (termUses env · true) ++ r.named c)
       return (needs ++ keys, problems)

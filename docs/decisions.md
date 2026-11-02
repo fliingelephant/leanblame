@@ -100,9 +100,8 @@ what that needs, and so on. What several declarations need is there once.
   `moreLeanArgs` and `weakLeanArgs`, as `lean` reads them) and needs what the
   module imports from outside the library; nothing one module opens or sets
   reaches the next. Lean refuses an `open` of a namespace that does not exist
-  yet: one that no module from outside the library imported by its module makes
-  is declared first (`namespace N` `end N`); declaring one that exists changes
-  nothing.
+  yet: every namespace an `open` opens is declared first (`namespace N` `end N`);
+  declaring one that exists changes nothing.
 - A tagged theorem's statement is a piece of `Challenge.lean`: its command with
   the proof `sorry`. It needs what the statement uses, copies of the scope
   commands around it, and `import ChallengeDeps`.
