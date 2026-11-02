@@ -27,7 +27,6 @@ def appendOnlyErrors (root : System.FilePath) (base : String) (loaded : Array Lo
     | .ok cfg => pure cfg
     | .error e => return #[s!"{Config.fileName} at the merge base {base} does not parse: {e}"]
   let dirs := cfg.records
-  if dirs.isEmpty then return #[]
   let ids : Std.HashSet String := loaded.foldl (·.insert ·.hash) {}
   let mut errors := #[]
   let out ← IO.Process.run

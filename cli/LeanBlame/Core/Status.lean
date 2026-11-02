@@ -74,14 +74,14 @@ def historyOf (ledger : Ledger) (id : String) (current : Option String) : Array 
     | .approve r a c =>
       { record := r.hash, action := .approve, signer := a.signer, date := a.date, name := c.name
         claim := c.claim, note := a.note
-        standing := some (ledger.standing r a.signer id c.claim current) }
+        standing := some (ledger.standing r id c.claim current) }
     | .withdraw r w c =>
       { record := r.hash, action := .withdraw, signer := w.signer, date := w.date, name := c.name
         claim := c.claim, note := w.note, standing := none }
 
 /-- The live approve records of declaration `id`, in (date, id) order, with its entry in each. -/
 def liveApprovals (ledger : Ledger) (id : String) : Array (LoadedRecord × ApproveRecord × ApprovedConstant) :=
-  (ledger.approvalsOf id).filter fun (r, a, _) => ledger.isLive r a.signer id
+  (ledger.approvalsOf id).filter fun (r, _, _) => ledger.isLive r id
 
 /-- The `equiv` proof that declaration `id` at `claim` means what a live approval of it meant. -/
 def evidenceFor (root : System.FilePath) (ledger : Ledger) (id claim : String) : IO (Option String) := do

@@ -147,15 +147,6 @@ def blueprintTags (f : System.FilePath) : IO (Array Tag × Array String) := do
       | _ => { name, id := none, parent := n.names[0]?, informal }
   return (tags, errors)
 
-/-- A declaration of the boundary list while `expand` makes it: its own id, and the declaration
-whose id stands for it. -/
-structure Entry where
-  name : Name
-  ci : ConstantInfo
-  informal : String
-  ownId : Option String
-  parent : Option Name
-
 /-- What `n` is, in the words of Lean's documentation (doc-gen4): `def`, `theorem`, `axiom`,
 `opaque`, `instance`, `inductive`, `structure`, `class`, `constructor`, and `field` for a structure's
 projection. Not hashed: the hash takes the kernel's kind (`Source.kindOf`). -/
@@ -197,7 +188,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
     | _ => #[]
   let parentOf : NameMap Name := tags.foldl (init := {}) fun m t =>
     (members t.name).foldl (init := m) fun m c => m.insert c t.name
-  let mut entries : Array Entry := #[]
+  let mut entries : Array (Tag × ConstantInfo) := #[]
   let mut errors := #[]
   for t in tags do
     let some ci := env.find? t.name
@@ -206,25 +197,24 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       errors := errors.push s!"{t.name}: `unsafe` declarations cannot be tagged"; continue
     if ci matches .recInfo _ then
       errors := errors.push s!"{t.name}: recursors cannot be tagged"; continue
-    entries := entries.push
-      { name := t.name, ci, informal := t.informal, ownId := t.id, parent := t.parent <|> parentOf.find? t.name }
+    entries := entries.push ({ t with parent := t.parent <|> parentOf.find? t.name }, ci)
     for m in members t.name do
       if tagged.contains m then continue
       let some mi := env.find? m | errors := errors.push s!"{m}: member of {t.name} not found"; continue
       let informal := (((← findSimpleDocString? env m).map normalizeInformal).filter (· != "")).getD t.informal
-      entries := entries.push { name := m, ci := mi, informal, ownId := none, parent := some t.name }
-  let byName : NameMap Entry := entries.foldl (init := {}) fun m e => m.insert e.name e
+      entries := entries.push ({ name := m, id := none, parent := some t.name, informal }, mi)
+  let byName : NameMap Tag := entries.foldl (init := {}) fun m (e, _) => m.insert e.name e
   let rec root (fuel : Nat) (p : Name) : Name :=
     match fuel, byName.find? p with
-    | fuel + 1, some { ownId := none, parent := some q, .. } => root fuel q
+    | fuel + 1, some { id := none, parent := some q, .. } => root fuel q
     | _, _ => p
   let mut out := #[]
   -- An id names one declaration: a copied `@[trusted "id"]` is caught here.
   let mut owner : Std.HashMap String Name := {}
-  for e in entries do
+  for (e, ci) in entries do
     let parent := e.parent.map (root entries.size)
-    let id? := e.ownId <|> parent.bind fun p =>
-      (byName.find? p).bind (·.ownId) |>.map (s!"{·}/{relativeName p e.name}")
+    let id? := e.id <|> parent.bind fun p =>
+      (byName.find? p).bind (·.id) |>.map (s!"{·}/{relativeName p e.name}")
     let some id := id?
       | errors := errors.push s!"{e.name}: tagged without an id; run `leanblame id` in the library that tags it"
         continue
@@ -236,7 +226,7 @@ def expand (env : Environment) (tags : Array Tag) : IO (Array (Name × BoundaryD
       | errors := errors.push s!"{e.name}: Lean has no source position for it"; continue
     let d : BoundaryDecl := {
       name := e.name.toString, id, parent := parent.map (·.toString), module := module.toString
-      kind := kindWord env e.name e.ci, role := Source.roleOf e.ci, informal := e.informal, statement := default }
+      kind := kindWord env e.name ci, role := Source.roleOf ci, informal := e.informal, statement := default }
     out := out.push (place, e.name, d)
   let before (a b : (Nat × Nat × Nat) × Name × BoundaryDecl) : Bool :=
     let ((m, l, c), (m', l', c')) := (a.1, b.1)
@@ -327,7 +317,7 @@ def load (root : System.FilePath) (libsGiven : Array String) : IO Loaded := do
     if let some (_, o) := libOptions.find? (·.1.isLocalModule m) then
       mods := mods.push m
       options := options.insert m o
-  return { package := pkg.name.toString (escape := false), mods, options, deps, requires, env, srcPath }
+  return { package := pkg.prettyName, mods, options, deps, requires, env, srcPath }
 
 structure Result where
   exportHash : String

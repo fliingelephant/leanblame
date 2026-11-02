@@ -155,17 +155,16 @@ def Ledger.entriesOf (l : Ledger) (id : String) : Array Ledger.Entry :=
 def Ledger.approvalsOf (l : Ledger) (id : String) : Array (LoadedRecord × ApproveRecord × ApprovedConstant) :=
   (l.entriesOf id).filterMap fun | .approve r a c => some (r, a, c) | .withdraw .. => none
 
-/-- Whether approve record `r` by `signer` is live for declaration `id`. -/
-def Ledger.isLive (l : Ledger) (r : LoadedRecord) (signer id : String) : Bool :=
-  !l.withdrawn.contains (r.hash, id) && !l.cfg.exclude.contains r.hash && l.cfg.allows signer
+/-- Whether approve record `r` is live for declaration `id`. -/
+def Ledger.isLive (l : Ledger) (r : LoadedRecord) (id : String) : Bool :=
+  !l.withdrawn.contains (r.hash, id) && !l.cfg.exclude.contains r.hash && l.cfg.allows r.record.signer
 
-/-- What approve record `r` by `signer` of declaration `id` at `claim` is worth, given the
-declaration's current claim (`none`: it is not on the current boundary list). -/
-def Ledger.standing (l : Ledger) (r : LoadedRecord) (signer id claim : String)
-    (current : Option String) : Standing :=
+/-- What approve record `r` of declaration `id` at `claim` is worth, given the declaration's current
+claim (`none`: it is not on the current boundary list). -/
+def Ledger.standing (l : Ledger) (r : LoadedRecord) (id claim : String) (current : Option String) : Standing :=
   if l.withdrawn.contains (r.hash, id) then .withdrawn
   else if l.cfg.exclude.contains r.hash then .excluded
-  else if !l.cfg.allows signer then .notAllowed
+  else if !l.cfg.allows r.record.signer then .notAllowed
   else if current == some claim then .current
   else .superseded
 

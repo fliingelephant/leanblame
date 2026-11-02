@@ -150,7 +150,7 @@ def run (root : System.FilePath) (fromRef : String) (toRef : Option String) (key
     | none => currentPoint root
   let entries ← compute old new keys
   if json then
-    IO.print ((report old new entries).pretty ++ "\n")
+    IO.print (jsonText (report old new entries))
   else
     for e in entries do
       for l in textLines e do IO.println l

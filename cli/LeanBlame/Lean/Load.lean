@@ -56,7 +56,7 @@ def addConstants (env : Kernel.Environment) (consts : Std.HashMap Name ConstantI
     (order : Array Name) (check : Bool) : IO Kernel.Environment := do
   let mut env := env
   for n in order do
-    let some ci := consts[n]? | continue
+    let some ci := consts[n]? | throw <| .userError s!"{n} is not among the constants"
     let some d ← IO.ofExcept (declarationOf consts ci) | continue
     match if check then env.addDecl {} d else env.addDeclWithoutChecking d with
     | .ok env' => env := env'

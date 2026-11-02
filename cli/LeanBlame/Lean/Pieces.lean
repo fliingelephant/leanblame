@@ -180,7 +180,6 @@ structure Cmd where
 
 /-- One module, read. -/
 structure Read where
-  module : Name
   bytes : ByteArray
   fileMap : FileMap
   /-- The environment with this module as the main one, so that its private names read. -/
@@ -193,8 +192,6 @@ structure Read where
   refs : Array (String.Pos.Raw × String.Pos.Raw × Name)
   /-- Where the source writes the name of each constant it declares, as `refs`. -/
   defs : Array (String.Pos.Raw × String.Pos.Raw × Name)
-  /-- Whether each command writes an instance. -/
-  instances : Array Bool
 
 /-- The library's constants that the names in `c` refer to. -/
 def Read.named (r : Read) (c : Cmd) (stop := c.stop) : Array Name :=
@@ -401,8 +398,7 @@ def readModule (env : Environment) (options : Options) (library : NameSet) (m : 
       refs := refs.push (ictx.fileMap.lspPosToUtf8Pos r.start, ictx.fileMap.lspPosToUtf8Pos r.end, n)
     if let some d := info.definition? then
       defs := defs.push (ictx.fileMap.lspPosToUtf8Pos d.range.start, ictx.fileMap.lspPosToUtf8Pos d.range.end, n)
-  return { module := m, bytes := source.toUTF8, fileMap := ictx.fileMap, env, options, cmds,
-           owner, refs, defs, instances := cmds.map (writesInstance ·.stx) }
+  return { bytes := source.toUTF8, fileMap := ictx.fileMap, env, options, cmds, owner, refs, defs }
 
 /-! ## Writing a command for a challenge -/
 
@@ -817,7 +813,7 @@ def make (env : Environment) (library : Array Name) (srcPath : SearchPath) (opti
     | .head deps m => return (((outsideOf m).map Key.outside).push (.tail deps m), (optionsOf m).2)
     | .instances m =>
       let r ← readOk m
-      return (((Array.range r.cmds.size).filter (r.instances[·]!)).map (Key.cmd true m ·), #[])
+      return (((Array.range r.cmds.size).filter (writesInstance r.cmds[·]!.stx)).map (Key.cmd true m ·), #[])
     | .close deps m s => return (#[.cmd deps m (← scopesIn m).scopes[s]!.1], #[])
     | .cmd deps m i =>
       let r ← readOk m
