@@ -257,7 +257,7 @@ def proveGroup (root : System.FilePath) (base : Kernel.Environment) (new old : C
   if proven.isEmpty then return (#[], "")
   -- The solution export: the accepted theorems and what they use, replayed by `leanchecker`.
   let tmp ← Store.tmpPath root "solution"
-  let solution ← Store.putFile root .proofs tmp (← Export.dump (.ofKernelEnv p.env) p.theorems (path? := some tmp))
+  let solution ← Store.putFile root .proofs tmp (← Export.writeFile (.ofKernelEnv p.env) p.theorems tmp)
   unless ← Source.kernelAccepts (← Store.objectFile root .proofs solution) do
     fail s!"leanchecker rejected the solution export {solution}"
   return (proven, solution)

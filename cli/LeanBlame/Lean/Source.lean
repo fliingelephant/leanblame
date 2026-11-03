@@ -161,9 +161,17 @@ def ofEnv (env : Environment) (roots : Array Name) : IO Core.Source := do
 def parseFile (path : System.FilePath) : IO LeanExport.ExportedEnv := do
   LeanExport.parseStream (.ofHandle (← IO.FS.Handle.mk path .read))
 
-/-- Export `hash` from the object store, parsed. -/
+/-- Export `hash` from the object store, parsed: its modules' files, in import order. -/
 def loadExported (root : System.FilePath) (hash : String) : IO LeanExport.ExportedEnv := do
-  parseFile (← Store.objectFile root .exports hash)
+  let mut constMap : Std.HashMap Name ConstantInfo := {}
+  let mut constOrder : Array Name := #[]
+  for (m, e) in ← Store.exportModules root hash do
+    let part ← parseFile (← Store.objectFile root .modules e)
+    for (n, ci) in part.constMap do
+      if constMap.contains n then fail s!"export {hash}: {n} is in module {m} and in an earlier one"
+      constMap := constMap.insert n ci
+    constOrder := constOrder ++ part.constOrder
+  return { constMap, constOrder }
 
 /-- Whether the toolchain's `leanchecker` replays the export file `path` without error: the
 kernel check `release` and `equiv` run. -/

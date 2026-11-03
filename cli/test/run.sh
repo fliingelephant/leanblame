@@ -844,6 +844,9 @@ ok "a proof against a withdrawn approval does not count"
 edit Sample/Energy.lean 's/:= energy p.norm$/:= energy p.norm * 1/'
 commit "pointEnergy: new body"
 export_lib
+grep -Eq '^leanblame: [0-9]+ modules, 1 written, [1-9][0-9]* unchanged$' "$logs/export.log" \
+  || fail "export wrote again more than the changed module: $(grep modules "$logs/export.log")"
+ok "export writes again only the module that changed"
 must_fail '^Sample.pointEnergy: no goal: a cause other than `untagged`; a human reads$' -- "$lb" equiv Sample.pointEnergy
 ok "equiv refuses an own-body change"
 

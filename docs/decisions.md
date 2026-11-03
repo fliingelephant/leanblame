@@ -50,9 +50,10 @@ Twelve commands; the [README](../README.md) lists them.
 Lean's toolchain ships `leanexport`, which writes every constant of an
 environment (types, values, universe levels) to one text file, and
 `leanchecker`, which replays such a file through the Lean kernel. An export is the
-tagged declarations and everything they use, as `leanexport` writes them, known by
-its SHA-256. LeanBlame hashes the claims from the constants it holds, keeps only those
-that are not trusted, and gates releases and `equiv` proofs with the checker.
+tagged declarations and everything they use that is not trusted, as `leanexport` writes
+them: one file per module, the other modules' constants named only, and the list of the
+files, whose SHA-256 is the export's hash. LeanBlame hashes the claims from the same
+constants, and gates releases and `equiv` proofs with the checker.
 
 `lake comparator` builds on the same two
 tools: it compares an untrusted solution against a trusted statement file,
@@ -191,10 +192,12 @@ signed `axiom` in the library or its tagged dependencies.
 - Code, records, config: git.
 - Exports, boundary lists, the library's own constants, graphs, piece graphs, `equiv` proofs,
   release manifests: an object store keyed by hash, one directory per kind
-  (`.leanblame/store/<kind>/`). Of an export the store keeps the constants that are not
-  trusted, as `leanexport` writes them, under the hash of the whole export: what
-  `challenge check` and `equiv` read of an old or the current version; `release` writes the
-  whole export again from the build. A graph is an export hashed against a boundary
+  (`.leanblame/store/<kind>/`). An export is kept as its list of module files, each file
+  under its own hash and found again by what made it, `module-keys/<key>`: the Lean
+  version, the module's compiled files and its constants the export uses. So `export`
+  writes only the modules that changed. `challenge check` and `equiv` read an old or the
+  current export; `release` writes the whole export, trusted constants included, again
+  from the build. A graph is an export hashed against a boundary
   list: every claim hash, with the parts `status` compares and the axiom
   report. `export` writes it; the other commands read it and never hash. It is
   keyed by what it was computed from:
@@ -202,7 +205,8 @@ signed `axiom` in the library or its tagged dependencies.
   not complete is an error. `.leanblame/current` points at the last export and
   its piece graph, with the commit, toolchain and dependencies it was made from.
   `export` deletes what nothing names any more: exports and boundary lists named
-  by no record and not current, the graphs of deleted exports, a piece graph or
+  by no record and not current, module files no kept export lists and their keys, the
+  graphs of deleted exports, a piece graph or
   constant list that is not current, evidence whose claim is no longer current, proofs named by
   no evidence and no record. Validity compares the records' claims with the graph
   of the current code, which whoever judges makes with `export`. Graphs of old
