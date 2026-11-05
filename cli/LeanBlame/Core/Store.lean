@@ -1,21 +1,21 @@
 /-
 The object store (docs/decisions.md, Storage): `.leanblame/store/<kind>/<hex>`, where
 `<hex>` is the SHA-256 of the file's bytes and `<kind>` one directory per kind of object: exports
-(each the list of its modules' files), the modules' files, boundary lists, listings of a library's
-own constants, `equiv` proofs (exports as `leanexport` writes them), release manifests and piece
-graphs (`Pieces`). Two kinds are keyed by what made them: graphs, exports hashed against boundary
-lists (`Graph`), as `graphs/<export hex>-<boundary hex>.json`; and module keys, `module-keys/<key>`,
-each the hash of the module file made from that key (`Export.moduleKey`).
+(each the list of a build's modules), the files of the modules that are not trusted, boundary lists,
+listings of a library's own constants, `equiv` proofs (exports as `leanexport` writes them), release
+manifests and piece graphs (`Pieces`). Two kinds are keyed by what made them: graphs, exports hashed
+against boundary lists (`Graph`), as `graphs/<export hex>-<boundary hex>.json`; and module keys,
+`module-keys/<key hex>`, each the hash of the module file made from that key (`Export.moduleKey`).
 
 One small local file points into it: `.leanblame/current` (JSON), the export, boundary list,
 constant listing and piece graph of the last `export` run, with the commit, toolchain and
 dependencies it was made from. `equiv` writes evidence files next to it,
 `.leanblame/equiv/evidence/<claim hex>.json`. `export` sweeps: an export, boundary list or listing
 that neither the current pointer nor a record names is deleted, so are the module files no kept
-export lists and their keys, the graphs of a deleted export, a piece graph the current pointer does
-not name, evidence for a claim that is no longer current, and a proof that neither evidence nor a
-record names. Every JSON file here is read strictly: an
-unknown or missing key is an error.
+export lists, the module keys of an earlier build, the graphs of a deleted export, a piece graph the
+current pointer does not name, evidence for a claim that is no longer current, and a proof that
+neither evidence nor a record names. Every JSON file here is read strictly: an unknown or missing
+key is an error.
 -/
 import LeanBlame.Core.Schema
 
@@ -75,39 +75,32 @@ def objectFile (root : System.FilePath) (k : Kind) (hash : String) : IO System.F
 def readString (root : System.FilePath) (k : Kind) (hash : String) : IO String := do
   IO.FS.readFile (← objectFile root k hash)
 
-/-- The modules of export `hash`, in import order, each with the hash of its file. -/
+/-- The modules of export `hash` that are not trusted, in import order, each with the hash of its
+file. -/
 def exportModules (root : System.FilePath) (hash : String) : IO (Array (String × String)) := do
   readJson (← objectFile root .exports hash) fun j => do
-    let o ← JsonObj.read j "export" ["modules"]
-    (← o.get (Array Lean.Json) "modules").mapM fun m => do
-      let mo ← JsonObj.read m "export.modules" ["name", "export"]
-      let e ← mo.get String "export"
-      unless isHash e do throw s!"export.modules: `{e}` is not a sha256: hash"
-      return (← mo.get String "name", e)
+    let o ← JsonObj.read j "export" ["trusted", "modules"]
+    let entries (k field : String) : Except String (Array (String × String)) := do
+      (← o.get (Array Lean.Json) k).mapM fun m => do
+        let mo ← JsonObj.read m s!"export.{k}" ["name", field]
+        let h ← mo.get String field
+        unless isHash h do throw s!"export.{k}: `{h}` is not a sha256: hash"
+        return (← mo.get String "name", h)
+    discard <| entries "trusted" "compiled"
+    entries "modules" "export"
 
-/-- The module file made from key `key` (`Export.moduleKey`), if the store has it. -/
+/-- The hash of the module file made from key `key` (`Export.moduleKey`), if the store has the key. -/
 def moduleFile? (root : System.FilePath) (key : String) : IO (Option String) := do
-  let p := kindDir root .moduleKeys / key
+  let p := objectPath root .moduleKeys key
   unless ← p.pathExists do return none
   let e := strTrim (← IO.FS.readFile p)
   unless isHash e do fail s!"{p}: `{e}` is not a sha256: hash"
-  return if ← (objectPath root .modules e).pathExists then some e else none
+  unless ← (objectPath root .modules e).pathExists do fail s!"{p}: module file {e} is not in the store"
+  return some e
 
 /-- Record that key `key` made the module file `e`. -/
-def putModuleKey (root : System.FilePath) (key e : String) : IO Unit := do
-  IO.FS.createDirAll (kindDir root .moduleKeys)
-  IO.FS.writeFile (kindDir root .moduleKeys / key) (e ++ "\n")
-
-/-- Delete every module key whose module file is not in `keep` (hex digests); returns how many. -/
-def sweepModuleKeys (root : System.FilePath) (keep : Std.HashSet String) : IO Nat := do
-  let d := kindDir root .moduleKeys
-  unless ← d.isDir do return 0
-  let mut n := 0
-  for e in ← d.readDir do
-    unless keep.contains (hashHex (strTrim (← IO.FS.readFile e.path))) do
-      IO.FS.removeFile e.path
-      n := n + 1
-  return n
+def putModuleKey (root : System.FilePath) (key e : String) : IO Unit :=
+  writeFileMkdirs (objectPath root .moduleKeys key) (e ++ "\n")
 
 /-- Boundary list `hash`, from the object store. -/
 def readBoundary (root : System.FilePath) (hash : String) : IO BoundaryList := do

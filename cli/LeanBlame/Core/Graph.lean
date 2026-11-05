@@ -54,8 +54,9 @@ structure Source where
 
 /-- What a proof assistant contributes to the tool besides the `Source` of each export. -/
 structure Backend where
-  /-- Whether the assistant's own checker replays the last export (`Store.Current`) of the library at
-  a directory, written again from the library's build, which must give that export. -/
+  /-- Whether the assistant's own checker replays the tagged declarations of the last export
+  (`Store.Current`) of the library at a directory and everything they use, written again from the
+  library's build, which must give that export. -/
   kernelAccepts : System.FilePath → Store.Current → IO Bool
   /-- The name of that checker, for the release manifest. Lean: `leanchecker`. -/
   checker : String

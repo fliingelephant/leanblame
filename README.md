@@ -80,7 +80,7 @@ Run in the library root as `lake exe leanblame <command>`.
 | Command | Does |
 |---------|------|
 | `init` | Create `leanblame.toml`, `records/`. |
-| `export` | Build, write the list of tagged declarations, export them and what they use. |
+| `export` | Build, write the list of tagged declarations, export the code that is not trusted. |
 | `id` | Tag every declaration of the library, each with a random id. |
 | `status [--json]` | Per tagged declaration: `valid`, `outdated` or `unsigned`, and the cause of any change. |
 | `diff --from RECORD [--to RECORD] [--json] [NAME\|ID...]` | What changed between two sign-offs, or a sign-off and now, as the kernel sees it; with the old and new text. |

@@ -136,6 +136,17 @@ export_lib
 [[ "$(current_export)" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "no current export"
 first_export="$(current_export)"
 ok "export stored $first_export"
+python3 - <<'PY' || fail "the export does not list the trusted modules by their compiled files and keep the others"
+import json, os
+c = json.load(open(".leanblame/current"))
+l = json.load(open(".leanblame/store/exports/" + c["export"][7:]))
+trusted = [m["name"] for m in l["trusted"]]
+mods = [m["name"] for m in l["modules"]]
+assert "Init.Prelude" in trusted and "Sample.Basic" in mods and not set(trusted) & set(mods), (trusted[:3], mods)
+assert all(m["compiled"].startswith("sha256:") for m in l["trusted"])
+assert all(os.path.exists(".leanblame/store/modules/" + m["export"][7:]) for m in l["modules"])
+PY
+ok "the export lists the trusted modules by their compiled files, Lean's own too, and keeps the others' constants"
 python3 - <<'PY' || fail "Lean's own declarations are not trusted by their statement"
 import glob, json
 c = json.load(open(".leanblame/current"))

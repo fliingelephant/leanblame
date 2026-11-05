@@ -357,7 +357,7 @@ the environment of the library's build, which must be the current export, the
 kernel checking each, then the
 goals with their proofs (`fun P h => h`). The accepted theorems and what they
 use are written as an export, which `leanchecker --from-export` replays, as
-`release` replays the export: the evidence is a file anyone can check again.
+`release` replays the tagged declarations: the evidence is a file anyone can check again.
 The old source is never elaborated.
 
 Never copy old *source* into the new build. It would elaborate against the new

@@ -5,9 +5,10 @@ Three gates on the current export, which must name a commit, and a report:
 1. signoff: every tagged declaration is `valid`;
 2. axioms: no tagged theorem rests on an axiom that is neither standard nor a tagged, signed
    axiom (from `status`; open theorems are counted, not failed);
-3. kernel, last, as it builds the library: the proof assistant's checker replays the export,
-   written again from the library's build, which must give it (`Core.Backend.kernelAccepts`; Lean:
-   `leanchecker --silent --from-export`, as `lake check` runs it).
+3. kernel, last, as it builds the library: the proof assistant's checker replays the tagged
+   declarations and everything they use, written again from the library's build, which must give
+   the export (`Core.Backend.kernelAccepts`; Lean: `leanchecker --silent --from-export`, as
+   `lake check` runs it).
 Then the manifest goes to the object store, and to FILE with `--out`. Its theorems are the tagged
 declarations with role `proved` (trust-model.md).
 -/

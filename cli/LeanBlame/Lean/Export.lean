@@ -5,9 +5,10 @@
 Builds the libraries with `lake build`, imports their modules, and makes the boundary list: the
 declarations tagged `@[trusted "id"]` (own and imported), or named by the blueprint
 manifest `boundary` names, plus the members of tagged structures and inductives, with `id`, `parent`,
-`module`, `kind`, `role` and the printed statement. Exports what the boundary list's declarations
-use, proofs included, with the toolchain's `leanexport` writer (in-process): one file per module
-that is not trusted, written again only when the module changed (`exportOf`). The store keeps the
+`module`, `kind`, `role` and the printed statement. Exports the build (`exportOf`): the constants of
+each module that is not trusted, proofs included, with the toolchain's `leanexport` writer
+(in-process), one file per module, written again only when the module's compiled files changed; and
+the trusted modules by the key of their compiled files. The store keeps the
 export, the boundary list and the graph: every claim hash (docs/decisions.md, "Storage"). Makes
 the piece graph the challenges of the tagged declarations are cut from (`Pieces`). Then points
 `.leanblame/current` at them, with the commit, toolchain and dependencies they were made from.
@@ -281,23 +282,9 @@ def taggableIn (env : Environment) (mods : Array Name) : IO (Array Name) := do
   (own.filterMapM fun (n, ci) => return if ← taggable n ci then some n else none).toIO'
     { fileName := "", fileMap := default } { env }
 
-/-- The recursors of each inductive of `env`, as `LeanExport.initState` collects them. -/
-def recursorsOf (env : Environment) : NameMap NameSet := Id.run do
-  let mut m : NameMap NameSet := {}
-  for (_, ci) in env.constants do
-    if let .recInfo rv := ci then
-      for i in rv.all do
-        m := m.alter i fun s => some ((s.getD {}).insert rv.name)
-  return m
-
-/-- The toolchain exporter's state as `LeanExport.initState` sets it up without options, the
-recursors of each inductive given (`recursors`), with the constants `skip` counted as written. -/
-def exporterState (recursors : NameMap NameSet) (skip : NameHashSet) : LeanExport.State :=
-  { visitedNames := (Std.HashMap.emptyWithCapacity 4096).insert .anonymous 0
-    visitedLevels := (Std.HashMap.emptyWithCapacity 64).insert .zero 0
-    visitedExprs := Std.HashMap.emptyWithCapacity 4096
-    noMDataExprs := Std.HashMap.emptyWithCapacity 64
-    visitedConstants := skip, recursorMap := recursors }
+/-- The toolchain exporter's state as `leanexport` starts it (`LeanExport.initState`, no options). -/
+def exporterStart (env : Environment) : IO LeanExport.State :=
+  return (← StateT.run (ReaderT.run (LeanExport.initState env) { env }) {}).2
 
 /-- Run the toolchain's exporter on `env` from `roots` with state `st`, as `leanexport` writes, into
 `out`; the constants `st` counts as written stay names where used. Returns the SHA-256 (hex) of the
@@ -319,99 +306,67 @@ def writeExport (env : Environment) (st : LeanExport.State) (roots : Array Name)
 
 /-- Write the export of `env` from `roots`, as `leanexport` writes it, to the file `path`. Returns the
 SHA-256 (hex) of the bytes. -/
-def writeFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String :=
-  return (← IO.FS.withFile path .write fun h =>
-    writeExport env (exporterState (recursorsOf env) {}) roots h.write).1
+def writeFile (env : Environment) (roots : Array Name) (path : System.FilePath) : IO String := do
+  let st ← exporterStart env
+  return (← IO.FS.withFile path .write fun h => writeExport env st roots h.write).1
 
-/-- What the toolchain's exporter writes along with a constant (`LeanExport.dumpConstant`): the
-constants of its type and value; for an inductive, its whole block with the constructors and the
-recursors (`recursors`), and the constants of their types and of the recursors' rules; for a
-constructor or a recursor, its inductives; for `Quot`, `Eq` and the `Quot` package. -/
-def exportUses (env : Environment) (recursors : NameMap NameSet) : ConstantInfo → Array Name
-  | .axiomInfo v => v.type.getUsedConstants
-  | .defnInfo v => v.type.getUsedConstants ++ v.value.getUsedConstants
-  | .thmInfo v => v.type.getUsedConstants ++ v.value.getUsedConstants
-  | .opaqueInfo v => v.type.getUsedConstants ++ v.value.getUsedConstants
-  | .quotInfo _ => #[``Eq, ``Quot, ``Quot.mk, ``Quot.lift, ``Quot.ind]
-  | .ctorInfo v => #[v.induct]
-  | .recInfo v => v.all.toArray
-  | .inductInfo v => Id.run do
-    let typeOf (n : Name) := ((env.find? n).map (·.type.getUsedConstants)).getD #[]
-    let mut out := #[]
-    for i in v.all do
-      out := out.push i ++ typeOf i
-      if let some (.inductInfo iv) := env.find? i then
-        for c in iv.ctors do out := out.push c ++ typeOf c
-    for r in (recursors.get? v.name).getD {} do
-      out := out.push r ++ typeOf r
-      if let some (.recInfo rv) := env.find? r then
-        for rule in rv.rules do out := out ++ rule.rhs.getUsedConstants
-    return out
-
-/-- The constants the toolchain's exporter writes from `roots` (`exportUses`), but those in `skip`,
-which it counts as written, and unsafe ones. -/
-def exported (env : Environment) (recursors : NameMap NameSet) (skip : NameHashSet) (roots : Array Name) :
-    IO NameHashSet := do
-  let writes (n : Name) : IO (Option ConstantInfo) := do
-    if skip.contains n then return none
-    let some ci := env.find? n | fail s!"{n} is used but is not in the environment"
-    return if ci.isUnsafe then none else some ci
-  let reached ← reach roots fun n => return ((← writes n).map (exportUses env recursors)).getD #[]
-  reached.foldlM (init := {}) fun s n => return if (← writes n).isSome then s.insert n else s
-
-/-- What the file of module `m` in an export is made from (`exportOf`): the Lean version, the
-module's compiled files, and the constants written of it (`roots`), each part with its length. -/
-def moduleKey (m : Name) (roots : Array Name) : IO String := do
+/-- The key of module `m` (`exportOf`): the SHA-256 of the Lean version, the module's name and its
+compiled files, each with its length. -/
+def moduleKey (m : Name) : IO String := do
   let olean ← findOLean m
-  let part (s : Sha256.State) (b : ByteArray) : Sha256.State := (s.update s!"{b.size}\n".toUTF8).update b
-  let mut s := part {} s!"leanblame module export\n{Lean.githash}\n{m}".toUTF8
+  let mut s := ({} : Sha256.State).update s!"leanblame module\n{Lean.githash}\n{m}\n".toUTF8
   for ext in #["olean", "olean.server", "olean.private"] do
     let p := olean.withExtension ext
-    s := part s (← if ← p.pathExists then IO.FS.readBinFile p else pure .empty)
-  s := part s ("\n".intercalate (roots.map toString).toList).toUTF8
-  return Sha256.toHex s.finish
+    unless ← p.pathExists do continue
+    s ← (s.update s!"{ext} {(← p.metadata).byteSize}\n".toUTF8).updateFile p
+  return mkHash (Sha256.toHex s.finish)
 
-/-- The constants of `env` in the modules `mods`. -/
-def constantsIn (env : Environment) (mods : NameSet) : NameHashSet :=
-  env.constants.fold (init := {}) fun s n _ => if (moduleOf? env n).any mods.contains then s.insert n else s
+/-- The modules of `env` with their keys (`moduleKey`), in import order, computed in parallel. -/
+def moduleKeys (env : Environment) : IO (Array (Name × String)) := do
+  let tasks ← env.header.moduleNames.mapM fun m => IO.asTask (moduleKey m)
+  (env.header.moduleNames.zip tasks).mapM fun (m, t) => return (m, ← IO.ofExcept (← IO.wait t))
 
-/-- The export of `env` from `roots` (docs/decisions.md, "Storage"): for each module of `env` not in
-`trusted`, in import order, the constants of the module that the toolchain's exporter writes from
-the roots (`exported`), as it writes them, in a file of the module's own where every other constant
-is a name. A module's file is stored under its SHA-256 and found again by its key (`moduleKey`), so
-a module is written again only when its compiled files or its constants written change. Stores the
-list of the modules with their files' hashes, whose SHA-256 is the export's hash; returns that hash,
-how many modules the export has, and how many of them were found in the store. -/
-def exportOf (root : System.FilePath) (env : Environment) (roots : Array Name) (trusted : NameSet) :
-    IO (String × Nat × Nat) := do
-  let recursors := recursorsOf env
-  let written ← exported env recursors (constantsIn env trusted) roots
+/-- The list of an export's modules as the store keeps it, whose SHA-256 is the export's hash: the
+trusted ones with their keys (`moduleKey`), the others with the hashes of their files. -/
+def listText (trusted files : Array (Name × String)) : String :=
+  let entries (field : String) (a : Array (Name × String)) := Json.arr <| a.map fun (m, h) =>
+    Json.mkObj [("name", m.toString), (field, h)]
+  (Json.mkObj [("trusted", entries "compiled" trusted), ("modules", entries "export" files)]).compress
+
+/-- The export of `env` (docs/decisions.md, "Storage"): for each module of `env` not in `trusted`, in
+import order, its constants as the toolchain's exporter writes them, in a file of the module's own
+where the other modules' constants are names; and each trusted module with its key (`moduleKey`),
+as the export does not keep them. A module's file is stored under its SHA-256 and found again by the
+module's key, so a module is written again only when its compiled files change, and a change that
+leaves its constants as they were (a docstring) keeps its file. Stores the list of the modules,
+whose SHA-256 is the export's hash; returns that hash, the keys of the modules that are not trusted,
+and how many of their files the store had. -/
+def exportOf (root : System.FilePath) (env : Environment) (trusted : NameSet) :
+    IO (String × Array String × Nat) := do
+  let (trustedKeys, others) := (← moduleKeys env).partition (trusted.contains ·.1)
+  -- `leanexport` sizes its expression cache for a whole environment; a module's starts empty.
+  let start := { (← exporterStart env) with visitedExprs := {} }
+  -- One set of every constant serves each module: its own are taken out while it is written.
   let mut skip : NameHashSet := env.constants.fold (init := {}) fun s n _ => s.insert n
-  let mut parts : Array (Name × String) := #[]
+  let mut files := #[]
   let mut found := 0
-  for i in [0:env.header.moduleNames.size] do
-    let m := env.header.moduleNames[i]!
-    if trusted.contains m then continue
-    let own := ((env.header.moduleData[i]?.map (·.constNames)).getD #[]).filter fun n =>
-      (env.getModuleIdxFor? n).map (·.toNat) == some i
-    let mroots := own.filter written.contains
-    if mroots.isEmpty then continue
-    let key ← moduleKey m mroots
+  for (m, key) in others do
     if let some e ← Store.moduleFile? root key then
-      parts := parts.push (m, e)
+      files := files.push (m, e)
       found := found + 1
       continue
+    let some i := env.getModuleIdx? m | fail s!"module {m} was not imported"
+    let own := ((env.header.moduleData[i.toNat]?.map (·.constNames)).getD #[]).filter
+      (env.getModuleIdxFor? · == some i)
     for n in own do skip := skip.erase n
     let tmp ← Store.tmpPath root "module"
     let (hex, counted) ← IO.FS.withFile tmp .write fun h =>
-      writeExport env (exporterState recursors skip) mroots h.write
+      writeExport env { start with visitedConstants := skip } own h.write
     skip := own.foldl (·.insert ·) counted
     let e ← Store.putFile root .modules tmp hex
     Store.putModuleKey root key e
-    parts := parts.push (m, e)
-  let list := Json.mkObj [("modules", Json.arr <| parts.map fun (m, e) =>
-    Json.mkObj [("name", m.toString), ("export", e)])]
-  return (← Store.putString root .exports list.compress, parts.size, found)
+    files := files.push (m, e)
+  return (← Store.putString root .exports (listText trustedKeys files), others.map (·.2), found)
 
 /-- The constants an export starts from: the tagged declarations, in `Name` order. -/
 def rootsOf (names : Array Name) : Array Name :=
@@ -519,9 +474,9 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   -- them); `env` is not kept from here on.
   initSearchPath sysroot leanPath
   let bare ← importModules (mods.map ({ module := · })) {} (loadExts := false)
-  IO.eprintln s!"leanblame: leanexport ({roots.size} roots)"
-  let (exportHash, modules, found) ← exportOf root bare roots trustedMods
-  IO.eprintln s!"leanblame: {modules} modules, {modules - found} written, {found} unchanged"
+  IO.eprintln "leanblame: leanexport"
+  let (exportHash, keys, found) ← exportOf root bare trustedMods
+  IO.eprintln s!"leanblame: {keys.size} modules, {keys.size - found} written, {found} unchanged"
   let boundary ← Store.putString root .boundaries (jsonText boundaryList)
   -- The graph: every claim hash, computed now by this LeanBlame, as the other commands only read it.
   let trusted : Std.HashSet String := trustedMods.foldl (init := {}) fun s m => s.insert m.toString
@@ -539,8 +494,9 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
   Store.writeCurrent root
     { exportHash, boundary, owned := ownedHash, modules := mods.map toString, pieces, commit, toolchain, deps }
   -- Sweep. Exports and boundary lists stay while the current pointer or a record names them, graphs
-  -- with their export; the piece graph while the current pointer names it; evidence while its claim is
-  -- current; a proof while evidence or a record names it.
+  -- with their export, module files while a kept export lists them, module keys of this build; the
+  -- piece graph while the current pointer names it; evidence while its claim is current; a proof while
+  -- evidence or a record names it.
   let mut exports : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex exportHash)
   let mut boundaries : Std.HashSet String := ({} : Std.HashSet String).insert (hashHex boundary)
   let mut proofs : Std.HashSet String := {}
@@ -557,7 +513,9 @@ def run (backend : Core.Backend) (root : System.FilePath) (boundaryFile? : Optio
     if ← (Store.objectPath root .exports e).pathExists then
       for (_, m) in ← Store.exportModules root e do kept := kept.insert (hashHex m)
   let mut removed := (← Store.sweep root .exports exports) + (← Store.sweep root .boundaries boundaries)
-  removed := removed + (← Store.sweep root .modules kept) + (← Store.sweepModuleKeys root kept)
+  -- Module keys before module files, so that a key always names a file the store has.
+  removed := removed + (← Store.sweep root .moduleKeys (keys.foldl (init := {}) (·.insert <| hashHex ·)))
+  removed := removed + (← Store.sweep root .modules kept)
   removed := removed + (← Store.sweep root .owned (({} : Std.HashSet String).insert (hashHex ownedHash)))
   removed := removed + (← Store.sweep root .pieces (({} : Std.HashSet String).insert (hashHex pieces)))
   removed := removed + (← Store.sweepDir (Store.evidenceDir root) evidence)
@@ -586,28 +544,26 @@ def rootsOfCurrent (root : System.FilePath) (cur : Store.Current) : IO (Array Na
     | none => fail s!"{d.name}: this name does not read back from its printed form"
   return rootsOf names
 
-/-- The library's build, imported without environment extensions as `run` imports it to hash: it
-must give the last export (`cur`), from the same Lean and dependencies. -/
-def build (root : System.FilePath) (cur : Store.Current) : IO (Environment × Array Name) := do
+/-- The library's build, imported without environment extensions as `run` imports it to hash, for a
+command that needs the last export (`cur`) whole: the build must give that export, from the same Lean
+and dependencies. -/
+def lastBuild (root : System.FilePath) (cur : Store.Current) : IO Environment := do
   let cfg ← Config.load root
   let l ← load root cfg.libraries (loadExts := false)
   sameDeps root cur
-  let roots ← rootsOfCurrent root cur
   let trustedMods ← trustedModules root cfg.trusted l.env.header.moduleNames
   -- `exportOf` finds the modules' files on the paths `load` used (loading Lake's workspace resets them).
   initSearchPath l.sysroot l.leanPath
-  unless (← exportOf root l.env roots trustedMods).1 == cur.exportHash do
+  unless (← exportOf root l.env trustedMods).1 == cur.exportHash do
     fail "the library's build is not the last export; export again"
-  return (l.env, roots)
+  return l.env
 
-/-- The library's build, for a command that needs the last export (`cur`) whole (`build`). -/
-def lastBuild (root : System.FilePath) (cur : Store.Current) : IO Environment :=
-  return (← build root cur).1
-
-/-- Whether `leanchecker` replays the last export (`cur`), trusted constants included, written again
-from the library's build (`build`) to a temporary file. -/
+/-- Whether `leanchecker` replays the last export's (`cur`) tagged declarations and everything they
+use, trusted constants included, written again from the library's build (`lastBuild`) to a
+temporary file. -/
 def replays (root : System.FilePath) (cur : Store.Current) : IO Bool := do
-  let (env, roots) ← build root cur
+  let env ← lastBuild root cur
+  let roots ← rootsOfCurrent root cur
   let tmp ← Store.tmpPath root "export"
   try
     discard <| writeFile env roots tmp

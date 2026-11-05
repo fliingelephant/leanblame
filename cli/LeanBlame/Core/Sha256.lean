@@ -131,4 +131,14 @@ def hexOfBytes (bytes : ByteArray) : String :=
 def hexOfString (s : String) : String :=
   hexOfBytes s.toUTF8
 
+/-- `s` updated with the bytes of the file `p`, read a piece at a time. -/
+def State.updateFile (s : State) (p : System.FilePath) : IO State :=
+  IO.FS.withFile p .read fun h => do
+    let mut s := s
+    repeat
+      let b ← h.read 1048576
+      if b.isEmpty then break
+      s := s.update b
+    return s
+
 end LeanBlame.Sha256
